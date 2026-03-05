@@ -9,8 +9,6 @@
   PYTHONUNBUFFERED = "1"
   DEBUG = "false"
   PORT = "8000"
-  DATABASE_URL = "${DATABASE_URL}"
-  REDIS_URL = "${REDIS_URL}"
 
 # 健康检查
 [deploy]
