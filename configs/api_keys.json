@@ -1,0 +1,33 @@
+{
+  "reddit_api": {
+    "client_id": "YOUR_CLIENT_ID_HERE",
+    "client_secret": "YOUR_CLIENT_SECRET_HERE",
+    "user_agent": "VibeMarketingBot 1.0 by /u/your_username_here",
+    "username": "your_reddit_username_here",
+    "password": "your_reddit_password_here"
+  },
+  "social_media_monitoring": {
+    "monitoring_period_days": 7,
+    "target_keywords": [
+      "shampoo",
+      "hair care",
+      "conditioner",
+      "scalp treatment",
+      "hair loss",
+      "dandruff",
+      "hair product",
+      "hair routine"
+    ],
+    "target_subreddits": [
+      "SkincareAddicts",
+      "hair",
+      "HairLoss",
+      "AskReddit",
+      "Beauty",
+      "CurlyHair",
+      "ChemistryHair",
+      "HairProducts",
+      "Showerthoughts"
+    ]
+  }
+}

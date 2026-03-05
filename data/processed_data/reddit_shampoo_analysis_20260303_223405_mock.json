@@ -1,0 +1,46 @@
+{
+  "report_date": "2026-03-03T22:34:05.616712",
+  "time_period": "2026-02-24 to 2026-03-03",
+  "metrics": {
+    "total_posts": 5,
+    "total_comments": 5,
+    "sentiment": {
+      "positive": 32,
+      "neutral": 18,
+      "negative": 8
+    },
+    "top_subreddits": [
+      {
+        "name": "r/SkincareAddicts",
+        "count": 12
+      },
+      {
+        "name": "r/Hair",
+        "count": 9
+      },
+      {
+        "name": "r/CurlyHair",
+        "count": 8
+      },
+      {
+        "name": "r/AskReddit",
+        "count": 6
+      },
+      {
+        "name": "r/Beauty",
+        "count": 5
+      }
+    ],
+    "engagement": {
+      "average_upvotes": 15.2,
+      "average_comments": 6.8
+    }
+  },
+  "themed_discussions": [
+    "Sulfate-free formulations",
+    "Natural/DIY hair care",
+    "Premium product comparisons",
+    "Scalp health concerns",
+    "Damaged hair treatments"
+  ]
+}

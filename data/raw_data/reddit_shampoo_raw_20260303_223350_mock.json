@@ -1,0 +1,123 @@
+{
+  "collection_date": "2026-03-03T22:33:50.439345",
+  "period": "2026-02-24 to 2026-03-03",
+  "posts": [
+    {
+      "id": "post1",
+      "title": "What\u2019s everyone\u2019s favorite sulfate-free shampoo? Having issues with scalp irritation",
+      "subreddit": "SkincareAddicts",
+      "score": 142,
+      "num_comments": 36,
+      "created_utc": 1772462030.43933,
+      "permalink": "https://www.reddit.com/r/SkincareAddicts/comments/post1/",
+      "selftext": "Been dealing with scalp issues lately and wondering if anyone has recommendations for a good sulfate-free shampoo."
+    },
+    {
+      "id": "post2",
+      "title": "DIY shampoo with coconut oil and honey - thoughts?",
+      "subreddit": "Hair",
+      "score": 87,
+      "num_comments": 24,
+      "created_utc": 1772375630.43933,
+      "permalink": "https://www.reddit.com/r/Hair/comments/post2/",
+      "selftext": "Made my own shampoo with coconut oil, honey, and some essential oils. Has anyone tried this?"
+    },
+    {
+      "id": "post3",
+      "title": "Olaplex vs. K18 - which one actually works for damaged hair?",
+      "subreddit": "CurlyHair",
+      "score": 201,
+      "num_comments": 68,
+      "created_utc": 1772289230.43933,
+      "permalink": "https://www.reddit.com/r/CurlyHair/comments/post3/",
+      "selftext": "Trying to decide between these two for my chemically treated hair. Which one restored your hair the best?"
+    },
+    {
+      "id": "post4",
+      "title": "Why do expensive shampoos seem to work better? Is it just placebo?",
+      "subreddit": "AskReddit",
+      "score": 312,
+      "num_comments": 142,
+      "created_utc": 1772202830.43933,
+      "permalink": "https://www.reddit.com/r/AskReddit/comments/post4/",
+      "selftext": "Just curious if there's science behind premium shampoos or if it's marketing."
+    },
+    {
+      "id": "post5",
+      "title": "Head & Shoulders is literally the worst now - any alternatives for dandruff?",
+      "subreddit": "Beauty",
+      "score": 76,
+      "num_comments": 45,
+      "created_utc": 1772116430.43933,
+      "permalink": "https://www.reddit.com/r/Beauty/comments/post5/",
+      "selftext": "Used to love Head & Shoulders but the formula has changed. Need recommendations for dandruff control."
+    }
+  ],
+  "comments": [
+    {
+      "id": "comment1",
+      "body": "I switched to Aussie 3 Minute Miracle and my hair feels amazing!",
+      "score": 24,
+      "parent_post_id": "post1"
+    },
+    {
+      "id": "comment2",
+      "body": "Try the new OGX Coconut Curls - it's drugstore but works great for curls",
+      "score": 18,
+      "parent_post_id": "post3"
+    },
+    {
+      "id": "comment3",
+      "body": "Have you tried using apple cider vinegar rinse? Works great for scalp issues",
+      "score": 31,
+      "parent_post_id": "post1"
+    },
+    {
+      "id": "comment4",
+      "body": "K18 is worth the money if you have severely damaged hair. I saw results after one use.",
+      "score": 42,
+      "parent_post_id": "post3"
+    },
+    {
+      "id": "comment5",
+      "body": "Trader Joe's has some great affordable options that work just as well as expensive brands.",
+      "score": 15,
+      "parent_post_id": "post4"
+    }
+  ],
+  "analysis": {
+    "sentiment_breakdown": {
+      "positive": 32,
+      "neutral": 18,
+      "negative": 8
+    },
+    "top_subreddits": [
+      {
+        "name": "r/SkincareAddicts",
+        "count": 12
+      },
+      {
+        "name": "r/Hair",
+        "count": 9
+      },
+      {
+        "name": "r/CurlyHair",
+        "count": 8
+      },
+      {
+        "name": "r/AskReddit",
+        "count": 6
+      },
+      {
+        "name": "r/Beauty",
+        "count": 5
+      }
+    ],
+    "engagement_metrics": {
+      "average_upvotes": 15.2,
+      "average_comments": 6.8
+    }
+  },
+  "total_posts": 5,
+  "total_comments": 5
+}
