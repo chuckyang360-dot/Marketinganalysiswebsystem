@@ -53,9 +53,9 @@ export function Footer() {
             <h3 className="font-semibold mb-4">{t('footer.company')}</h3>
             <ul className="space-y-2">
               <li>
-                <a href="#" className="text-sm text-gray-600 hover:text-gray-900">
+                <Link to="/about" className="text-sm text-gray-600 hover:text-gray-900">
                   {t('footer.about')}
-                </a>
+                </Link>
               </li>
               <li>
                 <a href="#" className="text-sm text-gray-600 hover:text-gray-900">

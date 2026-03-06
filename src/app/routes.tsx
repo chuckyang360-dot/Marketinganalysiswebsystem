@@ -7,6 +7,7 @@ import { TwitterAnalysis } from './pages/TwitterAnalysis';
 import { ContentGeneration } from './pages/ContentGeneration';
 import { DataSummary } from './pages/DataSummary';
 import { History } from './pages/History';
+import { About } from './pages/About';
 import { NotFound } from './pages/NotFound';
 
 export const router = createBrowserRouter([
@@ -21,6 +22,7 @@ export const router = createBrowserRouter([
       { path: 'content', Component: ContentGeneration },
       { path: 'summary', Component: DataSummary },
       { path: 'history', Component: History },
+      { path: 'about', Component: About },
       { path: '*', Component: NotFound },
     ],
   },

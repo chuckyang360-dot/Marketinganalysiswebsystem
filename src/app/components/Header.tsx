@@ -19,6 +19,7 @@ export function Header() {
     { path: '/content', label: t('nav.content') },
     { path: '/summary', label: t('nav.summary') },
     { path: '/history', label: t('nav.history') },
+    { path: '/about', label: t('nav.about') },
   ];
 
   return (
