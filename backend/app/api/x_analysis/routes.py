@@ -4,6 +4,7 @@ from typing import List, Dict, Any
 from ...database import get_db
 from ...models.x_analysis import XTask, XSearchResult
 from ...auth.google_oauth import login_with_google
+from ...services.api_layer import task_manager
 import asyncio
 from datetime import datetime
 
@@ -31,9 +32,8 @@ async def start_analysis(
         db.commit()
         db.refresh(task)
 
-        # 这里可以触发 agent 执行分析任务
-        # 实际调用对应的 agent
-        asyncio.create_task(run_x_analysis(task.id, keyword))
+        # 使用API Layer执行分析任务
+        asyncio.create_task(execute_analysis_with_task_manager(task.id, keyword))
 
         return {
             "task_id": task.id,
@@ -175,12 +175,54 @@ async def get_analysis_history(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-async def run_x_analysis(task_id: int, keyword: str):
-    """执行 X 分析任务（模拟）"""
-    # 这里实际调用对应的 agent
-    # 示例：
-    # from agents.x_monitor import run_x_monitoring
-    # await run_x_monitoring(keyword, task_id)
+async def execute_analysis_with_task_manager(task_id: int, keyword: str):
+    """使用Task Manager执行X分析任务"""
+    db = next(get_db())  # 获取数据库会话
+    try:
+        # 执行分析
+        analysis_result = await task_manager.execute_x_analysis(
+            keyword=keyword,
+            user_email="",  # 这个值会在更新任务时从数据库获取
+            task_id=str(task_id)
+        )
 
-    # 模拟任务执行
-    await asyncio.sleep(5)  # 模拟处理时间
+        # 更新任务状态
+        task = db.query(XTask).filter(XTask.id == task_id).first()
+        if task:
+            task.status = analysis_result['status']
+            if analysis_result['status'] == 'completed':
+                task.total_mentions = analysis_result['total_mentions']
+                task.positive_count = analysis_result['positive_count']
+                task.negative_count = analysis_result['negative_count']
+                task.neutral_count = analysis_result['neutral_count']
+                task.completed_at = datetime.utcnow()
+                task.analysis_summary = f"分析完成：总计{analysis_result['total_mentions']}条提及，正面{analysis_result['positive_count']}条，负面{analysis_result['negative_count']}条，中性{analysis_result['neutral_count']}条"
+
+            db.commit()
+
+            # 如果是成功，保存详细结果
+            if analysis_result['status'] == 'completed' and analysis_result['results']:
+                for result in analysis_result['results']:
+                    search_result = XSearchResult(
+                        task_id=task_id,
+                        tweet_id=result['id'],
+                        text=result['text'],
+                        author=result['author'],
+                        sentiment_score=result['sentiment']['score'],
+                        sentiment_label=result['sentiment']['label'],
+                        created_at=result['created_at'],
+                        metadata=result.get('metrics', {})
+                    )
+                    db.add(search_result)
+                db.commit()
+
+    except Exception as e:
+        print(f"Analysis execution error: {str(e)}")
+        # 更新任务状态为失败
+        task = db.query(XTask).filter(XTask.id == task_id).first()
+        if task:
+            task.status = 'failed'
+            task.analysis_summary = f"分析失败：{str(e)}"
+            db.commit()
+    finally:
+        db.close()
