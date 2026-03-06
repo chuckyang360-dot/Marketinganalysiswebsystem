@@ -13,7 +13,7 @@ COPY requirements.txt .
 RUN pip install --upgrade pip
 
 # 安装依赖
-RUN pip install --no-cache-dir fastapi uvicorn sqlalchemy python-jose passlib python-multipart httpx pydantic pydantic-settings alembic google-auth google-auth-oauthlib google-auth-httplib2 requests python-dotenv redis celery schedule authlib bcrypt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY . .
