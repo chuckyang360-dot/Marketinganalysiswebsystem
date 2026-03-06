@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from .config import settings
 from .database import init_db
@@ -45,8 +46,11 @@ init_db()
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(x_analysis_router, prefix="/x-analysis", tags=["X Analysis"])
 
-# Static files (for frontend integration)
-app.mount("/static", StaticFiles(directory="frontend/build"), name="static")
+# Static files (for frontend integration) - only mount if directory exists
+# This allows backend to work independently of frontend (deployed on Vercel)
+frontend_build_path = Path("frontend/build")
+if frontend_build_path.exists():
+    app.mount("/static", StaticFiles(directory=str(frontend_build_path)), name="static")
 
 
 @app.get("/")
