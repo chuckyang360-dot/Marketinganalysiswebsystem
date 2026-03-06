@@ -7,6 +7,10 @@ from .database import init_db
 from .auth.routes import router as auth_router
 from .api.x_analysis.routes import router as x_analysis_router
 
+# Import all models to ensure they're registered with Base.metadata
+# This must be done before calling init_db()
+from .models import user, x_analysis
+
 # Create FastAPI app
 app = FastAPI(
     title="Vibe Marketing API",
@@ -34,7 +38,7 @@ app.add_middleware(
 # from .middleware.auth import AuthMiddleware
 # app.add_middleware(AuthMiddleware)
 
-# Initialize database
+# Initialize database (after models are imported)
 init_db()
 
 # Include routers

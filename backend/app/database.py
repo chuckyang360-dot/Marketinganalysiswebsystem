@@ -3,9 +3,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
 
-# Import all models to ensure they're registered
-from .models import user, x_analysis
-
 # Create database engine
 engine = create_engine(
     settings.DATABASE_URL,
@@ -30,5 +27,5 @@ def get_db():
 
 
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables - models must be imported before calling this"""
     Base.metadata.create_all(bind=engine)
