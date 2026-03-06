@@ -41,4 +41,4 @@ class XSearchResult(Base):
     sentiment_label = Column(String, default="neutral")  # positive, negative, neutral
 
     # 元数据
-    metadata = Column(JSON, nullable=True)  # 其他相关信息
+    extra_data = Column("metadata", JSON, nullable=True)  # 其他相关信息

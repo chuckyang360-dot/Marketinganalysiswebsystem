@@ -124,7 +124,7 @@ async def get_analysis_results(
                         "label": result.sentiment_label
                     },
                     "created_at": result.created_at,
-                    "metadata": result.metadata
+                    "metadata": result.extra_data
                 }
                 for result in search_results
             ]
@@ -211,7 +211,7 @@ async def execute_analysis_with_task_manager(task_id: int, keyword: str):
                         sentiment_score=result['sentiment']['score'],
                         sentiment_label=result['sentiment']['label'],
                         created_at=result['created_at'],
-                        metadata=result.get('metrics', {})
+                        extra_data=result.get('metrics', {})
                     )
                     db.add(search_result)
                 db.commit()
