@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from .config import settings
 
 # Import all models to ensure they're registered
-from .models import user, x_monitoring
+from .models import user, x_analysis
 
 # Create database engine
 engine = create_engine(

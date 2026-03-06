@@ -21,8 +21,8 @@ class User(Base):
     google_id = Column(String, unique=True, nullable=True)
 
     # 关联关系
-    x_accounts = relationship("XAccount", back_populates="user")
-    x_insights = relationship("XInsight", back_populates="user")
+    x_tasks = relationship("XTask", back_populates="user")
+    x_search_results = relationship("XSearchResult", back_populates="user")
 
     def set_password(self, password: str):
         """设置密码哈希"""
