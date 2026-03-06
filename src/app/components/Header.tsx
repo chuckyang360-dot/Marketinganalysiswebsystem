@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Globe, Menu, X } from 'lucide-react';
 import { useState } from 'react';
@@ -7,6 +7,7 @@ import { Button } from './ui/button';
 export function Header() {
   const { language, setLanguage, t } = useLanguage();
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isActive = (path: string) => location.pathname === path;
@@ -64,10 +65,10 @@ export function Header() {
 
           {/* Login/Register - Desktop */}
           <div className="hidden lg:flex items-center gap-2">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
               {t('nav.login')}
             </Button>
-            <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600">
+            <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
               {t('nav.register')}
             </Button>
           </div>
@@ -102,10 +103,10 @@ export function Header() {
               </Link>
             ))}
             <div className="pt-3 border-t border-gray-200 space-y-2">
-              <Button variant="outline" className="w-full">
+              <Button variant="outline" className="w-full" onClick={() => navigate('/login')}>
                 {t('nav.login')}
               </Button>
-              <Button className="w-full bg-gradient-to-r from-blue-600 to-purple-600">
+              <Button className="w-full bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
                 {t('nav.register')}
               </Button>
             </div>

@@ -29,43 +29,43 @@ export function TwitterAnalysis() {
     e.preventDefault();
     setLoading(true);
 
-    setTimeout(() => {
-      const mockResult: TwitterResult = {
-        mentions: [
-          { text: '刚试用了这个AI营销工具，效果超出预期！', author: '@marketer_pro', engagement: 234, sentiment: '积极' },
-          { text: '有人用过这个平台吗？想了解一下使用体验', author: '@tech_enthusiast', engagement: 89, sentiment: '中性' },
-          { text: '功能很强大，但价格有点贵', author: '@startup_founder', engagement: 156, sentiment: '中性' },
-        ],
-        sentimentTrend: [
-          { date: '3/1', positive: 65, negative: 12 },
-          { date: '3/2', positive: 72, negative: 10 },
-          { date: '3/3', positive: 68, negative: 15 },
-        ],
-        influencers: [
-          { name: 'Marketing Guru', followers: 125000, influence: '高' },
-          { name: 'Tech Reviewer', followers: 89000, influence: '中' },
-          { name: 'Startup Coach', followers: 56000, influence: '中' },
-        ],
-        alerts: [
-          '暂无重大危机警报',
-          '品牌整体舆论趋势稳定向好',
-        ],
-      };
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/x-analysis`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          brand: formData.brand,
+          competitors: formData.competitors,
+          hashtags: formData.hashtags,
+        }),
+      });
 
-      setResult(mockResult);
-      setLoading(false);
+      if (!response.ok) {
+        throw new Error('请求失败');
+      }
+
+      const data = await response.json();
+      setResult(data);
       toast.success(t('common.success'));
 
+      // 保存到历史记录
       const history = JSON.parse(localStorage.getItem('analysisHistory') || '[]');
       history.unshift({
         id: Date.now(),
         type: 'Twitter',
         data: formData,
-        result: mockResult,
+        result: data,
         timestamp: new Date().toISOString(),
       });
       localStorage.setItem('analysisHistory', JSON.stringify(history.slice(0, 50)));
-    }, 2000);
+    } catch (error) {
+      console.error('Analysis error:', error);
+      toast.error(t('common.error') || '分析失败，请重试');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
