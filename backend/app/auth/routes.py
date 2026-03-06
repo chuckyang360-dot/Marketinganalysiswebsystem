@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import urllib.parse
 
-from ...database import get_db
-from ...schemas import GoogleAuthRequest, Token, UserResponse, GoogleAuthUrlResponse
-from ...config import settings
+from ..database import get_db
+from ..schemas import GoogleAuthRequest, Token, UserResponse, GoogleAuthUrlResponse
+from ..config import settings
 from .google_oauth import login_with_google
 from .jwt_handler import create_access_token
 
