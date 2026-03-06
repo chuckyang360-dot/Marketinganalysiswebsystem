@@ -137,9 +137,9 @@ async def get_analysis_results(
 
 @router.get("/history")
 async def get_analysis_history(
+    id_token: str,
     limit: int = 10,
     offset: int = 0,
-    id_token: str,
     db: Session = Depends(get_db)
 ):
     """获取分析历史"""
