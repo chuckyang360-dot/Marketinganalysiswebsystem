@@ -1,7 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
+
+print("=== MAIN.PY VERSION MARKER: CORS_DEBUG_V5 ===")
+
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+import logging
+import os
 
 from .config import settings
 from .database import init_db
@@ -12,6 +18,15 @@ from .api.x_analysis.routes import router as x_analysis_router
 # This must be done before calling init_db()
 from .models import user, x_analysis
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO if not settings.DEBUG else logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+
 # Create FastAPI app
 app = FastAPI(
     title="Vibe Marketing API",
@@ -20,31 +35,37 @@ app = FastAPI(
     debug=settings.DEBUG,
 )
 
-# Configure CORS
+# OPTIONS handler middleware - must be before CORSMiddleware
+@app.middleware("http")
+async def allow_options(request: Request, call_next):
+    """Allow all OPTIONS preflight requests"""
+    if request.method == "OPTIONS":
+        print(
+            f"[OPTIONS HANDLER] method={request.method} "
+            f"path={request.url.path} "
+            f"origin={request.headers.get('origin')} "
+            f"acr-method={request.headers.get('access-control-request-method')} "
+            f"acr-headers={request.headers.get('access-control-request-headers')}"
+        )
+        return Response(status_code=200)
+    return await call_next(request)
+
+# Configure CORS - must be added before routers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.FRONTEND_URL,
-        "http://localhost:3000",
-        "http://127.0.0.1:3000"
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Authorization"],
 )
-
-# Add authentication middleware
-# Note: For development, you might want to disable this
-# For production, you'd uncomment this line:
-# from .middleware.auth import AuthMiddleware
-# app.add_middleware(AuthMiddleware)
 
 # Initialize database (after models are imported)
 init_db()
 
 # Include routers
-app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-app.include_router(x_analysis_router, prefix="/x-analysis", tags=["X Analysis"])
+app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(x_analysis_router, prefix="/api/x-analysis", tags=["X Analysis"])
 
 # Static files (for frontend integration) - only mount if directory exists
 # This allows backend to work independently of frontend (deployed on Vercel)
@@ -52,24 +73,26 @@ frontend_build_path = Path("frontend/build")
 if frontend_build_path.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_build_path)), name="static")
 
-
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {"message": "Welcome to Vibe Marketing API", "version": "1.0.0"}
 
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "message": "API is running"}
-
+    return {
+        "status": "healthy",
+        "message": "API is running",
+        "version_marker": "CORS_DEBUG_V5"
+    }
 
 if __name__ == "__main__":
     import uvicorn
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
+        port=port,
         reload=False
     )
