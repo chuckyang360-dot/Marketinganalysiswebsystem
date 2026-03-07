@@ -95,22 +95,22 @@ class XAISearchService:
 
                 result = response.json()
 
-                message = result.get('choices', [{}]).get('0', {}).get('message', 'No content') or '')
-                if not message:
-                    logger.error(f"xAI chat API returned empty message")
+                # Parse response safely
+                message = ""
+                if "choices" in result and len(result["choices"]) > 0:
+                    try:
+                        message = result["choices"][0].get("message", "")
+                    except:
+                        message = ""
+                else:
+                    logger.error("xAI chat API returned empty result")
                     return []
-
-                try:
-                    import json
-                    content_json = json.loads(message)
-                except:
-                    content_json = {}
 
                 # Generate mock tweets from analysis results
                 tweets = []
                 sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
 
-                mentions_data = content_json.get('mentions', [])
+                mentions_data = content_json.get("mentions", [])
                 for mention in mentions_data:
                     tweets.append({
                         'id': mention.get('id', str(i)),
@@ -130,7 +130,7 @@ class XAISearchService:
                         'sentiment': ['positive' if 'sentiment' in mention and mention['sentiment'] == 'positive' else 'neutral']
                     })
 
-                influencers_data = content_json.get('influencers', [])
+                influencers_data = content_json.get("influencers", [])
                 influencers = []
                 for inf in influencers_data:
                     followers = inf.get('followers', 1000)
@@ -141,11 +141,11 @@ class XAISearchService:
                         'influence': influence
                     })
 
-                themes = content_json.get('themes', ['关于 ' + keyword + ' 的讨论', '产品体验', '服务问题', '使用建议'])
+                themes = content_json.get("themes", ['关于 ' + keyword + ' 的讨论', '产品体验', '服务问题', '使用建议'])
                 if not themes:
                     themes = ['关于 ' + keyword + ' 的相关讨论']
 
-                alerts = content_json.get('alerts', [])
+                alerts = content_json.get("alerts", [])
                 if not alerts:
                     if sentiment_counts['negative'] > 0:
                         alerts.append(f"检测到 {sentiment_counts['negative']} 条负面提及，建议关注用户反馈")
