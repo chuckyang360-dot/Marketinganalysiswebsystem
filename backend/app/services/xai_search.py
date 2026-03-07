@@ -165,3 +165,7 @@ class XAISearchService:
         except Exception as e:
             logger.error(f"xAI chat API error: {str(e)}")
             raise Exception(f"Error analyzing X: {str(e)}")
+
+
+# Create a singleton instance for use across the application
+xai_search_service = XAISearchService()
