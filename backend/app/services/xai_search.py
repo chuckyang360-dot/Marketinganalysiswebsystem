@@ -44,8 +44,7 @@ class XAISearchService:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # Using xAI's search endpoint
-                search_url = f"{self.base_url}/search"
+                chat_url = f"{self.base_url}/chat/completions"
 
                 # Prepare search request
                 payload = {
