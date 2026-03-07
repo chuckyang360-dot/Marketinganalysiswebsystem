@@ -3,12 +3,14 @@ X AI Search Service - Real X/Twitter search using xAI Chat Completions API
 """
 
 import httpx
+import json
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from ..config import settings
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class XAISearchService:
     """Service for analyzing X/Twitter using xAI Grok API"""
@@ -43,10 +45,8 @@ class XAISearchService:
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                # Use xAI's chat completions API
                 chat_url = f"{self.api_url}/chat/completions"
 
-                # Build prompt for X/Twitter analysis
                 prompt = f"""Analyze X/Twitter platform sentiment and discussions about "{keyword}".
                 Provide:
                 1. Sentiment breakdown (positive, negative, neutral counts)
@@ -74,14 +74,8 @@ class XAISearchService:
                     headers=self.headers,
                     json={
                         "messages": [
-                            {
-                                "role": "system",
-                                "content": prompt
-                            },
-                            {
-                                "role": "user",
-                                "content": f"Analyze for: {keyword}"
-                            }
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": f"Analyze for: {keyword}"}
                         ],
                         "model": "grok-beta",
                         "stream": False
@@ -96,12 +90,14 @@ class XAISearchService:
                 result = response.json()
 
                 # Parse response safely
-                message = ""
+                content_json = {}
                 if "choices" in result and len(result["choices"]) > 0:
                     try:
-                        message = result["choices"][0].get("message", "")
-                    except:
-                        message = ""
+                        content = result["choices"][0].get("message", {}).get("content", "")
+                        content_json = json.loads(content)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse xAI response as JSON: {e}")
+                        content_json = {}
                 else:
                     logger.error("xAI chat API returned empty result")
                     return []
@@ -111,7 +107,7 @@ class XAISearchService:
                 sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
 
                 mentions_data = content_json.get("mentions", [])
-                for mention in mentions_data:
+                for i, mention in enumerate(mentions_data):
                     tweets.append({
                         'id': mention.get('id', str(i)),
                         'text': mention.get('text', ''),
@@ -153,7 +149,6 @@ class XAISearchService:
                         alerts.append(f"当前 {keyword} 相关讨论量较少，建议增加内容营销")
 
                 logger.info(f"xAI chat API returned {len(tweets)} tweets")
-
                 return tweets
 
         except httpx.TimeoutException:
@@ -165,6 +160,65 @@ class XAISearchService:
         except Exception as e:
             logger.error(f"xAI chat API error: {str(e)}")
             raise Exception(f"Error analyzing X: {str(e)}")
+
+    async def analyze_sentiment_batch(
+        self,
+        texts: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Analyze sentiment for a batch of texts using xAI API
+
+        Args:
+            texts: List of text to analyze
+
+        Returns:
+            List of sentiment results with 'label' and 'score' keys
+        """
+        if not self.api_key:
+            logger.warning("XAI_API_KEY not configured, returning neutral sentiments")
+            return [{'label': 'neutral', 'score': 0.0} for _ in texts]
+
+        results = []
+        for text in texts:
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    chat_url = f"{self.api_url}/chat/completions"
+
+                    prompt = f"""Analyze the sentiment of the following text.
+                    Return ONLY JSON with keys:
+                    - label: "positive", "negative", or "neutral"
+                    - score: float between 0.0 and 1.0
+
+                    Text: "{text[:200]}\""""
+
+                    api_response = await client.post(
+                        chat_url,
+                        headers=self.headers,
+                        json={
+                            "messages": [
+                                {"role": "system", "content": "You are a sentiment analyzer. Return only JSON."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            "model": "grok-beta",
+                            "stream": False
+                        }
+                    )
+
+                    if api_response.status_code == 200:
+                        result = api_response.json()
+                        content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                        sentiment_data = json.loads(content)
+                        results.append({
+                            'label': sentiment_data.get('label', 'neutral'),
+                            'score': sentiment_data.get('score', 0.5)
+                        })
+                    else:
+                        results.append({'label': 'neutral', 'score': 0.0})
+            except Exception as e:
+                logger.warning(f"Sentiment analysis failed: {e}")
+                results.append({'label': 'neutral', 'score': 0.0})
+
+        return results
 
 
 # Create a singleton instance for use across the application
