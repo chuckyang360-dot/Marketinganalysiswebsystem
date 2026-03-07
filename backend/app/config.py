@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # X AI API Configuration
     XAI_API_KEY: Optional[str] = None
     XAI_API_URL: str = "https://api.x.ai/v1"
+    XAI_MODEL: Optional[str] = None  # Must be set explicitly via environment variable
     X_ANALYSIS_PROVIDER: str = "mock"  # Options: "mock", "xai"
 
     # Redis Configuration

@@ -17,12 +17,18 @@ class XAISearchService:
 
     def __init__(self):
         self.api_key = settings.XAI_API_KEY
-        self.api_url = "https://api.x.ai/v1"
+        self.api_url = settings.XAI_API_URL
+        self.model = settings.XAI_MODEL
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "User-Agent": "VibeMarketing/1.0"
         }
+
+        if not self.model:
+            logger.error("XAI_MODEL environment variable is not set. xAI features will not work.")
+        else:
+            logger.info(f"XAISearchService initialized with model: {self.model}")
 
     async def search_x(
         self,
@@ -41,6 +47,10 @@ class XAISearchService:
         """
         if not self.api_key:
             logger.warning("XAI_API_KEY not configured, returning empty results")
+            return []
+
+        if not self.model:
+            logger.error("XAI_MODEL environment variable is not set. Please set it in Railway environment variables.")
             return []
 
         try:
@@ -67,7 +77,7 @@ class XAISearchService:
 
                 Keep responses realistic and based on actual X/Twitter activity patterns."""
 
-                logger.info(f"Calling xAI chat API for keyword: {keyword}")
+                logger.info(f"Calling xAI chat API for keyword: {keyword}, using model: {self.model}")
 
                 response = await client.post(
                     chat_url,
@@ -77,7 +87,7 @@ class XAISearchService:
                             {"role": "system", "content": prompt},
                             {"role": "user", "content": f"Analyze for: {keyword}"}
                         ],
-                        "model": "grok-beta",
+                        "model": self.model,
                         "stream": False
                     }
                 )
@@ -178,6 +188,10 @@ class XAISearchService:
             logger.warning("XAI_API_KEY not configured, returning neutral sentiments")
             return [{'label': 'neutral', 'score': 0.0} for _ in texts]
 
+        if not self.model:
+            logger.error("XAI_MODEL environment variable is not set. Please set it in Railway environment variables.")
+            return [{'label': 'neutral', 'score': 0.0} for _ in texts]
+
         results = []
         for text in texts:
             try:
@@ -199,7 +213,7 @@ class XAISearchService:
                                 {"role": "system", "content": "You are a sentiment analyzer. Return only JSON."},
                                 {"role": "user", "content": prompt}
                             ],
-                            "model": "grok-beta",
+                            "model": self.model,
                             "stream": False
                         }
                     )
