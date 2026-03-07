@@ -12,18 +12,19 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./vibe_marketing.db"
 
     # JWT Configuration
-    SECRET_KEY: str = "your-secret-key-here"
+    SECRET_KEY: str = "your-secret-key-here-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     # Google OAuth Configuration
-    GOOGLE_CLIENT_ID: str
-    GOOGLE_CLIENT_SECRET: str
-    GOOGLE_REDIRECT_URI: str
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+    GOOGLE_REDIRECT_URI: Optional[str] = None
 
     # X AI API Configuration
-    XAI_API_KEY: str
+    XAI_API_KEY: Optional[str] = None
     XAI_API_URL: str = "https://api.x.ai/v1"
+    X_ANALYSIS_PROVIDER: str = "mock"  # Options: "mock", "xai"
 
     # Redis Configuration
     REDIS_HOST: str = "localhost"
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
 
     # Frontend Configuration
-    FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_URL: str = "http://localhost:5173"
 
     class Config:
         env_file = ".env"

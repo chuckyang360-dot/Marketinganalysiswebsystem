@@ -10,19 +10,36 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    google_id: str
+    google_id: Optional[str] = None
     picture: Optional[str] = None
 
 
 class UserResponse(UserBase):
     id: int
-    google_id: str
-    picture: Optional[str]
+    google_id: Optional[str] = None
+    picture: Optional[str] = None
     is_active: bool
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+# Login/Register Schemas
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+
+
+class ErrorResponse(BaseModel):
+    success: bool = False
+    message: str
 
 
 # Token Schemas

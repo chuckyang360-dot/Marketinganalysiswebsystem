@@ -1,12 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router';
 import { useLanguage } from '../contexts/LanguageContext';
 import { AnalysisLayout } from '../components/AnalysisLayout';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card } from '../components/ui/card';
-import { Twitter, TrendingUp, Users, AlertTriangle } from 'lucide-react';
+import { Twitter, TrendingUp, Users, AlertTriangle, Clock, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { getToken, logout, fetchAnalysisHistory } from '../lib/auth';
 
 interface TwitterResult {
   mentions: Array<{ text: string; author: string; engagement: number; sentiment: string }>;
@@ -17,6 +19,7 @@ interface TwitterResult {
 
 export function TwitterAnalysis() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     brand: '',
@@ -24,17 +27,50 @@ export function TwitterAnalysis() {
     hashtags: '',
   });
   const [result, setResult] = useState<TwitterResult | null>(null);
+  const [queryTime, setQueryTime] = useState<string | null>(null);
+
+  // 检查 token 是否有效
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = getToken();
+      if (token) {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/x-analysis/history`, {
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+          if (response.status === 401 || response.status === 404) {
+            logout();
+            toast.error('登录已过期，请重新登录');
+            navigate('/login');
+          }
+        } catch (error) {
+          // 忽略检查错误
+        }
+      }
+    };
+    checkAuth();
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setQueryTime(null);
 
     try {
+      const token = getToken();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/x-analysis`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           brand: formData.brand,
           competitors: formData.competitors,
@@ -42,30 +78,44 @@ export function TwitterAnalysis() {
         }),
       });
 
+      if (response.status === 401 || response.status === 404) {
+        logout();
+        toast.error('登录已过期，请重新登录');
+        navigate('/login');
+        return;
+      }
+
       if (!response.ok) {
-        throw new Error('请求失败');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || errorData.message || '请求失败');
       }
 
       const data = await response.json();
       setResult(data);
-      toast.success(t('common.success'));
+      setQueryTime(new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
+      toast.success('分析完成');
 
-      // 保存到历史记录
-      const history = JSON.parse(localStorage.getItem('analysisHistory') || '[]');
-      history.unshift({
-        id: Date.now(),
-        type: 'Twitter',
-        data: formData,
-        result: data,
-        timestamp: new Date().toISOString(),
-      });
-      localStorage.setItem('analysisHistory', JSON.stringify(history.slice(0, 50)));
+      // 刷新历史记录
+      if (token) {
+        try {
+          await fetchAnalysisHistory(token);
+        } catch (error) {
+          console.error('Failed to refresh history:', error);
+        }
+      }
     } catch (error) {
       console.error('Analysis error:', error);
-      toast.error(t('common.error') || '分析失败，请重试');
+      const message = error instanceof Error ? error.message : '分析失败，请重试';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const getSentimentColor = (sentiment: string) => {
+    if (sentiment === '积极') return 'text-green-600';
+    if (sentiment === '消极') return 'text-red-600';
+    return 'text-gray-600';
   };
 
   return (
@@ -111,32 +161,48 @@ export function TwitterAnalysis() {
               className="w-full bg-gradient-to-r from-sky-600 to-blue-600"
               disabled={loading}
             >
-              {loading ? t('common.loading') : t('twitter.button.analyze')}
+              {loading ? '分析中...' : t('twitter.button.analyze')}
             </Button>
           </form>
         </Card>
 
         {/* Results */}
-        <div className="space-y-6">
+        <div className="space-y-4">
           {result ? (
             <>
+              {/* Query Info */}
+              <Card className="p-4 bg-gradient-to-r from-sky-50 to-blue-50 border-sky-100">
+                <div className="flex items-center gap-3 text-sm">
+                  <Twitter className="w-5 h-5 text-sky-600" />
+                  <div className="flex-1">
+                    <div className="font-medium text-sky-900">分析关键词：{formData.brand}</div>
+                    <div className="text-sky-700 mt-1 flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      查询时间：{queryTime}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* 品牌提及 */}
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <Twitter className="w-5 h-5 text-sky-600" />
                   <h3 className="text-lg font-semibold">{t('twitter.result.mentions')}</h3>
+                  <span className="ml-auto text-sm text-gray-500">共 {result.mentions.length} 条</span>
                 </div>
                 <div className="space-y-3">
                   {result.mentions.map((mention, i) => (
-                    <div key={i} className="p-3 bg-gray-50 rounded-lg">
-                      <p className="text-sm mb-2">{mention.text}</p>
+                    <div key={i} className="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                      <p className="text-sm mb-2 text-gray-900">{mention.text}</p>
                       <div className="flex items-center justify-between text-xs text-gray-600">
-                        <span>{mention.author}</span>
+                        <span>@{mention.author}</span>
                         <div className="flex items-center gap-3">
-                          <span>♥ {mention.engagement}</span>
-                          <span className={
-                            mention.sentiment === '积极' ? 'text-green-600' :
-                            mention.sentiment === '消极' ? 'text-red-600' : 'text-gray-600'
-                          }>
+                          <span className="flex items-center gap-1">
+                            <span className="text-red-500">♥</span>
+                            <span>{mention.engagement}</span>
+                          </span>
+                          <span className={getSentimentColor(mention.sentiment)}>
                             {mention.sentiment}
                           </span>
                         </div>
@@ -146,20 +212,27 @@ export function TwitterAnalysis() {
                 </div>
               </Card>
 
+              {/* 情绪趋势 */}
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <TrendingUp className="w-5 h-5 text-green-600" />
                   <h3 className="text-lg font-semibold">{t('twitter.result.sentiment')}</h3>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {result.sentimentTrend.map((trend, i) => (
                     <div key={i} className="flex items-center gap-4">
-                      <span className="text-sm text-gray-600 w-12">{trend.date}</span>
-                      <div className="flex-1 flex gap-2">
-                        <div className="flex-1 h-8 bg-green-100 rounded flex items-center justify-center text-xs font-medium text-green-700">
+                      <span className="text-sm text-gray-600 w-16">{trend.date}</span>
+                      <div className="flex-1 flex gap-2 h-8">
+                        <div
+                          className="flex-1 bg-green-100 rounded flex items-center justify-center text-xs font-medium text-green-700"
+                          style={{ width: `${(trend.positive / (trend.positive + trend.negative)) * 100}%` }}
+                        >
                           {trend.positive}%
                         </div>
-                        <div className="flex-1 h-8 bg-red-100 rounded flex items-center justify-center text-xs font-medium text-red-700">
+                        <div
+                          className="flex-1 bg-red-100 rounded flex items-center justify-center text-xs font-medium text-red-700"
+                          style={{ width: `${(trend.negative / (trend.positive + trend.negative)) * 100}%` }}
+                        >
                           {trend.negative}%
                         </div>
                       </div>
@@ -168,6 +241,7 @@ export function TwitterAnalysis() {
                 </div>
               </Card>
 
+              {/* 关键影响者 */}
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <Users className="w-5 h-5 text-purple-600" />
@@ -175,32 +249,56 @@ export function TwitterAnalysis() {
                 </div>
                 <div className="space-y-3">
                   {result.influencers.map((influencer, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
                       <div>
-                        <div className="font-medium">{influencer.name}</div>
+                        <div className="font-medium text-gray-900">@{influencer.name}</div>
                         <div className="text-sm text-gray-600">{influencer.followers.toLocaleString()} 粉丝</div>
                       </div>
-                      <div className="text-sm font-medium text-purple-600">{influencer.influence}</div>
+                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        influencer.influence === '高' ? 'bg-red-100 text-red-700' :
+                        influencer.influence === '中' ? 'bg-yellow-100 text-yellow-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {influencer.influence}
+                      </div>
                     </div>
                   ))}
                 </div>
               </Card>
 
-              <Card className="p-6">
+              {/* 风险预警 */}
+              <Card className="p-6 border-amber-200 bg-amber-50">
                 <div className="flex items-center gap-3 mb-4">
                   <AlertTriangle className="w-5 h-5 text-amber-600" />
-                  <h3 className="text-lg font-semibold">{t('twitter.result.alerts')}</h3>
+                  <h3 className="text-lg font-semibold text-amber-900">{t('twitter.result.alerts')}</h3>
                 </div>
-                <ul className="space-y-2">
+                <ul className="space-y-3">
                   {result.alerts.map((alert, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="text-amber-600 mt-0.5">•</span>
+                    <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
+                      <span className="text-amber-600 mt-0.5 flex-shrink-0">⚠</span>
                       <span>{alert}</span>
                     </li>
                   ))}
                 </ul>
               </Card>
+
+              {/* 查看历史 */}
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => navigate('/history')}
+              >
+                <Clock className="w-4 h-4 mr-2" />
+                查看历史记录
+              </Button>
             </>
+          ) : loading ? (
+            <Card className="p-12 text-center">
+              <div className="flex flex-col items-center justify-center">
+                <Twitter className="w-12 h-12 mx-auto mb-4 text-sky-600 animate-pulse" />
+                <p className="text-gray-600">正在分析中，请稍候...</p>
+              </div>
+            </Card>
           ) : (
             <Card className="p-12 text-center text-gray-500">
               <Twitter className="w-12 h-12 mx-auto mb-4 opacity-30" />

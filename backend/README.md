@@ -109,8 +109,11 @@ The API will be available at `http://localhost:8000`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/v1/auth/google/login` | Login with Google OAuth token |
-| GET | `/api/v1/auth/google/auth-url` | Get Google OAuth authorization URL |
+| POST | `/api/auth/login` | Login with email and password |
+| POST | `/api/auth/register` | Register with email and password |
+| GET | `/api/auth/google` | Google OAuth placeholder |
+| POST | `/api/auth/google/login` | Login with Google OAuth token |
+| GET | `/api/auth/google/auth-url` | Get Google OAuth authorization URL |
 
 ### X Agent
 

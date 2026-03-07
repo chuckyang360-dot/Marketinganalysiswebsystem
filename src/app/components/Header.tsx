@@ -1,11 +1,13 @@
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Globe, Menu, X } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Globe, Menu, X, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from './ui/button';
 
 export function Header() {
   const { language, setLanguage, t } = useLanguage();
+  const { user, isAuthenticated, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -22,6 +24,11 @@ export function Header() {
     { path: '/history', label: t('nav.history') },
     { path: '/about', label: t('nav.about') },
   ];
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-200">
@@ -64,14 +71,24 @@ export function Header() {
           </button>
 
           {/* Login/Register - Desktop */}
-          <div className="hidden lg:flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
-              {t('nav.login')}
-            </Button>
-            <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
-              {t('nav.register')}
-            </Button>
-          </div>
+          {!isAuthenticated ? (
+            <div className="hidden lg:flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
+                {t('nav.login')}
+              </Button>
+              <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
+                {t('nav.register')}
+              </Button>
+            </div>
+          ) : (
+            <div className="hidden lg:flex items-center gap-3">
+              <span className="text-sm text-gray-700 font-medium">{user?.name || user?.email}</span>
+              <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-600 hover:text-red-600">
+                <LogOut className="w-4 h-4 mr-1" />
+                {t('nav.logout')}
+              </Button>
+            </div>
+          )}
 
           {/* Mobile Menu Toggle */}
           <button
@@ -103,12 +120,24 @@ export function Header() {
               </Link>
             ))}
             <div className="pt-3 border-t border-gray-200 space-y-2">
-              <Button variant="outline" className="w-full" onClick={() => navigate('/login')}>
-                {t('nav.login')}
-              </Button>
-              <Button className="w-full bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
-                {t('nav.register')}
-              </Button>
+              {!isAuthenticated ? (
+                <>
+                  <Button variant="outline" className="w-full" onClick={() => navigate('/login')}>
+                    {t('nav.login')}
+                  </Button>
+                  <Button className="w-full bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
+                    {t('nav.register')}
+                  </Button>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-sm text-gray-700 font-medium py-2">{user?.name || user?.email}</div>
+                  <Button variant="outline" className="w-full text-gray-600 hover:text-red-600" onClick={handleLogout}>
+                    <LogOut className="w-4 h-4 mr-1" />
+                    {t('nav.logout')}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -1,6 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
 from ..database import Base
 import hashlib
 import secrets
@@ -11,6 +10,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
+    name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
@@ -20,19 +20,16 @@ class User(Base):
     # OAuth相关字段
     google_id = Column(String, unique=True, nullable=True)
 
-    # 关联关系
-    x_tasks = relationship("XTask", back_populates="user")
-    x_search_results = relationship("XSearchResult", back_populates="user")
-
     def set_password(self, password: str):
         """设置密码哈希"""
         salt = secrets.token_hex(16)
-        self.password_hash = hashlib.pbkdf2_hmac(
+        hash_result = hashlib.pbkdf2_hmac(
             'sha256',
             password.encode('utf-8'),
             salt.encode('utf-8'),
             100000
-        ).hex()
+        )
+        self.password_hash = salt + hash_result.hex()
 
     def verify_password(self, password: str) -> bool:
         """验证密码"""

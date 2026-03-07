@@ -8,7 +8,7 @@ interface LanguageContextType {
   t: (key: string) => string;
 }
 
-const translations = {
+const translations: Record<'zh' | 'en', Record<string, string>> = {
   zh: {
     // Navigation
     'nav.home': '首页',
@@ -18,6 +18,7 @@ const translations = {
     'nav.about': '关于我们',
     'nav.login': '登录',
     'nav.register': '注册',
+    'nav.logout': '退出',
     'nav.seo': 'SEO分析',
     'nav.reddit': 'Reddit热点',
     'nav.twitter': 'X舆情分析',
@@ -222,6 +223,32 @@ const translations = {
     'common.confirm': '确认',
     'common.save': '保存',
     'common.export': '导出',
+
+    'home.workflow.title': '多智能体协同工作流',
+    'home.workflow.description': '从市场洞察、趋势监控到内容输出与策略总结，形成完整的增长闭环。',
+    'home.scenario.badge': '核心场景',
+    'home.scenario.title': '把碎片化营销动作，重组为统一系统',
+    'home.scenario.description': '不是单点工具堆砌，而是把 SEO、Reddit、X、内容生产、数据总结串成一条可执行的增长链路。',
+    'home.scenario.card1.title': '发现机会',
+    'home.scenario.card1.description': '捕捉搜索趋势、社区热点和舆情变化，提前发现用户需求与市场空档。',
+    'home.scenario.card2.title': '生成内容',
+    'home.scenario.card2.description': '基于真实数据和用户语境生成营销文案、社媒素材与内容提纲，提高输出效率。',
+    'home.scenario.card3.title': '沉淀策略',
+    'home.scenario.card3.description': '把不同来源的分析结果汇总成可执行建议，降低决策噪音。',
+    'home.cta.title': '从单点分析，升级为完整营销系统',
+    'home.cta.description': '先把首页、注册登录和核心分析链路跑通，再逐步接入真实 API 与自动化工作流。',
+    'login.title': '登录 GlobalPulseAI',
+    'login.subtitle': '进入您的营销分析工作台',
+    'login.email': '邮箱',
+    'login.password': '密码',
+    'login.google': '使用 Google 继续',
+    'register.title': '注册 GlobalPulseAI',
+    'register.subtitle': '创建账户，开始体验多智能体营销分析',
+    'register.name': '姓名',
+    'register.namePlaceholder': '请输入您的姓名',
+    'register.email': '邮箱',
+    'register.password': '密码',
+    'register.google': '使用 Google 注册',
   },
   en: {
     // Navigation
@@ -232,6 +259,7 @@ const translations = {
     'nav.about': 'About',
     'nav.login': 'Login',
     'nav.register': 'Register',
+    'nav.logout': 'Logout',
     'nav.seo': 'SEO Analysis',
     'nav.reddit': 'Reddit Insights',
     'nav.twitter': 'X Monitoring',
@@ -436,6 +464,32 @@ const translations = {
     'common.confirm': 'Confirm',
     'common.save': 'Save',
     'common.export': 'Export',
+
+    'home.workflow.title': 'Multi-Agent Workflow',
+    'home.workflow.description': 'Turn market research, trend monitoring, content generation, and reporting into one connected growth loop.',
+    'home.scenario.badge': 'Core Scenarios',
+    'home.scenario.title': 'Rebuild fragmented marketing actions into one system',
+    'home.scenario.description': 'This is not a pile of isolated tools. It connects SEO, Reddit, X, content generation, and reporting into one executable workflow.',
+    'home.scenario.card1.title': 'Find opportunities',
+    'home.scenario.card1.description': 'Track search trends, community discussions, and sentiment shifts to identify demand and whitespace early.',
+    'home.scenario.card2.title': 'Generate content',
+    'home.scenario.card2.description': 'Create marketing copy, social content, and briefs from real data and user context instead of guesswork.',
+    'home.scenario.card3.title': 'Turn data into strategy',
+    'home.scenario.card3.description': 'Consolidate outputs from multiple agents into clearer recommendations and faster decisions.',
+    'home.cta.title': 'Move from isolated analysis to a full marketing system',
+    'home.cta.description': 'Get the landing page, auth flow, and core analysis path live first, then connect real APIs and automation.',
+    'login.title': 'Log in to GlobalPulseAI',
+    'login.subtitle': 'Enter your marketing analysis workspace',
+    'login.email': 'Email',
+    'login.password': 'Password',
+    'login.google': 'Continue with Google',
+    'register.title': 'Create your GlobalPulseAI account',
+    'register.subtitle': 'Start using the multi-agent marketing analysis platform',
+    'register.name': 'Name',
+    'register.namePlaceholder': 'Enter your name',
+    'register.email': 'Email',
+    'register.password': 'Password',
+    'register.google': 'Sign up with Google',
   },
 };
 

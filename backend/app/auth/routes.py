@@ -3,12 +3,101 @@ from sqlalchemy.orm import Session
 import urllib.parse
 
 from ..database import get_db
-from ..schemas import GoogleAuthRequest, Token, UserResponse, GoogleAuthUrlResponse
+from ..models import User
+from ..schemas import (
+    GoogleAuthRequest, Token, UserResponse, GoogleAuthUrlResponse,
+    LoginRequest, RegisterRequest, ErrorResponse
+)
 from ..config import settings
 from .google_oauth import login_with_google
 from .jwt_handler import create_access_token
 
 router = APIRouter()
+
+
+@router.post("/login")
+async def login_with_email(request: LoginRequest, db: Session = Depends(get_db)):
+    """Login with email and password"""
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email or password is incorrect"
+        )
+
+    if not user.verify_password(request.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email or password is incorrect"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    access_token = create_access_token(data={"sub": user.email})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "google_id": user.google_id,
+            "picture": None,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+        }
+    }
+
+
+@router.post("/register")
+async def register_with_email(request: RegisterRequest, db: Session = Depends(get_db)):
+    """Register with email and password"""
+    # Check if email already exists
+    existing_user = db.query(User).filter(User.email == request.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+
+    # Create new user
+    new_user = User(
+        username=request.email.split("@")[0],  # Use email prefix as username
+        name=request.name,
+        email=request.email,
+    )
+    new_user.set_password(request.password)
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return {
+        "access_token": "",
+        "token_type": "bearer",
+        "user": {
+            "id": new_user.id,
+            "email": new_user.email,
+            "name": new_user.name,
+            "google_id": new_user.google_id,
+            "picture": None,
+            "is_active": new_user.is_active,
+            "created_at": new_user.created_at,
+        }
+    }
+
+
+@router.get("/google")
+async def google_auth():
+    """Google OAuth placeholder endpoint"""
+    return {
+        "success": False,
+        "message": "Google OAuth not configured yet"
+    }
 
 
 @router.post("/google/login", response_model=Token)
