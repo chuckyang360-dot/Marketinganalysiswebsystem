@@ -2,13 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from pydantic import BaseModel
+import httpx
 from ...database import get_db
 from ...models.x_analysis import XTask, XSearchResult
 from ...auth.jwt_handler import get_current_user
 from ...models import User
 from ...config import settings
 from ...services.xai_search import xai_search_service
+from ...providers.x_provider import x_provider, XAPIError
 import asyncio
+import json
 from datetime import datetime
 import logging
 
@@ -29,31 +32,144 @@ async def run_xai_analysis(
     hashtags_list: List[str]
 ) -> Dict[str, Any]:
     """
-    Run real X analysis using xAI API
+    Run real X analysis using X API for data and xAI for sentiment
 
     Returns:
         Dictionary with mentions, stats, sentimentTrend, influencers, alerts
     """
-    logger.info(f"[PROVIDER] Using xAI provider for analysis of: {brand}")
+    logger.info(f"[PROVIDER] Using X API for analysis of: {brand}")
 
     try:
-        # 1. Search for tweets about the brand
-        tweets = await xai_search_service.search_x(brand, count=100)
-
-        if not tweets:
-            logger.warning(f"[XAISearch] No tweets found for keyword: {brand}")
+        # 1. Fetch real tweets from X API
+        try:
+            x_response = await x_provider.fetch_recent_tweets(brand, max_results=20)
+            raw_tweets = x_response.get('data', [])
+            logger.info(f"[XProvider] Retrieved {len(raw_tweets)} tweets from X API")
+        except XAPIError as e:
+            logger.error(f"[XProvider] Failed to fetch tweets: {e.message}")
             return {
                 "mentions": [],
-                "total_mentions": 0,
-                "positive_count": 0,
-                "negative_count": 0,
-                "neutral_count": 0,
+                "stats": {
+                    "total_mentions": 0,
+                    "positive_count": 0,
+                    "negative_count": 0,
+                    "neutral_count": 0
+                },
                 "sentimentTrend": [],
                 "influencers": [],
-                "alerts": [f"未找到关于 {brand} 的相关推文"]
+                "alerts": [f"X API 获取失败: {e.message}"],
+                "hashtags": hashtags_list,
+                "competitors": competitors_list,
+                "summary": f"X API 获取失败，无法分析 {brand} 的相关讨论",
+                "topics": []
             }
 
-        logger.info(f"[XAISearch] Retrieved {len(tweets)} tweets from xAI")
+        if not raw_tweets:
+            logger.warning(f"[XProvider] No tweets found for keyword: {brand}")
+            return {
+                "mentions": [],
+                "stats": {
+                    "total_mentions": 0,
+                    "positive_count": 0,
+                    "negative_count": 0,
+                    "neutral_count": 0
+                },
+                "sentimentTrend": [],
+                "influencers": [],
+                "alerts": [f"未找到关于 {brand} 的相关推文"],
+                "hashtags": hashtags_list,
+                "competitors": competitors_list,
+                "summary": f"未找到关于 {brand} 的相关推文",
+                "topics": []
+            }
+
+        # 2. Convert X API response to standard format
+        tweets = []
+        for tweet in raw_tweets:
+            tweets.append({
+                'id': tweet.get('id'),
+                'text': tweet.get('text'),
+                'author': 'unknown',  # X API recent search doesn't return author by default
+                'author_display': '',
+                'created_at': tweet.get('created_at'),
+                'public_metrics': tweet.get('public_metrics', {}),
+                'hashtags': [],
+                'mentions': []
+            })
+
+        logger.info(f"[XProvider] Converted {len(tweets)} tweets to standard format")
+
+        # 3. AI Analysis: Extract tweet texts and analyze with LLM
+        tweet_texts = [t['text'] for t in tweets]
+        logger.info(f"[AI Analysis] Starting AI analysis for {len(tweet_texts)} tweets")
+
+        # 构建 tweets 摘要文本
+        tweets_summary = "\n".join([f"- {text}" for text in tweet_texts[:20]])  # 最多分析前20条
+
+        # 调用 xAI 进行综合分析
+        ai_analysis = None
+        try:
+            prompt = f"""你是一位资深跨境营销分析师。基于以下关于 "{brand}" 的 X/Twitter 推文，提供营销洞察分析。
+
+推文内容：
+{tweets_summary}
+
+请以 JSON 格式返回分析结果，包含以下字段：
+{{
+  "sentiment": "positive" | "neutral" | "negative",
+  "summary": "营销洞察总结（不超过150字）：1）用户主要讨论的核心内容 2）主要负面反馈点 3）主要正面认可点 4）对品牌营销、内容选题或产品传播的启发",
+  "top_topics": ["可用于内容策划的话题标签1", "可用于营销复盘的讨论主题2", "垂直细分话题3"],
+  "alerts": ["需要立即关注的风险1", "品牌公关建议2"]
+}}
+
+分析要求：
+- summary 必须具体、有洞察价值，避免空泛总结
+- top_topics 不要只是重复品牌名，要提取可操作的细分话题（如产品功能、用户体验、价格敏感度、竞品对比等）
+- alerts 针对负面内容和潜在风险提出具体的公关或营销建议
+- 只返回 JSON，不要有其他文字
+- sentiment 根据正面和负面推文的比例判断
+"""
+
+            # 使用 xai_search_service 的内部方法调用 chat API
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                chat_url = f"{settings.XAI_API_URL}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {settings.XAI_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+
+                response = await client.post(
+                    chat_url,
+                    headers=headers,
+                    json={
+                        "messages": [
+                            {"role": "system", "content": "You are a social media sentiment analyzer. Return only valid JSON."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "model": settings.XAI_MODEL,
+                        "stream": False
+                    }
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+                    try:
+                        ai_analysis = json.loads(content)
+                        logger.info(f"[AI Analysis] AI analysis completed: {ai_analysis}")
+                    except json.JSONDecodeError:
+                        logger.warning(f"[AI Analysis] Failed to parse AI response as JSON: {content}")
+        except Exception as e:
+            logger.warning(f"[AI Analysis] AI analysis failed: {str(e)}, using fallback")
+
+        # AI 分析失败时的默认值
+        if not ai_analysis:
+            ai_analysis = {
+                "sentiment": "neutral",
+                "summary": f"关于 {brand} 的相关讨论",
+                "top_topics": [f"{brand} 相关讨论"],
+                "alerts": []
+            }
 
         # 2. Extract texts for sentiment analysis
         texts = [tweet.get('text', '') for tweet in tweets]
@@ -122,20 +238,44 @@ async def run_xai_analysis(
 
             processed_mentions.append(mention)
 
-        # 5. Build sentiment trend (simple 7-day distribution based on results)
+        # 5. Build sentiment trend based on real tweets' created_at and sentiment_label
         sentimentTrend = []
-        dates = ["3-1", "3-2", "3-3", "3-4", "3-5", "3-6", "3-7"]
-        pos_per_day = max(1, positive_count // 7)
-        neg_per_day = max(1, negative_count // 7)
+        date_sentiment_map = {}
 
-        for date in dates:
-            # Add some variation
-            day_pos = pos_per_day + (len(date) % 3) - 1
-            day_neg = neg_per_day + (len(date) % 2)
+        # 按日期聚合情感数据
+        for mention in processed_mentions:
+            created_at = mention.get('created_at', '')
+            sentiment_label = mention.get('sentiment_label', 'neutral')
+
+            # 解析日期：X API 返回 ISO 8601 格式，如 "2024-03-11T10:30:00.000Z"
+            # 提取 MM-DD 格式用于显示
+            try:
+                from datetime import datetime as dt
+                parsed_date = dt.fromisoformat(created_at.replace('Z', '+00:00'))
+                date_key = f"{parsed_date.month}-{parsed_date.day:02d}"  # 格式如 "3-11"
+            except (ValueError, AttributeError):
+                # 如果日期解析失败，使用当前日期
+                from datetime import datetime as dt
+                date_key = f"{dt.now().month}-{dt.now().day:02d}"
+
+            # 初始化日期的统计
+            if date_key not in date_sentiment_map:
+                date_sentiment_map[date_key] = {
+                    "positive": 0,
+                    "negative": 0,
+                    "neutral": 0
+                }
+
+            # 累加情感计数
+            date_sentiment_map[date_key][sentiment_label] += 1
+
+        # 按日期排序并转换为前端需要的格式
+        sorted_dates = sorted(date_sentiment_map.keys(), key=lambda x: tuple(map(int, x.split('-'))))
+        for date_key in sorted_dates:
             sentimentTrend.append({
-                "date": date,
-                "positive": max(0, day_pos),
-                "negative": max(0, day_neg)
+                "date": date_key,
+                "positive": date_sentiment_map[date_key]["positive"],
+                "negative": date_sentiment_map[date_key]["negative"]
             })
 
         # 6. Build influencers list (top by engagement)
@@ -145,8 +285,8 @@ async def run_xai_analysis(
             reverse=True
         )[:5]
 
-        # 7. Build alerts based on analysis
-        alerts = []
+        # 7. Build alerts - combine AI alerts with rule-based alerts
+        alerts = ai_analysis.get("alerts", [])
         if negative_count > 0:
             alerts.append(f"检测到 {negative_count} 条负面提及，建议关注用户反馈")
         if negative_count / (positive_count + 1) > 0.3:
@@ -166,7 +306,10 @@ async def run_xai_analysis(
             "influencers": influencers,
             "alerts": alerts,
             "hashtags": [tag for tweet in tweets for tag in tweet.get('hashtags', [])][:10],
-            "competitors": competitors_list
+            "competitors": competitors_list,
+            # AI 分析结果
+            "summary": ai_analysis.get("summary", f"关于 {brand} 的相关讨论"),
+            "topics": ai_analysis.get("top_topics", [])
         }
 
         logger.info(f"[XAISearch] Analysis complete: {len(processed_mentions)} mentions, "
@@ -188,7 +331,9 @@ async def run_xai_analysis(
             "influencers": [],
             "alerts": [f"分析失败: {str(e)}"],
             "hashtags": hashtags_list,
-            "competitors": competitors_list
+            "competitors": competitors_list,
+            "summary": f"分析 {brand} 时发生错误: {str(e)}",
+            "topics": []
         }
 
 
@@ -302,11 +447,15 @@ async def analyze_twitter(
         provider = settings.X_ANALYSIS_PROVIDER.lower()
         logger.info(f"X Analysis Request - Provider: {provider}, Brand: {request.brand}, User: {current_user.email}")
 
-        # 根据配置选择分析提供者
-        if provider == "xai":
-            result = await run_xai_analysis(request.brand, competitors_list, hashtags_list)
-        else:
-            result = await run_mock_analysis(request.brand, competitors_list, hashtags_list)
+        # 只支持 xai 提供者（真实 X API + xAI 分析）
+        if provider != "xai":
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的 provider 配置: '{settings.X_ANALYSIS_PROVIDER}'。请将 X_ANALYSIS_PROVIDER 设置为 'xai' 以使用真实 X API 数据。"
+            )
+
+        # 使用真实 X API + xAI 分析
+        result = await run_xai_analysis(request.brand, competitors_list, hashtags_list)
 
         # 构建原始数据用于历史记录
         raw_data = {
@@ -315,6 +464,8 @@ async def analyze_twitter(
             "sentimentTrend": result.get("sentimentTrend", []),
             "influencers": result.get("influencers", []),
             "alerts": result.get("alerts", []),
+            "summary": result.get("summary", ""),
+            "topics": result.get("topics", []),
             "provider": provider
         }
 
@@ -375,7 +526,9 @@ async def analyze_twitter(
             ],
             "sentimentTrend": result.get("sentimentTrend", []),
             "influencers": result.get("influencers", []),
-            "alerts": result.get("alerts", [])
+            "alerts": result.get("alerts", []),
+            "summary": result.get("summary", ""),
+            "topics": result.get("topics", [])
         }
 
     except HTTPException:
@@ -450,6 +603,8 @@ async def get_task_details(
         competitors = raw_data.get("competitors", [])
         hashtags = raw_data.get("hashtags", [])
         alerts = raw_data.get("alerts", [])
+        summary = raw_data.get("summary", "")
+        topics = raw_data.get("topics", [])
 
         # 检查使用的是哪个provider
         provider = raw_data.get("provider", "mock")
@@ -482,7 +637,9 @@ async def get_task_details(
             "influencers": raw_data.get("influencers", []),
             "alerts": alerts,
             "competitors": competitors,
-            "hashtags": hashtags
+            "hashtags": hashtags,
+            "summary": summary,
+            "topics": topics
         }
 
     except HTTPException:

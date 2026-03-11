@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 
@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     XAI_MODEL: Optional[str] = None  # Must be set explicitly via environment variable
     X_ANALYSIS_PROVIDER: str = "mock"  # Options: "mock", "xai"
 
+    # X (Twitter) API Configuration
+    X_BEARER_TOKEN: Optional[str] = None  # Bearer token for X API v2
+
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -35,9 +38,11 @@ class Settings(BaseSettings):
     # Frontend Configuration
     FRONTEND_URL: str = "http://localhost:5173"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"  # Ignore undefined environment variables (e.g., VITE_*)
+    )
 
 
 settings = Settings()
