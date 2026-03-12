@@ -22,8 +22,8 @@ router = APIRouter()
 
 class XAnalysisRequest(BaseModel):
     brand: str
-    competitors: str = ""
-    hashtags: str = ""
+    competitors: List[str] = []
+    hashtags: List[str] = []
 
 
 async def run_xai_analysis(
@@ -42,9 +42,8 @@ async def run_xai_analysis(
     try:
         # 1. Fetch real tweets from X API
         try:
-            x_response = await x_provider.fetch_recent_tweets(brand, max_results=20)
-            raw_tweets = x_response.get('data', [])
-            logger.info(f"[XProvider] Retrieved {len(raw_tweets)} tweets from X API")
+            mentions = await x_provider.search_mentions(brand, limit=20)
+            logger.info(f"[XProvider] Retrieved {len(mentions)} mentions from X API")
         except XAPIError as e:
             logger.error(f"[XProvider] Failed to fetch tweets: {e.message}")
             return {
@@ -64,7 +63,7 @@ async def run_xai_analysis(
                 "topics": []
             }
 
-        if not raw_tweets:
+        if not mentions:
             logger.warning(f"[XProvider] No tweets found for keyword: {brand}")
             return {
                 "mentions": [],
@@ -83,24 +82,9 @@ async def run_xai_analysis(
                 "topics": []
             }
 
-        # 2. Convert X API response to standard format
-        tweets = []
-        for tweet in raw_tweets:
-            tweets.append({
-                'id': tweet.get('id'),
-                'text': tweet.get('text'),
-                'author': 'unknown',  # X API recent search doesn't return author by default
-                'author_display': '',
-                'created_at': tweet.get('created_at'),
-                'public_metrics': tweet.get('public_metrics', {}),
-                'hashtags': [],
-                'mentions': []
-            })
-
-        logger.info(f"[XProvider] Converted {len(tweets)} tweets to standard format")
 
         # 3. AI Analysis: Extract tweet texts and analyze with LLM
-        tweet_texts = [t['text'] for t in tweets]
+        tweet_texts = [m.text for m in mentions]
         logger.info(f"[AI Analysis] Starting AI analysis for {len(tweet_texts)} tweets")
 
         # 构建 tweets 摘要文本
@@ -172,7 +156,7 @@ async def run_xai_analysis(
             }
 
         # 2. Extract texts for sentiment analysis
-        texts = [tweet.get('text', '') for tweet in tweets]
+        texts = [m.text for m in mentions]
 
         # 3. Batch sentiment analysis
         sentiments = await xai_search_service.analyze_sentiment_batch(texts)
@@ -186,7 +170,7 @@ async def run_xai_analysis(
         neutral_count = 0
         influencer_map = {}
 
-        for i, tweet in enumerate(tweets):
+        for i, mention in enumerate(mentions):
             sentiment_data = sentiments[i] if i < len(sentiments) else {'label': 'neutral', 'score': 0.0}
             label = sentiment_data.get('label', 'neutral')
             score = sentiment_data.get('score', 0.0)
@@ -199,44 +183,41 @@ async def run_xai_analysis(
             else:
                 neutral_count += 1
 
-            # Calculate engagement (likes + retweets + replies)
-            metrics = tweet.get('public_metrics', {})
-            engagement = metrics.get('like_count', 0) + metrics.get('retweet_count', 0) + metrics.get('reply_count', 0)
+            # Get engagement from Mention object
+            engagement = mention.engagement_total
 
-            # Build mention object
-            mention = {
-                'tweet_id': tweet.get('id', ''),
-                'text': tweet.get('text', ''),
-                'author': tweet.get('author', 'unknown'),
-                'author_display': tweet.get('author_display', ''),
+            # Build mention dict for output (compatibility with existing format)
+            processed_mention = {
+                'tweet_id': mention.id,
+                'text': mention.text,
+                'author': mention.author_username or mention.author,
+                'author_display': mention.author_display_name or mention.author,
                 'sentiment_score': int(score * 100),
                 'sentiment_label': label,
                 'engagement': engagement,
-                'created_at': tweet.get('created_at'),
-                'public_metrics': metrics,
-                'hashtags': tweet.get('hashtags', []),
-                'mentions': tweet.get('mentions', [])
+                'created_at': mention.timestamp.isoformat() if mention.timestamp else '',
+                'hashtags': [],  # TODO: Extract from platform_metadata if needed
+                'mentions': []   # TODO: Extract from platform_metadata if needed
             }
 
-            # Track influencers (tweets with high engagement)
+            # Track influencers (mentions with high engagement)
             if engagement > 10:
-                author = tweet.get('author', 'unknown')
+                author = mention.author_username or mention.author
                 if author not in influencer_map:
                     influencer_map[author] = {
                         'name': f"@{author}",
-                        'followers': metrics.get('like_count', 0) * 10,  # Estimate
-                        'influence': '中' if engagement > 50 else '低'
+                        'followers': mention.followers,
+                        'influence': '高' if mention.followers > 100000 else
+                                   '中' if mention.followers > 10000 else '低'
                     }
                 else:
-                    # Update influence level based on higher engagement
-                    if engagement > 50:
-                        influencer_map[author]['influence'] = '高'
+                    # Update with max followers
                     influencer_map[author]['followers'] = max(
                         influencer_map[author]['followers'],
-                        metrics.get('like_count', 0) * 10
+                        mention.followers
                     )
 
-            processed_mentions.append(mention)
+            processed_mentions.append(processed_mention)
 
         # 5. Build sentiment trend based on real tweets' created_at and sentiment_label
         sentimentTrend = []
@@ -305,7 +286,7 @@ async def run_xai_analysis(
             "sentimentTrend": sentimentTrend,
             "influencers": influencers,
             "alerts": alerts,
-            "hashtags": [tag for tweet in tweets for tag in tweet.get('hashtags', [])][:10],
+            "hashtags": [],
             "competitors": competitors_list,
             # AI 分析结果
             "summary": ai_analysis.get("summary", f"关于 {brand} 的相关讨论"),
@@ -440,9 +421,9 @@ async def analyze_twitter(
 ):
     """X平台舆情分析"""
     try:
-        # 解析竞品和标签
-        competitors_list = [c.strip() for c in request.competitors.split(",") if c.strip()] if request.competitors else []
-        hashtags_list = [h.strip() for h in request.hashtags.split(",") if h.strip()] if request.hashtags else []
+        # 解析竞品和标签（兼容数组和空值）
+        competitors_list = [c.strip() for c in request.competitors if c.strip()] if request.competitors else []
+        hashtags_list = [h.strip() for h in request.hashtags if h.strip()] if request.hashtags else []
 
         provider = settings.X_ANALYSIS_PROVIDER.lower()
         logger.info(f"X Analysis Request - Provider: {provider}, Brand: {request.brand}, User: {current_user.email}")

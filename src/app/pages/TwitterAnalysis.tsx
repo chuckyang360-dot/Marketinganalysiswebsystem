@@ -15,12 +15,15 @@ interface TwitterResult {
   sentimentTrend: Array<{ date: string; positive: number; negative: number }>;
   influencers: Array<{ name: string; followers: number; influence: string }>;
   alerts: string[];
+  summary?: string;  // AI 分析总结
+  topics?: string[]; // 热门话题
 }
 
 export function TwitterAnalysis() {
   const { t } = useLanguage();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [analysisStep, setAnalysisStep] = useState<string>('');
   const [formData, setFormData] = useState({
     brand: '',
     competitors: '',
@@ -58,6 +61,7 @@ export function TwitterAnalysis() {
     e.preventDefault();
     setLoading(true);
     setQueryTime(null);
+    setAnalysisStep('fetching');
 
     try {
       const token = getToken();
@@ -68,13 +72,17 @@ export function TwitterAnalysis() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
+      // 模拟分析进度
+      setTimeout(() => setAnalysisStep('analyzing'), 1000);
+      setTimeout(() => setAnalysisStep('processing'), 2500);
+
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/x-analysis`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           brand: formData.brand,
-          competitors: formData.competitors,
-          hashtags: formData.hashtags,
+          competitors: formData.competitors ? formData.competitors.split(',').map(s => s.trim()).filter(s => s) : [],
+          hashtags: formData.hashtags ? formData.hashtags.split(',').map(s => s.trim()).filter(s => s) : [],
         }),
       });
 
@@ -92,6 +100,7 @@ export function TwitterAnalysis() {
 
       const data = await response.json();
       setResult(data);
+      setAnalysisStep('');
       setQueryTime(new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }));
       toast.success('分析完成');
 
@@ -109,6 +118,7 @@ export function TwitterAnalysis() {
       toast.error(message);
     } finally {
       setLoading(false);
+      setAnalysisStep('');
     }
   };
 
@@ -168,7 +178,29 @@ export function TwitterAnalysis() {
 
         {/* Results */}
         <div className="space-y-4">
-          {result ? (
+          {loading ? (
+            <Card className="p-8 text-center">
+              <div className="flex flex-col items-center justify-center space-y-4">
+                <Twitter className="w-16 h-16 text-sky-600 animate-bounce" />
+                <h3 className="text-xl font-semibold text-gray-900">分析中...</h3>
+                <div className="space-y-2 text-sm">
+                  <div className={`flex items-center justify-center gap-2 text-sky-600 ${analysisStep === 'fetching' ? 'font-semibold' : 'text-gray-400'}`}>
+                    <span className={`inline-block w-2 h-2 rounded-full ${analysisStep === 'fetching' ? 'bg-sky-600' : 'bg-gray-300'}`} />
+                    正在抓取 X 数据...
+                  </div>
+                  <div className={`flex items-center justify-center gap-2 text-sky-600 ${analysisStep === 'analyzing' ? 'font-semibold' : 'text-gray-400'}`}>
+                    <span className={`inline-block w-2 h-2 rounded-full ${analysisStep === 'analyzing' ? 'bg-sky-600' : 'bg-gray-300'}`} />
+                    正在进行 AI 情绪分析...
+                  </div>
+                  <div className={`flex items-center justify-center gap-2 text-sky-600 ${analysisStep === 'processing' ? 'font-semibold' : 'text-gray-400'}`}>
+                    <span className={`inline-block w-2 h-2 rounded-full ${analysisStep === 'processing' ? 'bg-sky-600' : 'bg-gray-300'}`} />
+                    正在整理结果...
+                  </div>
+                </div>
+                <p className="text-gray-500 text-xs mt-4">请稍候，这可能需要几秒钟</p>
+              </div>
+            </Card>
+          ) : result ? (
             <>
               {/* Query Info */}
               <Card className="p-4 bg-gradient-to-r from-sky-50 to-blue-50 border-sky-100">
@@ -183,6 +215,19 @@ export function TwitterAnalysis() {
                   </div>
                 </div>
               </Card>
+
+              {/* AI 分析总结 */}
+              {result.summary && (
+                <Card className="p-6 bg-gradient-to-r from-emerald-50 to-teal-50 border-emerald-100">
+                  <div className="flex items-start gap-3">
+                    <TrendingUp className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h3 className="text-base font-semibold text-emerald-900 mb-2">AI 分析总结</h3>
+                      <p className="text-sm text-emerald-800">{result.summary}</p>
+                    </div>
+                  </div>
+                </Card>
+              )}
 
               {/* 品牌提及 */}
               <Card className="p-6">
@@ -273,7 +318,7 @@ export function TwitterAnalysis() {
                   <h3 className="text-lg font-semibold text-amber-900">{t('twitter.result.alerts')}</h3>
                 </div>
                 <ul className="space-y-3">
-                  {result.alerts.map((alert, i) => (
+                  {result.alerts && result.alerts.map((alert, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
                       <span className="text-amber-600 mt-0.5 flex-shrink-0">⚠</span>
                       <span>{alert}</span>
@@ -292,13 +337,6 @@ export function TwitterAnalysis() {
                 查看历史记录
               </Button>
             </>
-          ) : loading ? (
-            <Card className="p-12 text-center">
-              <div className="flex flex-col items-center justify-center">
-                <Twitter className="w-12 h-12 mx-auto mb-4 text-sky-600 animate-pulse" />
-                <p className="text-gray-600">正在分析中，请稍候...</p>
-              </div>
-            </Card>
           ) : (
             <Card className="p-12 text-center text-gray-500">
               <Twitter className="w-12 h-12 mx-auto mb-4 opacity-30" />

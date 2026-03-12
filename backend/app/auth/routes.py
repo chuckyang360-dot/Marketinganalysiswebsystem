@@ -64,17 +64,34 @@ async def register_with_email(request: RegisterRequest, db: Session = Depends(ge
             detail="Email already registered"
         )
 
+    # Generate unique username from email prefix
+    base_username = request.email.split("@")[0]
+    username = base_username
+
+    # Check if username exists, add suffix if needed
+    counter = 1
+    while db.query(User).filter(User.username == username).first():
+        username = f"{base_username}_{counter}"
+        counter += 1
+
     # Create new user
     new_user = User(
-        username=request.email.split("@")[0],  # Use email prefix as username
+        username=username,
         name=request.name,
         email=request.email,
     )
     new_user.set_password(request.password)
 
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Registration failed: {str(e)}"
+        )
 
     return {
         "access_token": "",
