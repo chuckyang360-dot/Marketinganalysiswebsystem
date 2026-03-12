@@ -79,7 +79,7 @@ class RedditAgent:
         sentiment_result = await analyze_sentiment(mentions)
 
         # 3. Summary generation
-        summary_result = self.summary_generator.generate(
+        summary_result = await self.summary_generator.generate(
             mentions=mentions,
             top_n=min(10, len(mentions)),
             influencers_count=3
