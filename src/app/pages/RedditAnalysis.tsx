@@ -9,10 +9,45 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { TrendingUp, MessageCircle, Heart, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface RedditResult {
-  trending: Array<{ title: string; subreddit: string; upvotes: number; comments: number }>;
-  sentiment: { positive: number; neutral: number; negative: number };
-  opportunities: string[];
+interface AnalysisResult {
+  summary: string;
+  sentiment: {
+    positive: number;
+    neutral: number;
+    negative: number;
+  };
+  topics: string[];
+  alerts: Array<{
+    level: string;
+    message: string;
+    count: number;
+    affected_users: string[];
+  }>;
+  mentions: Array<{
+    id: string;
+    platform: string;
+    author: string;
+    author_username: string;
+    author_display_name: string;
+    text: string;
+    url: string;
+    timestamp: string;
+    likes: number;
+    comments: number;
+    shares: number;
+    followers: number;
+    sentiment: string;
+    sentiment_score: number;
+    influencer_tier: string;
+    platform_metadata: Record<string, any>;
+    raw: any;
+  }>;
+}
+
+interface AnalysisRequest {
+  keywords: string;
+  subreddits: string;
+  limit?: number;
 }
 
 export function RedditAnalysis() {
@@ -23,47 +58,43 @@ export function RedditAnalysis() {
     keywords: '',
     timeRange: '7d',
   });
-  const [result, setResult] = useState<RedditResult | null>(null);
+  const [result, setResult] = useState<AnalysisResult | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    setTimeout(() => {
-      const mockResult: RedditResult = {
-        trending: [
-          { title: 'AI营销工具推荐 - 2026年最新', subreddit: 'marketing', upvotes: 1245, comments: 89 },
-          { title: '如何提升SEO排名？实战分享', subreddit: 'SEO', upvotes: 892, comments: 67 },
-          { title: '社交媒体营销的5个技巧', subreddit: 'socialmedia', upvotes: 756, comments: 45 },
-          { title: '内容营销案例分析', subreddit: 'content', upvotes: 634, comments: 38 },
-        ],
-        sentiment: {
-          positive: 65,
-          neutral: 25,
-          negative: 10,
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/reddit-analysis/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        opportunities: [
-          '用户对AI营销工具有强烈需求，可以针对性推出教程内容',
-          'SEO相关话题热度持续走高，建议增加SEO相关内容输出',
-          '社交媒体营销讨论活跃，可以参与社区互动建立品牌影响力',
-          '内容营销案例分享受欢迎，可以制作相关案例库',
-        ],
-      };
-
-      setResult(mockResult);
-      setLoading(false);
-      toast.success(t('common.success'));
-
-      const history = JSON.parse(localStorage.getItem('analysisHistory') || '[]');
-      history.unshift({
-        id: Date.now(),
-        type: 'Reddit',
-        data: formData,
-        result: mockResult,
-        timestamp: new Date().toISOString(),
+        body: JSON.stringify({
+          keywords: formData.keywords,
+          subreddits: formData.subreddits,
+          limit: 10,
+        }),
       });
-      localStorage.setItem('analysisHistory', JSON.stringify(history.slice(0, 50)));
-    }, 2000);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.status !== 'success') {
+        toast.error(data.summary || t('common.error'));
+      } else {
+        setResult(data);
+        toast.success(t('common.success'));
+      }
+    } catch (error) {
+      console.error('Analysis error:', error);
+      toast.error(error instanceof Error ? error.message : t('common.error'));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -85,7 +116,6 @@ export function RedditAnalysis() {
                 required
               />
             </div>
-
             <div>
               <Label>{t('reddit.input.keywords')}</Label>
               <Input
@@ -95,7 +125,6 @@ export function RedditAnalysis() {
                 required
               />
             </div>
-
             <div>
               <Label>{t('reddit.input.timeRange')}</Label>
               <Select value={formData.timeRange} onValueChange={(value) => setFormData({ ...formData, timeRange: value })}>
@@ -110,7 +139,6 @@ export function RedditAnalysis() {
                 </SelectContent>
               </Select>
             </div>
-
             <Button
               type="submit"
               className="w-full bg-gradient-to-r from-orange-600 to-red-600"
@@ -122,86 +150,140 @@ export function RedditAnalysis() {
         </Card>
 
         {/* Results */}
-        <div className="space-y-6">
-          {result ? (
-            <>
+        {result ? (
+          <>
+            {/* Topics */}
+            <div className="space-y-6">
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
-                  <MessageCircle className="w-5 h-5 text-orange-600" />
-                  <h3 className="text-lg font-semibold">{t('reddit.result.trending')}</h3>
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold">{t('reddit.result.topics')}</h3>
                 </div>
                 <div className="space-y-3">
-                  {result.trending.map((topic, i) => (
-                    <div key={i} className="p-3 bg-gray-50 rounded-lg">
-                      <div className="font-medium mb-2">{topic.title}</div>
-                      <div className="flex items-center gap-4 text-sm text-gray-600">
-                        <span>r/{topic.subreddit}</span>
-                        <span>↑ {topic.upvotes}</span>
-                        <span>💬 {topic.comments}</span>
-                      </div>
+                  {result.topics.map((topic: string, i: number) => (
+                    <div key={i} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="font-medium mb-2">{topic}</div>
                     </div>
                   ))}
                 </div>
               </Card>
+            </div>
 
+            {/* Sentiment Analysis */}
+            <div className="space-y-6">
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <Heart className="w-5 h-5 text-pink-600" />
                   <h3 className="text-lg font-semibold">{t('reddit.result.sentiment')}</h3>
                 </div>
                 <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm">积极</span>
-                      <span className="text-sm font-medium text-green-600">{result.sentiment.positive}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-green-600" style={{ width: `${result.sentiment.positive}%` }} />
-                    </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-sm">积极</span>
+                    <span className="text-sm font-medium text-green-600">{result.sentiment.positive}%</span>
                   </div>
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm">中性</span>
-                      <span className="text-sm font-medium text-gray-600">{result.sentiment.neutral}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-gray-600" style={{ width: `${result.sentiment.neutral}%` }} />
-                    </div>
+                  <div className="h-2 bg-green-600 rounded-full overflow-hidden">
+                    <div className="h-full bg-green-600" style={{ width: `${result.sentiment.positive}%` }} />
                   </div>
-                  <div>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm">消极</span>
-                      <span className="text-sm font-medium text-red-600">{result.sentiment.negative}%</span>
-                    </div>
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-red-600" style={{ width: `${result.sentiment.negative}%` }} />
-                    </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-sm">中性</span>
+                    <span className="text-sm font-medium text-gray-600">{result.sentiment.neutral}%</span>
+                  </div>
+                  <div className="h-2 bg-gray-600 rounded-full overflow-hidden">
+                    <div className="h-full bg-gray-600" style={{ width: `${result.sentiment.neutral}%` }} />
+                  </div>
+                  <div className="flex justify-between mb-2">
+                    <span className="text-sm">消极</span>
+                    <span className="text-sm font-medium text-red-600">{result.sentiment.negative}%</span>
+                  </div>
+                  <div className="h-2 bg-red-600 rounded-full overflow-hidden">
+                    <div className="h-full bg-red-600" style={{ width: `${result.sentiment.negative}%` }} />
                   </div>
                 </div>
               </Card>
+            </div>
 
+            {/* Mentions List */}
+            <div className="space-y-6">
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
-                  <AlertCircle className="w-5 h-5 text-blue-600" />
-                  <h3 className="text-lg font-semibold">{t('reddit.result.opportunities')}</h3>
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold">相关提及 ({result.mentions.length})</h3>
                 </div>
-                <ul className="space-y-2">
-                  {result.opportunities.map((opp, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="text-blue-600 mt-0.5">•</span>
-                      <span>{opp}</span>
-                    </li>
+                <div className="space-y-4">
+                  {result.mentions.slice(0, 20).map((mention: any, i: number) => (
+                    <div key={mention.id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+                      <div className="mb-3">
+                        <a href={mention.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                          <div className="font-medium mb-1">{mention.author_username || mention.author || 'Unknown'}</div>
+                          <p className="text-sm text-gray-700 leading-relaxed">{mention.text}</p>
+                        </a>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        <span>{new Date(mention.timestamp).toLocaleDateString()}</span>
+                        <span>•</span>
+                        <span>{mention.platform}</span>
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </Card>
-            </>
-          ) : (
-            <Card className="p-12 text-center text-gray-500">
-              <TrendingUp className="w-12 h-12 mx-auto mb-4 opacity-30" />
-              <p>填写左侧表单开始分析</p>
-            </Card>
-          )}
-        </div>
+            </div>
+
+            {/* Summary */}
+            <div className="space-y-6">
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <MessageCircle className="w-5 h-5 text-purple-600" />
+                  <h3 className="text-lg font-semibold">{t('reddit.result.summary')}</h3>
+                </div>
+                <p className="text-sm text-gray-700 leading-relaxed">
+                  {result.summary}
+                </p>
+              </Card>
+            </div>
+
+            {/* Alerts */}
+            {(result.alerts && result.alerts.length > 0) && (
+              <div className="space-y-6">
+                <Card className="p-6 border-l-4 border-orange-400 bg-orange-50">
+                  <div className="flex items-center gap-3 mb-4">
+                    <AlertCircle className="w-5 h-5 text-orange-600" />
+                    <h3 className="text-lg font-semibold">{t('reddit.result.alerts')} ({result.alerts.length})</h3>
+                  </div>
+                  <div className="space-y-3">
+                    {result.alerts.map((alert: any, i: number) => (
+                      <div key={i} className="p-3 bg-white rounded border border-gray-200">
+                        <div className="flex items-start gap-3">
+                          <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full ${
+                            alert.level === 'critical' ? 'bg-red-600 text-white' :
+                            alert.level === 'high' ? 'bg-orange-500 text-white' :
+                            alert.level === 'warning' ? 'bg-yellow-500 text-white' :
+                            'bg-blue-500 text-white'
+                          }`}>
+                            {alert.count}
+                          </span>
+                          <div className="flex-1">
+                            <div className="font-medium mb-1">{alert.message}</div>
+                            {alert.affected_users.length > 0 && (
+                              <div className="text-xs text-gray-500 mt-1">
+                                涉及: {alert.affected_users.slice(0, 2).join(', ')}...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            )}
+          </>
+        ) : (
+          <Card className="p-12 text-center text-gray-500">
+            <TrendingUp className="w-12 h-12 mx-auto mb-4 opacity-30" />
+            <p>填写左侧表单开始分析</p>
+          </Card>
+        )}
       </div>
     </AnalysisLayout>
   );
