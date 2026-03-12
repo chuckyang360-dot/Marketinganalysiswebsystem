@@ -449,7 +449,6 @@ export function History() {
       <div>
         <h3 className="text-lg font-semibold text-amber-900">风险预警</h3>
         <p className="text-sm text-amber-700">当前结果中未检测到风险</p>
-      </div>
     </div>
   </div>
 )}
