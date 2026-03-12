@@ -66,6 +66,10 @@ init_db()
 # Include routers
 app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(x_analysis_router, prefix="/api/x-analysis", tags=["X Analysis"])
+from .api.reddit_analysis import router as reddit_analysis_router
+from .api.seo_analysis import router as seo_analysis_router
+app.include_router(reddit_analysis_router, prefix="/api/reddit-analysis", tags=["Reddit Analysis"])
+app.include_router(seo_analysis_router, prefix="/api/seo-analysis", tags=["SEO Analysis"])
 
 # Static files (for frontend integration) - only mount if directory exists
 # This allows backend to work independently of frontend (deployed on Vercel)

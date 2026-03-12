@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # X (Twitter) API Configuration
     X_BEARER_TOKEN: Optional[str] = None  # Bearer token for X API v2
 
+    # Exa API Configuration
+    EXA_API_KEY: Optional[str] = None  # API key for Exa.ai neural search
+
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
