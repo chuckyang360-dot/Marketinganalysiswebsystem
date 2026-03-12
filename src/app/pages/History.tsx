@@ -454,6 +454,11 @@ export function History() {
     </div>
   </div>
        )}
+                </Card>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
