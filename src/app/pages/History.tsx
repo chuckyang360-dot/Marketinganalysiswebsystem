@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';Bimport { useLanguage } from '../contexts/LanguageContext';
+import { useState, useEffect } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { History as HistoryIcon, AlertCircle, Eye, X, Clock, Twitter, TrendingUp, Users, AlertTriangle, Hash } from 'lucide-react';
