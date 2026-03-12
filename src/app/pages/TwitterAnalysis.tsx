@@ -293,21 +293,29 @@ export function TwitterAnalysis() {
                   <h3 className="text-lg font-semibold">{t('twitter.result.influencers')}</h3>
                 </div>
                 <div className="space-y-3">
-                  {result.influencers.map((influencer, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
-                      <div>
-                        <div className="font-medium text-gray-900">@{influencer.name}</div>
-                        <div className="text-sm text-gray-600">{influencer.followers.toLocaleString()} 粉丝</div>
+                  {result.influencers && result.influencers.length > 0 ? (
+                    result.influencers.map((influencer, i) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-100">
+                        <div>
+                          <div className="font-medium text-gray-900">@{influencer.name}</div>
+                          <div className="text-sm text-gray-600">{influencer.followers.toLocaleString()} 粉丝</div>
+                        </div>
+                        <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          influencer.influence === '高' ? 'bg-red-100 text-red-700' :
+                          influencer.influence === '中' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {influencer.influence}
+                        </div>
                       </div>
-                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        influencer.influence === '高' ? 'bg-red-100 text-red-700' :
-                        influencer.influence === '中' ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        {influencer.influence}
-                      </div>
+                    ))
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                      <Users className="w-12 h-12 mb-3 opacity-30" />
+                      <p className="text-sm">暂无高价值影响者</p>
+                      <p className="text-xs text-gray-400">当前结果中未识别到高影响力账号</p>
                     </div>
-                  ))}
+                  )}
                 </div>
               </Card>
 

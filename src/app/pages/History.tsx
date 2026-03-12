@@ -292,7 +292,18 @@ export function History() {
                           <div className="text-sm text-gray-600 mt-1">中性</div>
                         </div>
                       </div>
-
+                      {/* AI Summary */}
+{selectedTask.summary && selectedTask.summary !== 'N/A' && (
+  <div className="bg-emerald-50 border-2 border-emerald-100 rounded-lg p-4">
+    <div className="flex items-start gap-3">
+      <TrendingUp className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+      <div>
+        <h3 className="text-base font-semibold text-emerald-900 mb-2">AI 分析总结</h3>
+        <p className="text-sm text-emerald-800">{selectedTask.summary}</p>
+      </div>
+    </div>
+  </div>
+)}
                       {/* Mentions */}
                       {selectedTask.mentions.length > 0 && (
                         <div>
@@ -416,30 +427,32 @@ export function History() {
                       )}
 
                       {/* Alerts */}
-                      {selectedTask.alerts.length > 0 && (
-                        <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
-                          <div className="flex items-center gap-2 mb-3">
-                            <AlertTriangle className="w-5 h-5 text-amber-600" />
-                            <h3 className="text-lg font-semibold text-amber-900">风险预警</h3>
-                          </div>
-                          <ul className="space-y-2">
-                            {selectedTask.alerts.map((alert, i) => (
-                              <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
-                                <span className="text-amber-600 mt-0.5 flex-shrink-0">⚠</span>
-                                <span>{alert}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </Card>
-            </div>
-          </div>
-        </div>
-      )}
+{selectedTask.alerts && selectedTask.alerts.length > 0 ? (
+  <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
+    <div className="flex items-center gap-2 mb-3">
+      <AlertTriangle className="w-5 h-5 text-amber-600" />
+      <h3 className="text-lg font-semibold text-amber-900">风险预警</h3>
+    </div>
+    <ul className="space-y-2">
+      {selectedTask.alerts.map((alert, i) => (
+        <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
+          <span className="text-amber-600 mt-0.5 flex-shrink-0">⚠</span>
+          <span>{alert}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+) : (
+  <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
+    <div className="flex items-center gap-3">
+      <AlertTriangle className="w-5 h-5 text-amber-300" />
+      <div>
+        <h3 className="text-lg font-semibold text-amber-900">风险预警</h3>
+        <p className="text-sm text-amber-700">当前结果中未检测到风险</p>
+      </div>
+    </div>
+  </div>
+)}
     </div>
   );
 }
