@@ -12,7 +12,7 @@ import {
   Users,
   AlertTriangle,
 } from 'lucide-react';
-import toast from 'sonner';
+import { toast } from 'sonner';
 import { getToken, logout, fetchAnalysisHistory, fetchTaskDetail } from '../lib/auth';
 
 interface HistoryItem {
