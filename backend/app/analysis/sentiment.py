@@ -9,6 +9,8 @@ from typing import List
 from ..providers.base import Mention
 from ..config import settings
 from pydantic import BaseModel
+import httpx
+import json
 
 
 class SentimentResult(BaseModel):
@@ -31,28 +33,26 @@ async def analyze_sentiment(mentions: List[Mention]) -> SentimentResult:
     # Extract texts for AI analysis
     texts = [mention.text[:200] for mention in mentions]
 
-    # Use xAI to analyze sentiment
-    import httpx
     headers = {
         "Content-Type": "application/json",
         "x-api-key": settings.XAI_API_KEY
     }
 
-    prompt = f"""Analyze the sentiment of the following social media mentions about the given brand/topic.
-Return only JSON with these keys:
+    system_prompt = """You are a sentiment analysis assistant. Analyze the sentiment of social media mentions and classify each as positive, negative, or neutral.
+
+Return ONLY a valid JSON object with these exact keys:
 - "positive": number of positive mentions
 - "negative": number of negative mentions
 - "neutral": number of neutral mentions
 
-Do NOT include any other commentary or explanation. Just return the counts.
-
-Mentions:
-{texts}
-"""
+Do not include any other text, explanation, or commentary. Just the JSON."""
 
     try:
         if not texts:
             return SentimentResult(positive=0.0, negative=0.0, neutral=0.0)
+
+        # Format mentions as numbered list for clarity
+        mentions_text = "\n".join([f"{i+1}. {text}" for i, text in enumerate(texts)])
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
@@ -60,28 +60,52 @@ Mentions:
                 headers=headers,
                 json={
                     "messages": [
-                        {"role": "system", "content": prompt},
-                        {"role": "user", "content": texts}
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Analyze the sentiment of these mentions:\n\n{mentions_text}"}
                     ],
                     "model": settings.XAI_MODEL,
-                    "stream": False
+                    "stream": False,
+                    "temperature": 0.1  # Low temperature for consistent output
                 }
             )
 
         if response.status_code != 200:
             print(f"xAI API error: {response.status_code}")
+            print(f"Response: {response.text[:500]}")
             return SentimentResult(positive=0.0, negative=0.0, neutral=0.0)
 
         result = response.json()
 
+        # Parse xAI response
         if "choices" in result and len(result["choices"]) > 0:
             message = result["choices"][0].get("message", {})
             content = message.get("content", "{}")
             try:
-                import json
+                # Clean up the content - remove markdown code blocks if present
+                content = content.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[-1]
+                if content.endswith("```"):
+                    content = content.rsplit("\n", 1)[0]
+                content = content.strip()
+
                 parsed = json.loads(content)
-                return parsed
-            except:
+
+                # Ensure all keys exist and are numbers
+                positive = float(parsed.get("positive", 0))
+                negative = float(parsed.get("negative", 0))
+                neutral = float(parsed.get("neutral", 0))
+
+                # If all zero, fall back to neutral
+                total = positive + negative + neutral
+                if total == 0:
+                    neutral = len(texts)
+
+                return SentimentResult(positive=positive, negative=negative, neutral=neutral)
+
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse sentiment JSON: {e}")
+                print(f"Raw content: {content[:500]}")
                 return SentimentResult(positive=0.0, negative=0.0, neutral=len(texts))
         else:
             return SentimentResult(positive=0.0, negative=0.0, neutral=len(texts))

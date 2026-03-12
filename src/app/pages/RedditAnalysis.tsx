@@ -69,6 +69,28 @@ export function RedditAnalysis() {
     return 0;
   };
 
+  // Helper function to normalize platform display for Reddit page
+  const normalizePlatform = (platform: string, metadata: Record<string, any> = {}): string => {
+    // Prefer detected_platform from metadata if available
+    const detectedPlatform = metadata.detected_platform;
+    if (detectedPlatform === 'reddit') return 'Reddit';
+    if (detectedPlatform === 'x') return 'X';
+    if (detectedPlatform) return detectedPlatform;
+
+    // Fallback to mapping
+    const platformMap: Record<string, string> = {
+      'reddit': 'Reddit',
+      'x': 'X',
+      'twitter': 'X',
+      'instagram': 'Instagram',
+      'tiktok': 'TikTok',
+      'youtube': 'YouTube',
+      'facebook': 'Facebook',
+    };
+
+    return platformMap[platform.toLowerCase()] || platform;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -230,7 +252,7 @@ export function RedditAnalysis() {
                       <div className="flex items-center gap-4 text-xs text-gray-500">
                         <span>{new Date(mention.timestamp).toLocaleDateString()}</span>
                         <span>•</span>
-                        <span>{mention.platform}</span>
+                        <span>{normalizePlatform(mention.platform, mention.platform_metadata)}</span>
                       </div>
                     </div>
                   ))}
