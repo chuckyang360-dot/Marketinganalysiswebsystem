@@ -155,8 +155,12 @@ const translations: Record<'zh' | 'en', Record<string, string>> = {
     'reddit.input.timeRange': '时间范围',
     'reddit.button.analyze': '开始挖掘',
     'reddit.result.title': 'Reddit热点分析报告',
-    'reddit.result.trending': '热门话题',
+    'reddit.result.topics': '热门话题',
+    'reddit.result.summary': '分析总结',
     'reddit.result.sentiment': '情感分析',
+    'reddit.result.mentions': '相关提及',
+    'reddit.result.alerts': '风险预警',
+    'reddit.result.trending': '热门话题',
     'reddit.result.opportunities': '潜在机会',
     
     // Twitter Analysis
@@ -396,8 +400,12 @@ const translations: Record<'zh' | 'en', Record<string, string>> = {
     'reddit.input.timeRange': 'Time Range',
     'reddit.button.analyze': 'Start Mining',
     'reddit.result.title': 'Reddit Trend Analysis Report',
-    'reddit.result.trending': 'Trending Topics',
+    'reddit.result.topics': 'Trending Topics',
+    'reddit.result.summary': 'Analysis Summary',
     'reddit.result.sentiment': 'Sentiment Analysis',
+    'reddit.result.mentions': 'Related Mentions',
+    'reddit.result.alerts': 'Risk Alerts',
+    'reddit.result.trending': 'Trending Topics',
     'reddit.result.opportunities': 'Opportunities',
     
     // Twitter Analysis

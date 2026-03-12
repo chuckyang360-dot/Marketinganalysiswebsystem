@@ -60,6 +60,15 @@ export function RedditAnalysis() {
   });
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
+  // Helper function to safely get nested values
+  const getSentimentValue = (value: any) => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'object' && value !== null) {
+      return value.positive || value.negative || value.neutral || 0;
+    }
+    return 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -143,7 +152,7 @@ export function RedditAnalysis() {
               type="submit"
               className="w-full bg-gradient-to-r from-orange-600 to-red-600"
               disabled={loading}
-            >
+              >
               {loading ? t('common.loading') : t('reddit.button.analyze')}
             </Button>
           </form>
@@ -161,8 +170,8 @@ export function RedditAnalysis() {
                 </div>
                 <div className="space-y-3">
                   {result.topics.map((topic: string, i: number) => (
-                    <div key={i} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                      <div className="font-medium mb-2">{topic}</div>
+                    <div key={i} className="p-3 bg-blue-50 rounded-lg text-white">
+                      <div className="font-medium mb-1">{topic}</div>
                     </div>
                   ))}
                 </div>
@@ -176,27 +185,27 @@ export function RedditAnalysis() {
                   <Heart className="w-5 h-5 text-pink-600" />
                   <h3 className="text-lg font-semibold">{t('reddit.result.sentiment')}</h3>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <div className="flex justify-between mb-2">
                     <span className="text-sm">积极</span>
-                    <span className="text-sm font-medium text-green-600">{result.sentiment.positive}%</span>
+                    <span className="text-sm font-medium text-green-600">{getSentimentValue(result.sentiment.positive)}%</span>
                   </div>
                   <div className="h-2 bg-green-600 rounded-full overflow-hidden">
-                    <div className="h-full bg-green-600" style={{ width: `${result.sentiment.positive}%` }} />
+                    <div className="h-full bg-green-600" style={{ width: `${getSentimentValue(result.sentiment.positive)}%` }} />
                   </div>
                   <div className="flex justify-between mb-2">
                     <span className="text-sm">中性</span>
-                    <span className="text-sm font-medium text-gray-600">{result.sentiment.neutral}%</span>
+                    <span className="text-sm font-medium text-gray-600">{getSentimentValue(result.sentiment.neutral)}%</span>
                   </div>
-                  <div className="h-2 bg-gray-600 rounded-full overflow-hidden">
-                    <div className="h-full bg-gray-600" style={{ width: `${result.sentiment.neutral}%` }} />
+                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-full bg-gray-600" style={{ width: `${getSentimentValue(result.sentiment.neutral)}%` }} />
                   </div>
                   <div className="flex justify-between mb-2">
                     <span className="text-sm">消极</span>
-                    <span className="text-sm font-medium text-red-600">{result.sentiment.negative}%</span>
+                    <span className="text-sm font-medium text-red-600">{getSentimentValue(result.sentiment.negative)}%</span>
                   </div>
                   <div className="h-2 bg-red-600 rounded-full overflow-hidden">
-                    <div className="h-full bg-red-600" style={{ width: `${result.sentiment.negative}%` }} />
+                    <div className="h-full bg-red-600" style={{ width: `${getSentimentValue(result.sentiment.negative)}%` }} />
                   </div>
                 </div>
               </Card>
@@ -207,15 +216,15 @@ export function RedditAnalysis() {
               <Card className="p-6">
                 <div className="flex items-center gap-3 mb-4">
                   <TrendingUp className="w-5 h-5 text-blue-600" />
-                  <h3 className="text-lg font-semibold">相关提及 ({result.mentions.length})</h3>
+                  <h3 className="text-lg font-semibold">{t('reddit.result.mentions')} ({result.mentions.length})</h3>
                 </div>
                 <div className="space-y-4">
                   {result.mentions.slice(0, 20).map((mention: any, i: number) => (
                     <div key={mention.id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
                       <div className="mb-3">
                         <a href={mention.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                          <div className="font-medium mb-1">{mention.author_username || mention.author || 'Unknown'}</div>
-                          <p className="text-sm text-gray-700 leading-relaxed">{mention.text}</p>
+                          <div className="font-medium mb-1">{mention.author_username || mention.author || '匿名'}</div>
+                          <p className="text-sm text-gray-700 leading-relaxed line-clamp-2">{mention.text}</p>
                         </a>
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500">
