@@ -453,5 +453,6 @@ export function History() {
     </div>
   </div>
 )}
-  );
+ </>
+ );
 }
