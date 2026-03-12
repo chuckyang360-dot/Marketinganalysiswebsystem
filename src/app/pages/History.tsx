@@ -453,7 +453,7 @@ export function History() {
       </div>
     </div>
   </div>
-  )}
-  </>
-);
+       )}
+    </div>
+  );
 }
