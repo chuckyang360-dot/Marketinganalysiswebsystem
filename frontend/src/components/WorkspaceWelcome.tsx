@@ -14,7 +14,7 @@ function callOnAnalyze(onAnalyze: ((query: string) => void) | undefined, query: 
 
 export function WorkspaceWelcome({ lang = 'zh', onAnalyze }: Props) {
   const [query, setQuery] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

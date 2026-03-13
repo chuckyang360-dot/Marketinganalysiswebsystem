@@ -60,7 +60,6 @@ export function WorkspaceSidebar({
   const welcomeNavItems = [
     { id: 'new', icon: '➕', label: text.newAnalysis, action: onNewAnalysis },
     { id: 'recent', icon: '🕐', label: text.recentAnalysis, action: () => {} },
-    { id: 'examples', icon: '📋', label: text.examples, action: onScrollToExamples },
     { id: 'home', icon: '🏠', label: text.backToHome, action: () => window.location.href = '/' }
   ];
 
