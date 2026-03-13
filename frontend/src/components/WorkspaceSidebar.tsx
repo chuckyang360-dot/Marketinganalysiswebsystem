@@ -1,32 +1,25 @@
 import { useState } from 'react';
 import type { FullAnalysisResponse } from '../types/analysis';
-import { reportCases } from '../data/reportCases';
 
 interface Props {
   currentResult?: FullAnalysisResponse | null;
-  staticCaseId?: string | null;
   onBackToWelcome?: () => void;
   onNewAnalysis?: () => void;
-  onSelect?: (query: string) => void;
   onScrollToSection?: (sectionId: string) => void;
-  onScrollToExamples?: () => void;
   lang?: 'zh' | 'en';
 }
 
 export function WorkspaceSidebar({
   currentResult,
-  staticCaseId,
   onBackToWelcome,
   onNewAnalysis,
   onScrollToSection,
-  onScrollToExamples,
   lang = 'zh'
 }: Props) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<string>('summary');
+  const [activeSection, setActiveSection] = useState<string>('section-executive');
 
-  const staticCase = staticCaseId ? reportCases.find(c => c.id === staticCaseId) : null;
-  const currentTitle = staticCase?.title || currentResult?.query || (lang === 'zh' ? '无' : 'None');
+  const currentTitle = currentResult?.query || (lang === 'zh' ? '无' : 'None');
 
   const t = {
     zh: {

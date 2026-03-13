@@ -3,9 +3,7 @@ import { Navbar } from '../components/Navbar';
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
 import { WorkspaceWelcome } from '../components/WorkspaceWelcome';
 import { WorkspaceResultView } from '../components/WorkspaceResultView';
-import { StaticCaseReport } from '../components/StaticCaseReport';
 import { runFullAnalysis } from '../services/api';
-import { reportCases } from '../data/reportCases';
 import type { FullAnalysisResponse } from '../types/analysis';
 import { useLanguage } from '../contexts/LanguageContext';
 
@@ -13,31 +11,12 @@ export function Workspace() {
   const { language: lang } = useLanguage();
   const [currentQuery, setCurrentQuery] = useState('');
   const [currentResult, setCurrentResult] = useState<FullAnalysisResponse | null>(null);
-  const [staticCaseId, setStaticCaseId] = useState<string | null>(null);
 
-  const handleCaseSelect = (caseId: string) => {
-    console.log("handleCaseSelect - caseId:", caseId);
-    console.log("reportCases ids:", reportCases.map(c => c.id));
-    const found = reportCases.find(c => c.id === caseId);
-    console.log("Found case:", found);
-    if (found) {
-      setStaticCaseId(caseId);
-    } else {
-      console.log("Case not found for caseId:", caseId);
-    }
-    setCurrentResult(null);
-  };
-
-  const handleExampleSelect = async (query: string) => {
+  const handleAnalyze = async (query: string) => {
     setCurrentQuery(query);
-    await runAnalysis(query);
-  };
-
-  const runAnalysis = async (q: string) => {
-    setCurrentQuery(q);
     setCurrentResult(null);
     try {
-      const data = await runFullAnalysis(q);
+      const data = await runFullAnalysis(query);
       setCurrentResult(data);
     } catch (error) {
       console.error('Analysis failed:', error);
@@ -47,7 +26,6 @@ export function Workspace() {
 
   const handleBackToWelcome = () => {
     setCurrentResult(null);
-    setStaticCaseId(null);
   };
 
   const handleNewAnalysis = () => {
@@ -61,13 +39,6 @@ export function Workspace() {
     }
   };
 
-  const handleScrollToExamples = () => {
-    const element = document.getElementById('examples');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
-
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-50 via-white to-blue-50 pt-16">
       <Navbar />
@@ -75,30 +46,19 @@ export function Workspace() {
         {/* Left Sidebar */}
         <WorkspaceSidebar
           currentResult={currentResult}
-          staticCaseId={staticCaseId}
           onBackToWelcome={handleBackToWelcome}
           onNewAnalysis={handleNewAnalysis}
-          onSelect={handleExampleSelect}
           onScrollToSection={handleScrollToSection}
-          onScrollToExamples={handleScrollToExamples}
           lang={lang}
         />
 
         {/* Right Main Area */}
         <div className="flex-1 overflow-y-auto">
-          {currentResult === null && staticCaseId === null ? (
+          {currentResult === null ? (
             <WorkspaceWelcome
               lang={lang}
-              onCaseSelect={handleCaseSelect}
-              onSelect={(query, result) => {
-                setCurrentQuery(query);
-                setCurrentResult(result);
-              }}
+              onAnalyze={handleAnalyze}
             />
-          ) : staticCaseId !== null ? (
-            <div className="min-h-full">
-              <StaticCaseReport caseId={staticCaseId} />
-            </div>
           ) : (
             <div className="min-h-full">
               {/* Minimal Query Display */}

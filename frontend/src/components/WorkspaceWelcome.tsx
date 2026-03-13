@@ -1,78 +1,25 @@
 import { useState } from 'react';
-import type { FullAnalysisResponse } from '../types/analysis';
 
 interface Props {
   lang?: 'zh' | 'en';
-  onCaseSelect?: (caseId: string) => void;
-  onSelect?: (query: string, result: FullAnalysisResponse) => void;
+  onAnalyze?: (query: string) => void;
 }
 
-// Helper function to safely call onCaseSelect
-function callOnCaseSelect(onCaseSelect: ((caseId: string) => void) | undefined, caseId: string) {
-  if (onCaseSelect) {
-    onCaseSelect(caseId);
+// Helper function to safely call onAnalyze
+function callOnAnalyze(onAnalyze: ((query: string) => void) | undefined, query: string) {
+  if (onAnalyze) {
+    onAnalyze(query);
   }
 }
 
-// Helper function to safely call onSelect
-function callOnSelect(onSelect: ((query: string, result: FullAnalysisResponse) => void) | undefined, query: string, result: FullAnalysisResponse) {
-  if (onSelect) {
-    onSelect(query, result);
-  }
-}
-
-export function WorkspaceWelcome({ lang = 'zh', onCaseSelect, onSelect }: Props) {
+export function WorkspaceWelcome({ lang = 'zh', onAnalyze }: Props) {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
-    setLoading(true);
-    try {
-      const mockResult: FullAnalysisResponse = {
-        status: 'success',
-        query: query,
-        reddit_analysis: {
-          summary: lang === 'zh' ? 'Reddit 分析结果' : 'Reddit analysis result',
-          sentiment: { positive: 65, negative: 20, neutral: 15 },
-          topics: [query, 'AI tools', 'coding assistant'],
-          alerts: [],
-          mentions: []
-        },
-        seo_analysis: {
-          summary: lang === 'zh' ? 'SEO 分析结果' : 'SEO analysis result',
-          sentiment: { positive: 70, negative: 10, neutral: 20 },
-          topics: [query, 'SEO strategy', 'content marketing'],
-          alerts: [],
-          mentions: []
-        },
-        gap_analysis: {
-          reddit_topics: [query, 'AI tools'],
-          seo_topics: [query, 'content marketing'],
-          opportunities: [
-            { keyword: query, gap_score: 2.5, demand: 5, supply: 2 }
-          ]
-        },
-        content_ideas: [
-          {
-            title: lang === 'zh' ? `如何使用 ${query} 进行高效编程` : `How to use ${query} for efficient programming`,
-            format: 'blog',
-            reason: lang === 'zh'
-              ? '用户在讨论中表示需要使用指南和教程内容'
-              : 'Users indicate they need usage guides and tutorials in discussions',
-            target_keyword: query
-          }
-        ]
-      };
-      await new Promise(resolve => setTimeout(() => resolve(mockResult), 500));
-      callOnSelect(onSelect, query, mockResult);
-    } catch (error) {
-      console.error('Analysis failed:', error);
-      alert(lang === 'zh' ? '分析失败，请稍后重试' : 'Analysis failed, please try again later');
-    } finally {
-      setLoading(false);
-    }
+    callOnAnalyze(onAnalyze, query);
   };
 
   const examples = [
@@ -145,11 +92,14 @@ export function WorkspaceWelcome({ lang = 'zh', onCaseSelect, onSelect }: Props)
 
         {/* Examples */}
         <div id="examples">
+          <div className="text-xs text-gray-500 uppercase tracking-wide mb-3">
+            {lang === 'zh' ? '示例' : 'Examples'}
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {examples.map((example) => (
               <button
                 key={example.id}
-                onClick={() => callOnCaseSelect(onCaseSelect, example.id)}
+                onClick={() => callOnAnalyze(onAnalyze, example.query)}
                 disabled={loading}
                 className="flex items-center gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-left"
               >
