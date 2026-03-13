@@ -39,6 +39,7 @@ export function WorkspaceSidebar({
       executiveSummary: '执行摘要',
       opportunityScore: '机会得分',
       redditAnalysis: 'Reddit分析',
+      xAnalysis: 'X 舆情',
       seoAnalysis: 'SEO分析',
       contentGap: '内容机会差距',
       contentIdeas: '内容创意'
@@ -53,6 +54,7 @@ export function WorkspaceSidebar({
       executiveSummary: 'Executive Summary',
       opportunityScore: 'Opportunity Score',
       redditAnalysis: 'Reddit Analysis',
+      xAnalysis: 'X Sentiment',
       seoAnalysis: 'SEO Analysis',
       contentGap: 'Content Gap',
       contentIdeas: 'Content Ideas'
@@ -73,6 +75,7 @@ export function WorkspaceSidebar({
     { id: 'summary', icon: '📊', label: text.executiveSummary },
     { id: 'score', icon: '🎯', label: text.opportunityScore },
     { id: 'reddit', icon: '💬', label: text.redditAnalysis },
+    { id: 'x', icon: 'X', label: text.xAnalysis },
     { id: 'seo', icon: '🔍', label: text.seoAnalysis },
     { id: 'gap', icon: '📈', label: text.contentGap },
     { id: 'ideas', icon: '💡', label: text.contentIdeas }

@@ -1,22 +1,17 @@
 """
-CEO Agent Service
+CEO Agent Service (Orchestrator)
 
-This module orchestrates the GlobalPulse AI marketing analysis system.
-It coordinates Reddit, SEO, Gap Analysis, and Content Idea agents into a unified workflow.
-
-Architecture:
-- CEO Agent orchestrates the full analysis pipeline
-- Calls Reddit Agent for demand-side analysis
-- Calls SEO Agent for supply-side analysis
-- Calls Gap Analysis Agent for opportunity identification
-- Calls Content Ideas Agent for actionable content suggestions
+架构：
+- Classify: 判断需要激活哪些 agents
+- Dispatch: 分发任务给各 agents
+- Aggregate: 聚合各 agent 结果为统一格式
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 import logging
-import re
 from .reddit_agent import reddit_agent
 from .seo_agent import seo_agent
+from .xai_search import xai_search_service
 from ..analysis.gap_analysis import analyze_keyword_gap
 from ..analysis.content_ideas import generate_content_ideas
 
@@ -94,134 +89,162 @@ def format_display_keyword(keyword: str) -> str:
 
 class CEOAgent:
     """
-    CEO Agent (MVP)
+    CEO Orchestrator
 
-    Purpose: Orchestrate the full marketing analysis workflow.
-
-    Responsibilities:
-    - Coordinate calls to Reddit, SEO, Gap, and Content Idea agents
-    - Provide unified entry point for the entire analysis pipeline
-    - Return structured output with all analysis results
-
-    Workflow:
-    1. Call Reddit Agent with query
-    2. Call SEO Agent with query
-    3. Extract topics from both results
-    4. Call Gap Analysis Agent with topics
-    5. Call Content Ideas Agent with topics and opportunities
+    职责：
+    - 分析查询，决定激活哪些 agents
+    - 分发任务给独立 agents
+    - 聚合结果为统一格式
     """
 
     def __init__(self):
-        """Initialize CEO agent with sub-agents."""
+        """Initialize CEO orchestrator with sub-agents."""
         self.reddit_agent = reddit_agent
         self.seo_agent = seo_agent
+        self.x_agent = xai_search_service
 
-    async def _call_reddit_agent(self, query: str, limit: int = 20) -> Dict[str, Any]:
+    # ========== 1. CLASSIFY LAYER ==========
+
+    def _should_enable_x_analysis(self, query: str) -> bool:
         """
-        Call Reddit Agent for demand-side analysis.
+        判断是否启用 X 分析
 
-        Args:
-            query: Search query
-            limit: Maximum number of results
+        支持的 provider：
+        - "mock": 使用 mock 数据
+        - "xai": 使用真实 X API
 
-        Returns:
-            Reddit analysis result
+        判断逻辑：
+        1. 检查 X_ANALYSIS_PROVIDER 配置
+        2. 只在 provider 为 "mock" 或 "xai" 时启用
         """
-        logger.info(f"[CEO_AGENT] Step 1: Calling Reddit Agent with query: '{query}'")
-        print(f"[CEO_AGENT] Step 1: Calling Reddit Agent with query: '{query}'")
+        from ..config import settings
 
-        result = await self.reddit_agent.run_analysis(
-            keywords=[query],
-            subreddits=None,
-            limit=limit
-        )
+        # 防空处理
+        provider = (settings.X_ANALYSIS_PROVIDER or "").lower()
 
-        logger.info(f"[CEO_AGENT] Step 1: Reddit Agent returned {len(result.get('mentions', []))} mentions")
-        print(f"[CEO_AGENT] Step 1: Reddit Agent returned {len(result.get('mentions', []))} mentions")
+        # 支持的 provider 集合
+        supported_providers = {"mock", "xai"}
 
-        return result
+        if provider not in supported_providers:
+            logger.warning(f"[CEO_CLASSIFY] Unsupported X_ANALYSIS_PROVIDER: '{provider}'. X analysis disabled.")
+            return False
 
-    async def _call_seo_agent(self, query: str, limit: int = 20) -> Dict[str, Any]:
+        logger.info(f"[CEO_CLASSIFY] X analysis enabled (provider={provider})")
+        return True
+
+    # ========== 2. DISPATCH LAYER ==========
+
+    async def _call_reddit_agent(self, query: str, limit: int) -> Dict[str, Any]:
+        """封装 Reddit agent 调用"""
+        logger.info(f"[CEO_DISPATCH] Calling Reddit Agent")
+        return await self.reddit_agent.run_analysis(keywords=[query], subreddits=None, limit=limit)
+
+    async def _call_seo_agent(self, query: str, limit: int) -> Dict[str, Any]:
+        """封装 SEO agent 调用"""
+        logger.info(f"[CEO_DISPATCH] Calling SEO Agent")
+        return await self.seo_agent.run_analysis(keywords=[query], site_url=None, limit=limit)
+
+    async def _call_x_agent(
+        self,
+        query: str,
+        limit: int = 20
+    ) -> Dict[str, Any]:
         """
-        Call SEO Agent for supply-side analysis.
+        封装 X Agent 调用（独立 agent）
 
-        Args:
-            query: Search query
-            limit: Maximum number of results
+        调用 x_provider.search_mentions，返回统一格式
 
-        Returns:
-            SEO analysis result
+        失败或无数据时返回标准空对象，确保 schema 一致
         """
-        logger.info(f"[CEO_AGENT] Step 2: Calling SEO Agent with query: '{query}'")
-        print(f"[CEO_AGENT] Step 2: Calling SEO Agent with query: '{query}'")
+        logger.info(f"[CEO_DISPATCH] Calling X Agent for: {query}")
 
-        result = await self.seo_agent.run_analysis(
-            keywords=[query],
-            site_url=None,
-            limit=limit
-        )
+        from ..providers.x_provider import x_provider
+        from ..config import settings
 
-        logger.info(f"[CEO_AGENT] Step 2: SEO Agent returned {len(result.get('mentions', []))} mentions")
-        print(f"[CEO_AGENT] Step 2: SEO Agent returned {len(result.get('mentions', []))} mentions")
+        try:
+            # 调用 X Provider 获取 mentions
+            mentions = await x_provider.search_mentions(query, limit)
 
-        return result
+            # 防空处理 mentions
+            processed_mentions = []
+            positive_count = 0
+            negative_count = 0
+            neutral_count = 0
+
+            for m in mentions:
+                if not m:
+                    continue
+
+                # 防空处理各字段
+                author_display = getattr(m, 'author_display_name', None) or getattr(m, 'author', '') or ''
+                author = getattr(m, 'author', '') or ''
+                likes = getattr(m, 'likes', 0)
+                comments = getattr(m, 'comments', 0)
+                shares = getattr(m, 'shares', 0)
+                sentiment = getattr(m, 'sentiment', 'neutral')
+                text = getattr(m, 'text', '')
+
+                # 统计情绪
+                if sentiment == "positive":
+                    positive_count += 1
+                elif sentiment == "negative":
+                    negative_count += 1
+                else:
+                    neutral_count += 1
+
+                processed_mentions.append({
+                    "text": text,
+                    "author": author_display or author,
+                    "engagement": likes + comments + shares,
+                    "sentiment": "积极" if sentiment == "positive" else
+                                "消极" if sentiment == "negative" else "中性"
+                })
+
+            # 构建返回结果（严格对齐后端 schema）
+            result = {
+                "mentions": processed_mentions,
+                "stats": {
+                    "total_mentions": len(processed_mentions),
+                    "positive_count": positive_count,
+                    "negative_count": negative_count,
+                    "neutral_count": neutral_count
+                },
+                "sentimentTrend": [],  # 第一版不生成
+                "influencers": [],  # 第一版不生成
+                "alerts": [],
+                "summary": f"关于 {query} 的 X 平台相关讨论",
+                "topics": []  # 第一版不提取
+            }
+
+            return result
+
+        except Exception as e:
+            logger.error(f"[CEO_DISPATCH] X agent failed: {str(e)}")
+            # 返回标准空对象，确保 schema 一致
+            return {
+                "mentions": [],
+                "stats": {"total_mentions": 0, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
+                "sentimentTrend": [],
+                "influencers": [],
+                "alerts": [f"X 分析失败: {str(e)}"],
+                "summary": f"无法分析 {query} 的 X 平台数据",
+                "topics": []
+            }
+
+    # ========== 3. AGGREGATE LAYER ==========
 
     async def _extract_topics(self, reddit_result: Dict, seo_result: Dict) -> tuple:
-        """
-        Extract topics from Reddit and SEO analysis results.
-
-        Args:
-            reddit_result: Reddit agent result
-            seo_result: SEO agent result
-
-        Returns:
-            Tuple of (reddit_topics, seo_topics)
-        """
+        """提取 topics（基于 reddit + seo，第一版不包含 x）"""
         reddit_topics = reddit_result.get("topics", [])
         seo_topics = seo_result.get("topics", [])
-
-        logger.info(f"[CEO_AGENT] Step 3: Extracted Reddit topics: {reddit_topics}")
-        print(f"[CEO_AGENT] Step 3: Extracted Reddit topics: {reddit_topics}")
-
-        logger.info(f"[CEO_AGENT] Step 3: Extracted SEO topics: {seo_topics}")
-        print(f"[CEO_AGENT] Step 3: Extracted SEO topics: {seo_topics}")
-
+        logger.info(f"[CEO_AGGREGATE] Reddit topics: {reddit_topics}")
+        logger.info(f"[CEO_AGGREGATE] SEO topics: {seo_topics}")
         return reddit_topics, seo_topics
 
     async def _call_gap_analysis(self, reddit_topics: List[str], seo_topics: List[str]) -> Dict[str, Any]:
-        """
-        Call Gap Analysis Agent to identify opportunities.
-
-        Args:
-            reddit_topics: Topics from Reddit Agent (demand side)
-            seo_topics: Topics from SEO Agent (supply side)
-
-        Returns:
-            Gap analysis result with formatted opportunities
-        """
-        logger.info(f"[CEO_AGENT] Step 4: Calling Gap Analysis with reddit_topics and seo_topics")
-        print(f"[CEO_AGENT] Step 4: Calling Gap Analysis with reddit_topics and seo_topics")
-
-        gap_result = analyze_keyword_gap(
-            reddit_topics=reddit_topics,
-            seo_topics=seo_topics
-        )
-
-        # Format keywords in opportunities for display
-        opportunities = gap_result.get("opportunities", [])
-        formatted_opportunities = [
-            {
-                **opp,
-                "keyword": format_display_keyword(opp.get("keyword", ""))
-            }
-            for opp in opportunities
-        ]
-        gap_result["opportunities"] = formatted_opportunities
-
-        logger.info(f"[CEO_AGENT] Step 4: Gap Analysis returned {len(formatted_opportunities)} opportunities")
-        print(f"[CEO_AGENT] Step 4: Gap Analysis returned {len(formatted_opportunities)} opportunities")
-
-        return gap_result
+        """调用 Gap Analysis"""
+        logger.info(f"[CEO_AGGREGATE] Calling Gap Analysis")
+        return analyze_keyword_gap(reddit_topics=reddit_topics, seo_topics=seo_topics)
 
     async def _call_content_ideas_agent(
         self,
@@ -229,37 +252,58 @@ class CEOAgent:
         seo_topics: List[str],
         opportunities: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        """
-        Call Content Ideas Agent to generate content suggestions.
-
-        Args:
-            reddit_topics: Topics from Reddit Agent (demand side)
-            seo_topics: Topics from SEO Agent (supply side)
-            opportunities: Opportunities from Gap Analysis (formatted)
-
-        Returns:
-            List of content ideas (flattened)
-        """
-        logger.info(f"[CEO_AGENT] Step 5: Calling Content Ideas Agent with {len(opportunities)} opportunities")
-        print(f"[CEO_AGENT] Step 5: Calling Content Ideas Agent with {len(opportunities)} opportunities")
-
+        """调用 Content Ideas Agent"""
+        logger.info(f"[CEO_AGGREGATE] Calling Content Ideas Agent")
         ideas_result = generate_content_ideas(
             reddit_topics=reddit_topics,
             seo_topics=seo_topics,
             opportunities=opportunities
         )
 
-        # Extract content_ideas list (flatten structure)
+        # 格式化 target_keyword
         content_ideas = ideas_result.get("content_ideas", [])
-
-        # Apply format_display_keyword to target_keyword in each idea
         for idea in content_ideas:
             idea["target_keyword"] = format_display_keyword(idea.get("target_keyword", ""))
 
-        logger.info(f"[CEO_AGENT] Step 5: Content Ideas Agent returned {len(content_ideas)} ideas")
-        print(f"[CEO_AGENT] Step 5: Content Ideas Agent returned {len(content_ideas)} ideas")
-
         return content_ideas
+
+    async def _aggregate_full_result(
+        self,
+        query: str,
+        agent_results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """聚合所有 agent 结果为统一格式"""
+        reddit_result = agent_results.get("reddit", {})
+        seo_result = agent_results.get("seo", {})
+        x_result = agent_results.get("x", {})
+
+        # 提取 topics
+        reddit_topics, seo_topics = await self._extract_topics(reddit_result, seo_result)
+
+        # Gap analysis（基于 reddit + seo，不包含 x）
+        gap_result = await self._call_gap_analysis(reddit_topics, seo_topics)
+
+        # Content ideas（基于 gap）
+        content_ideas = await self._call_content_ideas_agent(
+            reddit_topics,
+            seo_topics,
+            gap_result.get("opportunities", [])
+        )
+
+        # 构建统一结果
+        result = {
+            "query": query,
+            "reddit_analysis": reddit_result,
+            "seo_analysis": seo_result,
+            "x_analysis": x_result,  # X 作为独立结果
+            "gap_analysis": gap_result,
+            "content_ideas": content_ideas
+        }
+
+        logger.info(f"[CEO_AGGREGATE] Full analysis complete")
+        return result
+
+    # ========== 4. PUBLIC ENTRY ==========
 
     async def run_full_analysis(
         self,
@@ -267,69 +311,39 @@ class CEOAgent:
         limit: int = 20
     ) -> Dict[str, Any]:
         """
-        Run the full analysis pipeline with all agents.
+        运行完整分析流程（orchestrator 主入口）
 
-        Args:
-            query: Search query string
-            limit: Maximum results per agent
-
-        Returns:
-            Dictionary with unified analysis structure:
-            - query: Original query
-            - reddit_analysis: Reddit agent result
-            - seo_analysis: SEO agent result
-            - gap_analysis: Gap analysis result
-            - content_ideas: Content ideas result
+        流程：
+        1. Classify: 判断激活哪些 agents
+        2. Dispatch: 分发任务给 agents
+        3. Aggregate: 聚合结果
         """
-        # Log input
-        logger.info(f"[CEO_AGENT] Starting full analysis pipeline with query: '{query}'")
-        print(f"[CEO_AGENT] Starting full analysis pipeline with query: '{query}'")
+        logger.info(f"[CEO_ORCHESTRATOR] Starting analysis for: '{query}'")
 
-        # Step 1: Call Reddit Agent
-        reddit_result = await self._call_reddit_agent(query, limit)
+        # 1. CLASSIFY: 决定激活哪些 agents
+        enabled_agents = {"reddit", "seo"}  # 基础 agents 始终启用
 
-        # Step 2: Call SEO Agent
-        seo_result = await self._call_seo_agent(query, limit)
+        # 动态判断是否启用 X
+        if self._should_enable_x_analysis(query):
+            enabled_agents.add("x")
 
-        # Step 3: Extract topics from both results
-        reddit_topics, seo_topics = await self._extract_topics(reddit_result, seo_result)
+        logger.info(f"[CEO_CLASSIFY] Enabled agents: {enabled_agents}")
 
-        # Step 4: Call Gap Analysis Agent
-        gap_result = await self._call_gap_analysis(reddit_topics, seo_topics)
+        # 2. DISPATCH: 分发任务
+        agent_results = {}
 
-        # Step 5: Call Content Ideas Agent
-        content_ideas_result = await self._call_content_ideas_agent(
-            reddit_topics=reddit_topics,
-            seo_topics=seo_topics,
-            opportunities=gap_result.get("opportunities", [])
-        )
+        if "reddit" in enabled_agents:
+            agent_results["reddit"] = await self._call_reddit_agent(query, limit)
+        if "seo" in enabled_agents:
+            agent_results["seo"] = await self._call_seo_agent(query, limit)
+        if "x" in enabled_agents:
+            agent_results["x"] = await self._call_x_agent(query, limit)
 
-        # Build unified result
-        result = {
-            "query": query,
-            "reddit_analysis": {
-                "summary": reddit_result.get("summary", ""),
-                "sentiment": reddit_result.get("sentiment", {"positive": 0, "negative": 0, "neutral": 0}),
-                "topics": reddit_topics,
-                "alerts": reddit_result.get("alerts", []),
-                "mentions": reddit_result.get("mentions", [])
-            },
-            "seo_analysis": {
-                "summary": seo_result.get("summary", ""),
-                "sentiment": seo_result.get("sentiment", {"positive": 0, "negative": 0, "neutral": 0}),
-                "topics": seo_topics,
-                "alerts": seo_result.get("alerts", []),
-                "mentions": seo_result.get("mentions", [])
-            },
-            "gap_analysis": gap_result,
-            "content_ideas": content_ideas_result
-        }
-
-        logger.info(f"[CEO_AGENT] Full analysis complete for query: '{query}'")
-        print(f"[CEO_AGENT] Full analysis complete for query: '{query}'")
+        # 3. AGGREGATE: 聚合结果
+        result = await self._aggregate_full_result(query, agent_results)
 
         return result
 
 
-# Singleton instance for easy import
+# Singleton instance
 ceo_agent = CEOAgent()

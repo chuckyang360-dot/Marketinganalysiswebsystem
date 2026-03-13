@@ -56,11 +56,30 @@ export interface ContentIdea {
   target_keyword: string;
 }
 
+export interface XAnalysis {
+  summary: string;
+  stats: {
+    total_mentions: number;
+    positive_count: number;
+    negative_count: number;
+    neutral_count: number;
+  };
+  alerts: string[];
+  topics: string[];
+  mentions: {
+    text: string;
+    author: string;
+    engagement: number;
+    sentiment: string;
+  }[];
+}
+
 export interface FullAnalysisResponse {
-  status: string;
+  status?: string;
   query: string;
   reddit_analysis: RedditAnalysis;
   seo_analysis: SEOAnalysis;
+  x_analysis?: XAnalysis;
   gap_analysis: GapAnalysis;
   content_ideas: ContentIdea[];
 }
