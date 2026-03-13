@@ -7,31 +7,6 @@ interface Props {
 export function StrategySection({ data }: Props) {
   const { report } = data;
 
-  // Fallback data if report is not available
-  const strategyRecommendations = report?.strategy_recommendations || [
-    {
-      market_judgment: "处于成长型市场，建议采用差异化策略",
-      channels: ["Reddit", "产品官网", "专业博客"],
-      positioning: "专业可靠的解决方案提供商",
-      content_strategy: "建立专业内容矩阵，覆盖意识、考虑、决策全阶段",
-      timing: "立即启动，3 个月内建立完整内容体系",
-      format: "长文为主（60%），短视频辅助（30%），社交媒体互动（10%）"
-    }
-  ];
-
-  const methods = report?.methods || [
-    {
-      name: "建立用户信任体系",
-      steps: [
-        "收集并展示用户真实案例和评价",
-        "发布专业的产品白皮书和技术文档",
-        "建立透明的定价和服务承诺",
-        "提供产品试用和退款政策"
-      ],
-      metrics: ["信任度提升", "转化率提高", "客户留存率"]
-    }
-  ];
-
   return (
     <div id="section-strategy" className="space-y-6">
       {/* Strategy Recommendations Card */}
