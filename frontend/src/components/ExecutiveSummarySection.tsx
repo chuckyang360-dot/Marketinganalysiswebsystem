@@ -57,7 +57,7 @@ export function ExecutiveSummarySection({ data }: Props) {
           <h2 className="text-2xl font-bold text-gray-900">关键发现</h2>
         </div>
         <ul className="space-y-3">
-          {keyFindings.map((finding, idx) => (
+          {(keyFindings ?? []).map((finding, idx) => (
             <li key={idx} className="flex items-start gap-3 text-gray-700">
               <span className="text-purple-500 mt-1">•</span>
               <span>{finding}</span>

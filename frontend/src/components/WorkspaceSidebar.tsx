@@ -95,7 +95,7 @@ export function WorkspaceSidebar({
       {/* Welcome State Navigation */}
       {isWelcomeState && (
         <nav className="flex-1 flex flex-col items-center py-4 space-y-3">
-          {welcomeNavItems.map((item) => (
+          {(welcomeNavItems ?? []).map((item) => (
             <div key={item.id} className="relative">
               <button
                 onClick={() => item.action ? item.action() : null}
@@ -119,7 +119,7 @@ export function WorkspaceSidebar({
       {/* Result State Directory Navigation */}
       {!isWelcomeState && (
         <nav className="flex-1 flex flex-col py-3">
-          {resultSections.map((section) => (
+          {(resultSections ?? []).map((section) => (
             <button
               key={section.id}
               onClick={() => handleSectionClick(section.id)}

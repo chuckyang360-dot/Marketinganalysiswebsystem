@@ -38,7 +38,7 @@ export function Navbar() {
 
         {/* 中间导航 */}
         <nav className="flex items-center justify-center gap-8">
-          {navItems.map((item) => {
+          {(navItems ?? []).map((item) => {
             const active = location.pathname === item.to;
             return (
               <Link

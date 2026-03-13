@@ -36,7 +36,7 @@ export function AnalysisSection({ data }: Props) {
             Reddit 讨论话题（需求侧）
           </h3>
           <div className="flex flex-wrap gap-2">
-            {gap_analysis.reddit_topics.map((topic, idx) => (
+            {(gap_analysis.reddit_topics ?? []).map((topic, idx) => (
               <span key={idx} className="px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-sm">
                 {topic}
               </span>
@@ -50,7 +50,7 @@ export function AnalysisSection({ data }: Props) {
             SEO 内容话题（供给侧）
           </h3>
           <div className="flex flex-wrap gap-2">
-            {gap_analysis.seo_topics.map((topic, idx) => (
+            {(gap_analysis.seo_topics ?? []).map((topic, idx) => (
               <span key={idx} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm">
                 {topic}
               </span>
@@ -74,7 +74,7 @@ export function AnalysisSection({ data }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {gap_analysis.opportunities.map((opp, idx) => (
+                {(gap_analysis.opportunities ?? []).map((opp, idx) => (
                   <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
                     <td className="py-3 px-4 text-sm font-medium text-gray-900">{opp.keyword}</td>
                     <td className="py-3 px-4 text-center">

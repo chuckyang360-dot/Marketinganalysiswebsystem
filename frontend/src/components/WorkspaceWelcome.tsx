@@ -96,7 +96,7 @@ export function WorkspaceWelcome({ lang = 'zh', onAnalyze }: Props) {
             {lang === 'zh' ? '示例' : 'Examples'}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {examples.map((example) => (
+            {(examples ?? []).map((example) => (
               <button
                 key={example.id}
                 onClick={() => callOnAnalyze(onAnalyze, example.query)}

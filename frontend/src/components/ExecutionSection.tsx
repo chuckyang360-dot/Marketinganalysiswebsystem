@@ -93,7 +93,7 @@ export function ExecutionSection({ data }: Props) {
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">
-          {content_ideas.map((idea, idx) => (
+          {(content_ideas ?? []).map((idea, idx) => (
             <div key={idx} className="border border-gray-200 rounded-xl p-6 hover:border-blue-300 transition-colors">
               <div className="flex items-start justify-between mb-3">
                 <h3 className="text-lg font-semibold text-gray-900">{idea.title}</h3>
@@ -137,7 +137,7 @@ export function ExecutionSection({ data }: Props) {
                 文章 ({report.content_plan.articles.length})
               </h3>
               <div className="space-y-3">
-                {report.content_plan.articles.map((article, idx) => (
+                {(report.content_plan.articles ?? []).map((article, idx) => (
                   <div key={idx} className="p-4 bg-gray-50 rounded-xl">
                     <div className="text-sm font-medium text-gray-900 mb-1">{article.title}</div>
                     <div className="text-xs text-gray-500">{article.estimated_length || '未指定长度'}</div>
@@ -154,7 +154,7 @@ export function ExecutionSection({ data }: Props) {
                 社交媒体 ({report.content_plan.social_posts.length})
               </h3>
               <div className="space-y-3">
-                {report.content_plan.social_posts.map((post, idx) => (
+                {(report.content_plan.social_posts ?? []).map((post, idx) => (
                   <div key={idx} className="p-4 bg-gray-50 rounded-xl">
                     <div className="text-sm font-medium text-gray-900 mb-2">{post.platform}</div>
                     <div className="text-xs text-gray-600">{post.content}</div>
@@ -171,7 +171,7 @@ export function ExecutionSection({ data }: Props) {
                 视频创意 ({report.content_plan.video_ideas.length})
               </h3>
               <div className="space-y-3">
-                {report.content_plan.video_ideas.map((video, idx) => (
+                {(report.content_plan.video_ideas ?? []).map((video, idx) => (
                   <div key={idx} className="p-4 bg-gray-50 rounded-xl">
                     <div className="text-sm font-medium text-gray-900 mb-1">{video.title}</div>
                     <div className="text-xs text-gray-500">{video.estimated_duration || '未指定时长'}</div>
@@ -188,7 +188,7 @@ export function ExecutionSection({ data }: Props) {
                 海报创意 ({report.content_plan.poster_ideas.length})
               </h3>
               <div className="space-y-3">
-                {report.content_plan.poster_ideas.map((poster, idx) => (
+                {(report.content_plan.poster_ideas ?? []).map((poster, idx) => (
                   <div key={idx} className="p-4 bg-gray-50 rounded-xl">
                     <div className="text-sm font-medium text-gray-900 mb-2">{poster.headline}</div>
                     <div className="text-xs text-gray-600">{poster.key_message}</div>

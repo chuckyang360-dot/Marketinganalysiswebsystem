@@ -68,7 +68,7 @@ export function EvidenceSection({ data }: Props) {
 
         {/* Reddit Mentions */}
         <div className="space-y-3">
-          {redditMentions.slice(0, 5).map((mention, idx) => (
+          {(redditMentions ?? []).slice(0, 5).map((mention, idx) => (
             <div key={idx} className="p-4 bg-gray-50 rounded-xl">
               <div className="text-sm font-medium text-gray-900 mb-1">{mention.title}</div>
               <div className="text-xs text-gray-500">{mention.platform}</div>
@@ -107,7 +107,7 @@ export function EvidenceSection({ data }: Props) {
 
         {/* SEO Mentions */}
         <div className="space-y-3">
-          {seoMentions.slice(0, 5).map((mention, idx) => (
+          {(seoMentions ?? []).slice(0, 5).map((mention, idx) => (
             <div key={idx} className="p-4 bg-gray-50 rounded-xl">
               <div className="text-sm font-medium text-gray-900 mb-1">{mention.title}</div>
               <div className="text-xs text-gray-500">{mention.platform}</div>
@@ -147,7 +147,7 @@ export function EvidenceSection({ data }: Props) {
 
           {/* X Mentions */}
           <div className="space-y-3">
-            {xMentions.slice(0, 5).map((mention, idx) => (
+            {(xMentions ?? []).slice(0, 5).map((mention, idx) => (
               <div key={idx} className="p-4 bg-gray-50 rounded-xl">
                 <div className="text-sm font-medium text-gray-900 mb-1">{mention.author}</div>
                 <div className="text-sm text-gray-600 mb-2">{mention.text}</div>

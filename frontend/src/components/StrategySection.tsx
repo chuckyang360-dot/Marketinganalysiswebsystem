@@ -44,7 +44,7 @@ export function StrategySection({ data }: Props) {
         </div>
 
         <div className="space-y-6">
-          {strategyRecommendations.map((strategy, idx) => (
+          {(report?.strategy_recommendations ?? []).map((strategy, idx) => (
             <div key={idx} className="border border-gray-200 rounded-xl p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">市场判断</h3>
               <p className="text-gray-700 mb-4">{strategy.market_judgment}</p>
@@ -53,7 +53,7 @@ export function StrategySection({ data }: Props) {
                 <div className="mb-4">
                   <h4 className="text-sm font-semibold text-gray-600 mb-2">推荐渠道</h4>
                   <div className="flex flex-wrap gap-2">
-                    {strategy.channels.map((channel, chIdx) => (
+                    {(strategy.channels ?? []).map((channel, chIdx) => (
                       <span key={chIdx} className="px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-sm">
                         {channel}
                       </span>
@@ -104,14 +104,14 @@ export function StrategySection({ data }: Props) {
         </div>
 
         <div className="space-y-6">
-          {methods.map((method, idx) => (
+          {(report?.methods ?? []).map((method, idx) => (
             <div key={idx} className="border border-gray-200 rounded-xl p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">{method.name}</h3>
 
               <div className="mb-4">
                 <h4 className="text-sm font-semibold text-gray-600 mb-2">实施步骤</h4>
                 <ol className="space-y-2">
-                  {method.steps.map((step, stepIdx) => (
+                  {(method.steps ?? []).map((step, stepIdx) => (
                     <li key={stepIdx} className="flex items-start gap-3 text-sm text-gray-700">
                       <span className="text-blue-500 mt-0.5">{stepIdx + 1}.</span>
                       <span>{step}</span>
@@ -124,7 +124,7 @@ export function StrategySection({ data }: Props) {
                 <div>
                   <h4 className="text-sm font-semibold text-gray-600 mb-2">成功指标</h4>
                   <div className="flex flex-wrap gap-2">
-                    {method.metrics.map((metric, mIdx) => (
+                    {(method.metrics ?? []).map((metric, mIdx) => (
                       <span key={mIdx} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm">
                         {metric}
                       </span>
