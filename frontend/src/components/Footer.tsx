@@ -1,9 +1,7 @@
 import { Link } from 'react-router-dom';
 import { BarChart3, FileText, LayoutDashboard, Lightbulb, Globe, Book, HelpCircle, Mail, MapPin } from 'lucide-react';
-import { useLanguage } from '../contexts/LanguageContext';
 
 export function Footer() {
-  const { language: lang, t } = useLanguage();
 
   return (
     <footer className="border-t border-gray-200 bg-gray-50">

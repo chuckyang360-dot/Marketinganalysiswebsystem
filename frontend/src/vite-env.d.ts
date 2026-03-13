@@ -8,8 +8,3 @@ interface ImportMeta {
   readonly env: ImportMetaEnv
   readonly glob: ImportGlob[]
 }
-
-declare const VITE_API_BASE_URL: ImportMetaEnv.VITE_API_BASE_URL;
-
-export default ImportMeta;
-

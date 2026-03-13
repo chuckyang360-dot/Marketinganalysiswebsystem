@@ -1,4 +1,4 @@
-import { Search, TrendingUp, Globe, Users } from 'lucide-react';
+import { Search, Globe, Users } from 'lucide-react';
 import type { SEOAnalysis } from '../types/analysis';
 
 interface Props {

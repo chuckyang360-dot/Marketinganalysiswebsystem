@@ -17,6 +17,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   loading: boolean;
   login: (data: { user: User; access_token: string }) => void;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -52,8 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.removeUser();
   };
 
+  const register = async (name: string, email: string, password: string): Promise<void> => {
+    const response = await api.register(name, email, password);
+    login({ user: response.user, access_token: response.access_token });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

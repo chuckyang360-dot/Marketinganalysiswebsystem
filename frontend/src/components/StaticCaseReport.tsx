@@ -1,12 +1,10 @@
 import { reportCases } from '../data/reportCases';
-import type { ReportCase } from '../data/reportCases';
 
 interface Props {
   caseId: string;
-  lang?: 'zh' | 'en';
 }
 
-export function StaticCaseReport({ caseId, lang = 'zh' }: Props) {
+export function StaticCaseReport({ caseId }: Props) {
   const caseData = reportCases.find(c => c.id === caseId);
 
   if (!caseData) {
@@ -16,12 +14,6 @@ export function StaticCaseReport({ caseId, lang = 'zh' }: Props) {
       </div>
     );
   }
-
-  const priorityColor = {
-    high: 'bg-green-100 text-green-700',
-    medium: 'bg-yellow-100 text-yellow-700',
-    low: 'bg-gray-100 text-gray-700'
-  };
 
   const priorityLabel = {
     high: '高优先级',
@@ -157,7 +149,7 @@ export function StaticCaseReport({ caseId, lang = 'zh' }: Props) {
         <div className="space-y-3">
           {caseData.channelOpportunities.map((channel, idx) => (
             <div key={idx} className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-              <div className="flex-shrink-0 px-2 py-1 rounded-md text-xs font-medium {priorityColor[channel.priority]}">
+              <div className={`flex-shrink-0 px-2 py-1 rounded-md text-xs font-medium ${channel.priority === 'high' ? 'bg-green-100 text-green-700' : channel.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'}`}>
                 {priorityLabel[channel.priority]}
               </div>
               <div className="flex-1">

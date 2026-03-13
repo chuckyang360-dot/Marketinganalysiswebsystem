@@ -97,7 +97,7 @@ export function Workspace() {
             />
           ) : staticCaseId !== null ? (
             <div className="min-h-full">
-              <StaticCaseReport caseId={staticCaseId} lang={lang} />
+              <StaticCaseReport caseId={staticCaseId} />
             </div>
           ) : (
             <div className="min-h-full">
@@ -116,7 +116,7 @@ export function Workspace() {
                 </div>
               </div>
               <div className="p-6">
-                <WorkspaceResultView data={currentResult} />
+                {currentResult && <WorkspaceResultView data={currentResult} />}
               </div>
             </div>
           )}

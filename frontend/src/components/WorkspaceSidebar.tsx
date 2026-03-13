@@ -18,7 +18,6 @@ export function WorkspaceSidebar({
   staticCaseId,
   onBackToWelcome,
   onNewAnalysis,
-  onSelect,
   onScrollToSection,
   onScrollToExamples,
   lang = 'zh'

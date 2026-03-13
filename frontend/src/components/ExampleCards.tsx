@@ -43,7 +43,7 @@ interface ExampleCardProps {
   onClick: () => void;
 }
 
-function ExampleCard({ icon, title, description, query, onClick }: ExampleCardProps) {
+function ExampleCard({ icon, title, description, onClick }: ExampleCardProps) {
   return (
     <button
       onClick={onClick}

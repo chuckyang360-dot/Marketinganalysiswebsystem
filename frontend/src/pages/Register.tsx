@@ -9,7 +9,7 @@ export function Register() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { register, login } = useAuth();
+  const { register } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -31,10 +31,7 @@ export function Register() {
     try {
       await register(name, email, password);
       alert('注册成功');
-      console.log('Register successful - calling login');
-      // After registration, auto-login to get the token
-      await login(email, password);
-      console.log('Login successful - navigating to workspace');
+      console.log('Register successful - navigating to workspace');
       navigate('/workspace');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');

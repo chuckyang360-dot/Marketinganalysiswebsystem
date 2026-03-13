@@ -1,5 +1,3 @@
-import { type } from 'react';
-
 interface Props {
   query: string;
   onBack?: () => void;

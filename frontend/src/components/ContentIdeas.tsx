@@ -57,7 +57,7 @@ interface FormatSectionProps {
   ideas: ContentIdea[];
 }
 
-function FormatSection({ format, icon, label, ideas }: FormatSectionProps) {
+function FormatSection({ icon, label, ideas }: FormatSectionProps) {
   return (
     <div>
       <div className="flex items-center gap-2 mb-4">

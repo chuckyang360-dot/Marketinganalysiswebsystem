@@ -4,7 +4,21 @@ import type { FullAnalysisResponse } from '../types/analysis';
 interface Props {
   lang?: 'zh' | 'en';
   onCaseSelect?: (caseId: string) => void;
-  onSelect?: (query: string, result?: FullAnalysisResponse) => void;
+  onSelect?: (query: string, result: FullAnalysisResponse) => void;
+}
+
+// Helper function to safely call onCaseSelect
+function callOnCaseSelect(onCaseSelect: ((caseId: string) => void) | undefined, caseId: string) {
+  if (onCaseSelect) {
+    onCaseSelect(caseId);
+  }
+}
+
+// Helper function to safely call onSelect
+function callOnSelect(onSelect: ((query: string, result: FullAnalysisResponse) => void) | undefined, query: string, result: FullAnalysisResponse) {
+  if (onSelect) {
+    onSelect(query, result);
+  }
 }
 
 export function WorkspaceWelcome({ lang = 'zh', onCaseSelect, onSelect }: Props) {
@@ -52,7 +66,7 @@ export function WorkspaceWelcome({ lang = 'zh', onCaseSelect, onSelect }: Props)
         ]
       };
       await new Promise(resolve => setTimeout(() => resolve(mockResult), 500));
-      onSelect(query, mockResult);
+      callOnSelect(onSelect, query, mockResult);
     } catch (error) {
       console.error('Analysis failed:', error);
       alert(lang === 'zh' ? '分析失败，请稍后重试' : 'Analysis failed, please try again later');
@@ -135,7 +149,7 @@ export function WorkspaceWelcome({ lang = 'zh', onCaseSelect, onSelect }: Props)
             {examples.map((example) => (
               <button
                 key={example.id}
-                onClick={() => onCaseSelect?.(example.id)}
+                onClick={() => callOnCaseSelect(onCaseSelect, example.id)}
                 disabled={loading}
                 className="flex items-center gap-2 p-3 bg-white rounded-lg border border-gray-200 hover:border-blue-300 hover:shadow-sm transition-all text-left"
               >
