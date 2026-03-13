@@ -5,7 +5,19 @@ interface Props {
 }
 
 export function AnalysisSection({ data }: Props) {
-  const { gap_analysis, reddit_analysis } = data;
+  // 添加空值保护
+  const gap_analysis = data?.gap_analysis || {
+    reddit_topics: [],
+    seo_topics: [],
+    opportunities: []
+  };
+  const reddit_analysis = data?.reddit_analysis || {
+    summary: '',
+    sentiment: { positive: 0, negative: 0, neutral: 0 },
+    topics: [],
+    alerts: [],
+    mentions: []
+  };
 
   return (
     <div id="section-analysis" className="space-y-6">

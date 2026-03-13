@@ -3,6 +3,8 @@ import type { FullAnalysisResponse } from '../types/analysis';
 const API_BASE_URL = 'http://localhost:8000';
 
 export async function runFullAnalysis(query: string): Promise<FullAnalysisResponse> {
+  console.log("API_FULL_ANALYSIS_REQUEST", { query, limit: 20 });
+
   const response = await fetch(`${API_BASE_URL}/api/full-analysis`, {
     method: 'POST',
     headers: {
@@ -11,11 +13,37 @@ export async function runFullAnalysis(query: string): Promise<FullAnalysisRespon
     body: JSON.stringify({ query, limit: 20 }),
   });
 
+  console.log("API_FULL_ANALYSIS_RESPONSE_STATUS", response.status, response.ok);
+
   if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
+    const errorText = await response.text();
+    console.error("API_FULL_ANALYSIS_ERROR", response.status, errorText);
+    throw new Error(`API error: ${response.status} - ${errorText}`);
   }
 
-  return response.json();
+  const text = await response.text();
+  console.log("API_FULL_ANALYSIS_RESPONSE_TEXT", text.substring(0, 500));
+
+  let data: FullAnalysisResponse;
+  try {
+    data = JSON.parse(text);
+  } catch (parseError) {
+    console.error("API_FULL_ANALYSIS_PARSE_ERROR", parseError);
+    throw new Error('Failed to parse API response as JSON');
+  }
+
+  console.log("API_FULL_ANALYSIS_RESPONSE", data);
+
+  // 验证必要字段存在
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid response: data is null or not an object');
+  }
+
+  if (!data.query || !data.reddit_analysis || !data.seo_analysis) {
+    throw new Error('Invalid response: missing required fields (query, reddit_analysis, seo_analysis)');
+  }
+
+  return data;
 }
 
 // Auth API functions
