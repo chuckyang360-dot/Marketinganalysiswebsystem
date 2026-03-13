@@ -70,8 +70,21 @@ export function EvidenceSection({ data }: Props) {
         <div className="space-y-3">
           {(redditMentions ?? []).slice(0, 5).map((mention, idx) => (
             <div key={idx} className="p-4 bg-gray-50 rounded-xl">
-              <div className="text-sm font-medium text-gray-900 mb-1">{mention.title}</div>
-              <div className="text-xs text-gray-500">{mention.platform}</div>
+              <div className="text-sm font-medium text-gray-900 mb-1">{mention.title || mention.text || ''}</div>
+              <div className="text-xs text-gray-500">{mention.platform || 'Reddit'}</div>
+              {mention.text && mention.text.length > 100 && (
+                <div className="text-xs text-gray-600 mt-2 truncate">{mention.text.substring(0, 100)}...</div>
+              )}
+              {mention.url && (
+                <a
+                  href={mention.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline mt-1 block"
+                >
+                  查看原文
+                </a>
+              )}
             </div>
           ))}
         </div>
@@ -109,8 +122,21 @@ export function EvidenceSection({ data }: Props) {
         <div className="space-y-3">
           {(seoMentions ?? []).slice(0, 5).map((mention, idx) => (
             <div key={idx} className="p-4 bg-gray-50 rounded-xl">
-              <div className="text-sm font-medium text-gray-900 mb-1">{mention.title}</div>
-              <div className="text-xs text-gray-500">{mention.platform}</div>
+              <div className="text-sm font-medium text-gray-900 mb-1">{mention.title || mention.text || ''}</div>
+              <div className="text-xs text-gray-500">{mention.platform || 'Web'}</div>
+              {mention.url && (
+                <a
+                  href={mention.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 hover:underline mt-1 block"
+                >
+                  查看原文
+                </a>
+              )}
+              {mention.text && mention.text.length > 100 && (
+                <div className="text-xs text-gray-600 mt-2 truncate">{mention.text.substring(0, 100)}...</div>
+              )}
             </div>
           ))}
         </div>
