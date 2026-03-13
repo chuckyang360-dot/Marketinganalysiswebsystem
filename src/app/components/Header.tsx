@@ -1,4 +1,4 @@
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Globe, Menu, X, LogOut } from 'lucide-react';
@@ -14,21 +14,21 @@ export function Header() {
 
   const isActive = (path: string) => location.pathname === path;
 
-  const navLinks = [
-    { path: '/', label: t('nav.home') },
-    { path: '/seo', label: t('nav.seo') },
-    { path: '/reddit', label: t('nav.reddit') },
-    { path: '/twitter', label: t('nav.twitter') },
-    { path: '/content', label: t('nav.content') },
-    { path: '/summary', label: t('nav.summary') },
-    { path: '/history', label: t('nav.history') },
-    { path: '/about', label: t('nav.about') },
-  ];
+  const displayName = user?.name || user?.email?.split('@')[0] || 'User';
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
+
+  const navLinks = [
+    { path: '/', label: t('nav.home') },
+    { path: '/product', label: t('nav.product') || 'Product' },
+    { path: '/cases', label: t('nav.cases') || 'Cases' },
+    { path: '/about', label: t('nav.about') },
+  ];
+
+  const isWorkspacePage = location.pathname.startsWith('/workspace');
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-gray-200">
@@ -41,54 +41,65 @@ export function Header() {
           <span className="text-xl font-semibold">GlobalPulseAI</span>
         </Link>
 
-        {/* Desktop Navigation */}
-        <div className="hidden lg:flex items-center gap-8">
-          {navLinks.map((link) => (
-            <Link
-              key={link.path}
-              to={link.path}
-              className={`text-sm transition-colors ${
-                isActive(link.path)
-                  ? 'text-blue-600'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
-        </div>
+        {/* Desktop Navigation - Not on workspace pages */}
+        {!isWorkspacePage && (
+          <div className="hidden lg:flex items-center gap-8">
+            {navLinks.map((link) => (
+              <Link
+                key={link.path}
+                to={link.path}
+                className={`text-sm transition-colors ${
+                  isActive(link.path)
+                    ? 'text-blue-600'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        )}
 
         {/* Actions */}
         <div className="flex items-center gap-4">
-          {/* Language Toggle */}
-          <button
-            onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
-            aria-label="Toggle language"
-          >
-            <Globe className="w-4 h-4 text-gray-600" />
-            <span className="text-sm text-gray-600">{language === 'zh' ? '中文' : 'EN'}</span>
-          </button>
-
-          {/* Login/Register - Desktop */}
-          {!isAuthenticated ? (
-            <div className="hidden lg:flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
-                {t('nav.login')}
-              </Button>
-              <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
-                {t('nav.register')}
-              </Button>
-            </div>
-          ) : (
-            <div className="hidden lg:flex items-center gap-3">
-              <span className="text-sm text-gray-700 font-medium">{user?.name || user?.email}</span>
-              <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-600 hover:text-red-600">
-                <LogOut className="w-4 h-4 mr-1" />
-                {t('nav.logout')}
-              </Button>
-            </div>
+          {/* Language Toggle - Only on non-workspace pages */}
+          {!isWorkspacePage && (
+            <button
+              onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              aria-label="Toggle language"
+            >
+              <Globe className="w-4 h-4 text-gray-600" />
+              <span className="text-sm text-gray-600">{language === 'zh' ? '中文' : 'EN'}</span>
+            </button>
           )}
+
+          {/* Desktop Actions */}
+          <div className="hidden lg:flex items-center gap-2">
+            {!isAuthenticated ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => navigate('/login')}>
+                  {t('nav.login')}
+                </Button>
+                <Button size="sm" className="bg-gradient-to-r from-blue-600 to-purple-600" onClick={() => navigate('/register')}>
+                  {t('nav.register')}
+                </Button>
+              </>
+            ) : (
+              <>
+                {!isWorkspacePage && (
+                  <Button variant="ghost" size="sm" onClick={() => navigate('/workspace')}>
+                    {t('nav.workspace') || 'Workspace'}
+                  </Button>
+                )}
+                <span className="text-sm text-gray-700 font-medium">{displayName}</span>
+                <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-600 hover:text-red-600">
+                  <LogOut className="w-4 h-4 mr-1" />
+                  {t('nav.logout')}
+                </Button>
+              </>
+            )}
+          </div>
 
           {/* Mobile Menu Toggle */}
           <button
@@ -105,7 +116,7 @@ export function Header() {
       {mobileMenuOpen && (
         <div className="lg:hidden bg-white border-t border-gray-200">
           <div className="px-6 py-4 space-y-3">
-            {navLinks.map((link) => (
+            {!isWorkspacePage && navLinks.map((link) => (
               <Link
                 key={link.path}
                 to={link.path}
@@ -131,7 +142,12 @@ export function Header() {
                 </>
               ) : (
                 <div className="space-y-2">
-                  <div className="text-sm text-gray-700 font-medium py-2">{user?.name || user?.email}</div>
+                  {!isWorkspacePage && (
+                    <Button variant="outline" className="w-full" onClick={() => navigate('/workspace')}>
+                      {t('nav.workspace') || 'Workspace'}
+                    </Button>
+                  )}
+                  <div className="text-sm text-gray-700 font-medium py-2">{displayName}</div>
                   <Button variant="outline" className="w-full text-gray-600 hover:text-red-600" onClick={handleLogout}>
                     <LogOut className="w-4 h-4 mr-1" />
                     {t('nav.logout')}

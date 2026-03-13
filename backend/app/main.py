@@ -13,6 +13,9 @@ from .config import settings
 from .database import init_db
 from .auth.routes import router as auth_router
 from .api.x_analysis.routes import router as x_analysis_router
+from .api.gap_analysis import router as gap_analysis_router
+from .api.content_ideas import router as content_ideas_router
+from .api.ceo_agent import router as ceo_agent_router
 
 # Import all models to ensure they're registered with Base.metadata
 # This must be done before calling init_db()
@@ -70,6 +73,9 @@ from .api.reddit_analysis import router as reddit_analysis_router
 from .api.seo_analysis import router as seo_analysis_router
 app.include_router(reddit_analysis_router, prefix="/api/reddit-analysis", tags=["Reddit Analysis"])
 app.include_router(seo_analysis_router, prefix="/api/seo-analysis", tags=["SEO Analysis"])
+app.include_router(gap_analysis_router, prefix="/api/gap-analysis", tags=["Gap Analysis"])
+app.include_router(content_ideas_router, prefix="/api/content-ideas", tags=["Content Ideas"])
+app.include_router(ceo_agent_router, prefix="/api/full-analysis", tags=["Full Analysis"])
 
 # Static files (for frontend integration) - only mount if directory exists
 # This allows backend to work independently of frontend (deployed on Vercel)

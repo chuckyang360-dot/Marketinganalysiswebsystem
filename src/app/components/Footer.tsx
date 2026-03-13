@@ -1,4 +1,4 @@
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function Footer() {
@@ -26,23 +26,13 @@ export function Footer() {
             <h3 className="font-semibold mb-4">{t('footer.product')}</h3>
             <ul className="space-y-2">
               <li>
-                <Link to="/seo" className="text-sm text-gray-600 hover:text-gray-900">
-                  {t('nav.seo')}
+                <Link to="/product" className="text-sm text-gray-600 hover:text-gray-900">
+                  {t('nav.product') || 'Product'}
                 </Link>
               </li>
               <li>
-                <Link to="/reddit" className="text-sm text-gray-600 hover:text-gray-900">
-                  {t('nav.reddit')}
-                </Link>
-              </li>
-              <li>
-                <Link to="/twitter" className="text-sm text-gray-600 hover:text-gray-900">
-                  {t('nav.twitter')}
-                </Link>
-              </li>
-              <li>
-                <Link to="/content" className="text-sm text-gray-600 hover:text-gray-900">
-                  {t('nav.content')}
+                <Link to="/cases" className="text-sm text-gray-600 hover:text-gray-900">
+                  {t('nav.cases') || 'Cases'}
                 </Link>
               </li>
             </ul>

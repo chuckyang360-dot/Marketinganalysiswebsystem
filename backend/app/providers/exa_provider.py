@@ -7,10 +7,14 @@ It implements the unified BaseProvider interface.
 
 import httpx
 import re
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from .base import BaseProvider, Mention, SearchResult, ProviderError
 from ..config import settings
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class ExaProvider(BaseProvider):
@@ -61,22 +65,64 @@ class ExaProvider(BaseProvider):
         Returns:
             SearchResult with list of Mention objects (with metadata)
         """
+        logger.info(f"[EXA_PROVIDER] Search called with query: '{query}', limit: {limit}")
+        print(f"[EXA_PROVIDER] Search called with query: '{query}', limit: {limit}")
+
         if not await self.validate_query(query):
+            logger.warning(f"[EXA_PROVIDER] Query validation failed for: '{query}'")
+            print(f"[EXA_PROVIDER] Query validation failed for: '{query}'")
             return SearchResult(mentions=[], total_count=0, has_more=False)
 
         try:
             # Search URLs using Exa
+            logger.info(f"[EXA_PROVIDER] Calling Exa API to search URLs...")
+            print(f"[EXA_PROVIDER] Calling Exa API to search URLs...")
+
             search_response = await self._search_urls(query, limit)
 
-            if not search_response or not search_response.get("results"):
+            if not search_response:
+                logger.error(f"[EXA_PROVIDER] Exa API returned empty response")
+                print(f"[EXA_PROVIDER] Exa API returned empty response")
                 return SearchResult(mentions=[], total_count=0, has_more=False)
 
+            results = search_response.get("results", [])
+            logger.info(f"[EXA_PROVIDER] Exa API returned {len(results)} results")
+            print(f"[EXA_PROVIDER] Exa API returned {len(results)} results")
+
+            if not results:
+                logger.warning(f"[EXA_PROVIDER] No results found for query: '{query}'")
+                print(f"[EXA_PROVIDER] No results found for query: '{query}'")
+                return SearchResult(mentions=[], total_count=0, has_more=False)
+
+            # Print raw results for debugging (first 3)
+            sample_size = min(3, len(results))
+            logger.info(f"[EXA_PROVIDER] Raw results (first {sample_size}):")
+            print(f"[EXA_PROVIDER] Raw results (first {sample_size}):")
+            for i in range(sample_size):
+                result = results[i]
+                result_info = {
+                    "url": result.get("url", "")[:100],
+                    "title": result.get("title", "")[:100],
+                    "text": result.get("text", "")[:100]
+                }
+                logger.info(f"[EXA_PROVIDER]   Result {i+1}: {result_info}")
+                print(f"[EXA_PROVIDER]   Result {i+1}: {result_info}")
+
             # Extract content from discovered URLs
+            logger.info(f"[EXA_PROVIDER] Creating mention objects from results...")
+            print(f"[EXA_PROVIDER] Creating mention objects from results...")
+
             mentions = []
-            for result in search_response["results"][:limit]:
+            for i, result in enumerate(results[:limit]):
                 mention = await self._create_mention_from_result(result)
                 if mention:
                     mentions.append(mention)
+                    logger.info(f"[EXA_PROVIDER]   Created mention {i+1}: url={mention.url[:80]}, text={mention.text[:80] if mention.text else 'N/A'}")
+                else:
+                    logger.warning(f"[EXA_PROVIDER]   Failed to create mention from result {i+1}")
+
+            logger.info(f"[EXA_PROVIDER] Created {len(mentions)} mentions from {len(results)} results")
+            print(f"[EXA_PROVIDER] Created {len(mentions)} mentions from {len(results)} results")
 
             return SearchResult(
                 mentions=mentions,
@@ -85,10 +131,16 @@ class ExaProvider(BaseProvider):
             )
 
         except httpx.TimeoutException:
+            logger.error(f"[EXA_PROVIDER] Exa API request timed out after {self.DEFAULT_TIMEOUT}s")
+            print(f"[EXA_PROVIDER] Exa API request timed out after {self.DEFAULT_TIMEOUT}s")
             raise ProviderError(f"Exa API request timed out after {self.DEFAULT_TIMEOUT}s")
         except httpx.RequestError as e:
+            logger.error(f"[EXA_PROVIDER] Network error connecting to Exa API: {str(e)}")
+            print(f"[EXA_PROVIDER] Network error connecting to Exa API: {str(e)}")
             raise ProviderError(f"Network error connecting to Exa API: {str(e)}")
         except Exception as e:
+            logger.error(f"[EXA_PROVIDER] Unexpected error with Exa API: {str(e)}")
+            print(f"[EXA_PROVIDER] Unexpected error with Exa API: {str(e)}")
             raise ProviderError(f"Unexpected error with Exa API: {str(e)}")
 
     async def _search_urls(self, query: str, limit: int) -> Dict[str, Any]:
@@ -177,11 +229,18 @@ class ExaProvider(BaseProvider):
             title = result.get("title", "")
             snippet = result.get("text", "")
 
+            logger.debug(f"[EXA_PROVIDER] _create_mention_from_result: url={url[:80]}, title={title[:80] if title else 'N/A'}")
+            print(f"[EXA_PROVIDER] _create_mention_from_result: url={url[:80]}, title={title[:80] if title else 'N/A'}")
+
             if not url:
+                logger.warning("[EXA_PROVIDER] No URL found in result, skipping")
+                print("[EXA_PROVIDER] No URL found in result, skipping")
                 return None
 
             # Detect platform
             platform = self._detect_platform_from_url(url)
+            logger.debug(f"[EXA_PROVIDER] Detected platform: {platform}")
+            print(f"[EXA_PROVIDER] Detected platform: {platform}")
 
             # Extract author info based on platform
             author_info = {"author": "", "author_username": "", "author_display_name": ""}
@@ -200,6 +259,10 @@ class ExaProvider(BaseProvider):
             # Use the title as the text if snippet is empty
             text = snippet if snippet else title
 
+            if not text:
+                logger.warning(f"[EXA_PROVIDER] No text or title found for URL: {url}")
+                print(f"[EXA_PROVIDER] No text or title found for URL: {url}")
+
             # Parse URL for potential subreddits or other metadata
             metadata = {
                 "exa_result": result,
@@ -213,6 +276,8 @@ class ExaProvider(BaseProvider):
                 subreddit_match = re.search(r'/r/([^/]+)', url)
                 if subreddit_match:
                     metadata["subreddit"] = subreddit_match.group(1)
+                    logger.debug(f"[EXA_PROVIDER] Extracted subreddit: {subreddit_match.group(1)}")
+                    print(f"[EXA_PROVIDER] Extracted subreddit: {subreddit_match.group(1)}")
 
             # Create mention structure
             mention = Mention(
@@ -235,11 +300,15 @@ class ExaProvider(BaseProvider):
                 raw=result
             )
 
+            logger.debug(f"[EXA_PROVIDER] Created mention object: id={mention.id}, platform={mention.platform}, text_length={len(mention.text) if mention.text else 0}")
+            print(f"[EXA_PROVIDER] Created mention object: id={mention.id}, platform={mention.platform}, text_length={len(mention.text) if mention.text else 0}")
+
             return mention
 
         except Exception as e:
             # Log error but don't fail the entire batch
-            print(f"Error creating mention from result: {e}")
+            logger.error(f"[EXA_PROVIDER] Error creating mention from result: {e}")
+            print(f"[EXA_PROVIDER] Error creating mention from result: {e}")
             return None
 
     def _generate_id(self, result: Dict[str, Any]) -> str:

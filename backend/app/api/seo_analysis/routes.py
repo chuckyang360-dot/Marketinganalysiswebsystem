@@ -58,8 +58,9 @@ async def search_seo(
             limit=request.limit
         )
 
-        # Convert mentions to dict format for frontend
-        mentions_data = [mention.to_dict() for mention in result["mentions"]]
+        # result["mentions"] is already converted to dict format in seo_agent.py
+        # No need to call .to_dict() again
+        mentions_data = result["mentions"]
 
         return {
             "summary": result["summary"],

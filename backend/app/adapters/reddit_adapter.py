@@ -12,9 +12,13 @@ Architecture:
 
 from typing import List, Optional
 from datetime import datetime
+import logging
 from ..providers.base import Mention
 from ..config import settings
 import re
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class RedditAdapter:
@@ -48,16 +52,39 @@ class RedditAdapter:
         Returns:
             List of Mention objects (filtered to reddit.com only)
         """
+        logger.info(f"[REDDIT_ADAPTER] search_mentions called with query: '{query}', limit: {limit}")
+        print(f"[REDDIT_ADAPTER] search_mentions called with query: '{query}', limit: {limit}")
+
         # Use provider to search raw data
         search_result = await self.provider.search_mentions(query, limit)
 
+        raw_mentions = search_result.mentions
+        logger.info(f"[REDDIT_ADAPTER] Provider returned {len(raw_mentions)} mentions")
+        print(f"[REDDIT_ADAPTER] Provider returned {len(raw_mentions)} mentions")
+
         # Filter results: only include mentions from reddit.com
         filtered_mentions = []
-        for mention in search_result.mentions:
-            if self._is_reddit_source(mention):
+        filtered_count = 0
+        non_reddit_count = 0
+
+        for i, mention in enumerate(raw_mentions):
+            url = getattr(mention, 'url', '') or ''
+            is_reddit = self._is_reddit_source(mention)
+
+            logger.debug(f"[REDDIT_ADAPTER] Mention {i+1}: url={url[:80]}, is_reddit={is_reddit}")
+
+            if is_reddit:
                 # Enhance with Reddit-specific metadata
                 enhanced_mention = self._enhance_reddit_mention(mention)
                 filtered_mentions.append(enhanced_mention)
+                filtered_count += 1
+                logger.debug(f"[REDDIT_ADAPTER] Mention {i+1} PASSED Reddit filter and was enhanced")
+            else:
+                non_reddit_count += 1
+                logger.debug(f"[REDDIT_ADAPTER] Mention {i+1} FAILED Reddit filter (non-Reddit URL)")
+
+        logger.info(f"[REDDIT_ADAPTER] Filtered: {filtered_count} Reddit mentions, {non_reddit_count} non-Reddit mentions filtered out")
+        print(f"[REDDIT_ADAPTER] Filtered: {filtered_count} Reddit mentions, {non_reddit_count} non-Reddit mentions filtered out")
 
         return filtered_mentions
 

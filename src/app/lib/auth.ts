@@ -1,5 +1,8 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://marketinganalysiswebsystem-production.up.railway.app';
 
+const TOKEN_KEY = 'gp_access_token';
+const USER_KEY = 'gp_user';
+
 export interface LoginRequest {
   email: string;
   password: string;
@@ -61,17 +64,7 @@ export async function loginWithEmail(data: LoginRequest): Promise<AuthResponse> 
     body: JSON.stringify(data),
   });
 
-  const result = await handleResponse(response);
-
-  // Store token in localStorage
-  if (result.access_token) {
-    localStorage.setItem('access_token', result.access_token);
-    if (result.user) {
-      localStorage.setItem('user', JSON.stringify(result.user));
-    }
-  }
-
-  return result;
+  return handleResponse(response);
 }
 
 export async function registerWithEmail(data: RegisterRequest): Promise<AuthResponse> {
@@ -92,17 +85,17 @@ export function loginWithGoogle(): void {
 }
 
 export function logout(): void {
-  localStorage.removeItem('access_token');
-  localStorage.removeItem('user');
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
   window.location.href = '/login';
 }
 
 export function getToken(): string | null {
-  return localStorage.getItem('access_token');
+  return localStorage.getItem(TOKEN_KEY);
 }
 
 export function getUser(): Record<string, unknown> | null {
-  const user = localStorage.getItem('user');
+  const user = localStorage.getItem(USER_KEY);
   return user ? JSON.parse(user) : null;
 }
 

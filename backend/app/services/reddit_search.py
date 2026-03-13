@@ -3,23 +3,38 @@ Reddit Search Service
 
 This module provides high-level search and analysis services for Reddit.
 It coordinates between Reddit adapter and business logic.
+
+Purpose: DEMAND SIDE
+This agent retrieves REAL USER DISCUSSIONS from Reddit to analyze:
+- User needs and pain points
+- User sentiment and opinions
+- Controversies and debates
+- Authentic user expressions
+- Product/service feedback from real users
 """
 
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import logging
 from ..adapters.reddit_adapter import create_reddit_adapter
 from ..providers.exa_provider import exa_provider
 from ..providers.base import SearchResult, Mention
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class RedditSearchService:
     """
     Service layer for Reddit search operations.
 
+    Purpose: DEMAND SIDE - Get real user discussions from Reddit
+
     Responsibilities:
     - Orchestrate Reddit data retrieval
     - Combine results from multiple subreddits
     - Provide structured error handling
+    - Ensure only Reddit discussions are returned
     """
 
     def __init__(self):
@@ -44,15 +59,50 @@ class RedditSearchService:
         Returns:
             List of Mention objects
         """
+        query_info = {
+            "keywords": keywords,
+            "subreddits": subreddits,
+            "limit": limit
+        }
+
+        logger.info(f"[REDDIT_SEARCH] Starting search: {query_info}")
+        print(f"[REDDIT_SEARCH] Starting search: {query_info}")
+
         all_mentions = []
 
-        for keyword in keywords:
+        for i, keyword in enumerate(keywords, 1):
+            logger.info(f"[REDDIT_SEARCH] Searching keyword {i}/{len(keywords)}: '{keyword}'")
+            print(f"[REDDIT_SEARCH] Searching keyword {i}/{len(keywords)}: '{keyword}'")
+
             mentions = await self._search_single_keyword(
                 keyword,
                 subreddits=subreddits,
                 limit=limit
             )
+
+            logger.info(f"[REDDIT_SEARCH] Keyword '{keyword}' returned {len(mentions)} mentions")
+            print(f"[REDDIT_SEARCH] Keyword '{keyword}' returned {len(mentions)} mentions")
+
             all_mentions.extend(mentions)
+
+        logger.info(f"[REDDIT_SEARCH] Search complete. Total mentions across all keywords: {len(all_mentions)}")
+        print(f"[REDDIT_SEARCH] Search complete. Total mentions across all keywords: {len(all_mentions)}")
+
+        # Print sample mentions for debugging
+        if all_mentions:
+            sample_size = min(3, len(all_mentions))
+            logger.info(f"[REDDIT_SEARCH] Sample mentions (first {sample_size}):")
+            print(f"[REDDIT_SEARCH] Sample mentions (first {sample_size}):")
+            for i in range(sample_size):
+                mention = all_mentions[i]
+                mention_info = {
+                    "id": getattr(mention, 'id', ''),
+                    "text": getattr(mention, 'text', '')[:100],
+                    "url": getattr(mention, 'url', ''),
+                    "author": getattr(mention, 'author', '')
+                }
+                logger.info(f"[REDDIT_SEARCH]   Mention {i+1}: {mention_info}")
+                print(f"[REDDIT_SEARCH]   Mention {i+1}: {mention_info}")
 
         return all_mentions
 
@@ -82,7 +132,15 @@ class RedditSearchService:
             # 即使没有指定 subreddits，也强制 site:reddit.com
             query = f"site:reddit.com {keyword}"
 
-        return await self.adapter.search_mentions(query, limit)
+        logger.info(f"[REDDIT_SEARCH] Query built: '{query}'")
+        print(f"[REDDIT_SEARCH] Query built: '{query}'")
+
+        mentions = await self.adapter.search_mentions(query, limit)
+
+        logger.info(f"[REDDIT_SEARCH] Adapter returned {len(mentions)} mentions for query: '{query}'")
+        print(f"[REDDIT_SEARCH] Adapter returned {len(mentions)} mentions for query: '{query}'")
+
+        return mentions
 
 
 # Singleton instance for easy import

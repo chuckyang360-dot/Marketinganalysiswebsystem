@@ -1,4 +1,4 @@
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/button';
@@ -21,10 +21,10 @@ export function Login() {
     try {
       const result = await loginWithEmail({ email, password });
       toast.success('登录成功');
-      if (result.user) {
-        login(result.user);
+      if (result.user && result.access_token) {
+        login({ user: result.user, access_token: result.access_token });
+        navigate('/workspace');
       }
-      navigate('/');
     } catch (error) {
       const message = error instanceof Error ? error.message : '登录失败';
       toast.error(message);
