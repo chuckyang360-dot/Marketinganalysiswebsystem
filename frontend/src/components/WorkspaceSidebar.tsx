@@ -36,13 +36,13 @@ export function WorkspaceSidebar({
       backToHome: '返回首页',
       backToWelcome: '返回欢迎页',
       currentAnalysis: '当前分析',
-      executiveSummary: '执行摘要',
-      opportunityScore: '机会得分',
-      redditAnalysis: 'Reddit分析',
-      xAnalysis: 'X 舆情',
-      seoAnalysis: 'SEO分析',
-      contentGap: '内容机会差距',
-      contentIdeas: '内容创意'
+      executive: '执行摘要',
+      redditEvidence: 'Reddit 证据',
+      seoEvidence: 'SEO 证据',
+      xSentiment: 'X 舆情',
+      analysis: '深度分析',
+      strategy: '策略建议',
+      execution: '执行动作'
     },
     en: {
       newAnalysis: 'New Analysis',
@@ -51,13 +51,13 @@ export function WorkspaceSidebar({
       backToHome: 'Home',
       backToWelcome: 'Back to Welcome',
       currentAnalysis: 'Current Analysis',
-      executiveSummary: 'Executive Summary',
-      opportunityScore: 'Opportunity Score',
-      redditAnalysis: 'Reddit Analysis',
-      xAnalysis: 'X Sentiment',
-      seoAnalysis: 'SEO Analysis',
-      contentGap: 'Content Gap',
-      contentIdeas: 'Content Ideas'
+      executive: 'Executive Summary',
+      redditEvidence: 'Reddit Evidence',
+      seoEvidence: 'SEO Evidence',
+      xSentiment: 'X Sentiment',
+      analysis: 'Deep Analysis',
+      strategy: 'Strategy',
+      execution: 'Execution'
     }
   };
 
@@ -72,13 +72,13 @@ export function WorkspaceSidebar({
   ];
 
   const resultSections = [
-    { id: 'summary', icon: '📊', label: text.executiveSummary },
-    { id: 'score', icon: '🎯', label: text.opportunityScore },
-    { id: 'reddit', icon: '💬', label: text.redditAnalysis },
-    { id: 'x', icon: 'X', label: text.xAnalysis },
-    { id: 'seo', icon: '🔍', label: text.seoAnalysis },
-    { id: 'gap', icon: '📈', label: text.contentGap },
-    { id: 'ideas', icon: '💡', label: text.contentIdeas }
+    { id: 'section-executive', icon: '📊', label: text.executive },
+    { id: 'section-reddit-evidence', icon: '💬', label: text.redditEvidence },
+    { id: 'section-seo-evidence', icon: '🔍', label: text.seoEvidence },
+    { id: 'section-x-sentiment', icon: 'X', label: text.xSentiment },
+    { id: 'section-analysis', icon: '📈', label: text.analysis },
+    { id: 'section-strategy', icon: '🎯', label: text.strategy },
+    { id: 'section-execution', icon: '⚡', label: text.execution }
   ];
 
   const handleSectionClick = (sectionId: string) => {

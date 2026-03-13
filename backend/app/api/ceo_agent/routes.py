@@ -9,6 +9,7 @@ into a single unified workflow.
 from fastapi import APIRouter, Depends, HTTPException
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
+import logging
 
 from ...services.ceo_agent import ceo_agent
 
@@ -30,10 +31,12 @@ async def full_analysis(request: FullAnalysisRequest):
     Orchestrates the complete workflow:
     1. Reddit Agent (demand side)
     2. SEO Agent (supply side)
-    3. Gap Analysis Agent
-    4. Content Ideas Agent
+    3. X Agent (sentiment analysis, optional)
+    4. Gap Analysis Agent
+    5. Content Ideas Agent
+    6. AI Report Service (placeholder implementation)
 
-    Returns unified result with all analysis components.
+    Returns unified result with all analysis components including AI report.
     """
     try:
         # Validate input

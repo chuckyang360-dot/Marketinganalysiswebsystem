@@ -74,6 +74,55 @@ export interface XAnalysis {
   }[];
 }
 
+// AI Report 相关类型（占位实现）
+export interface StrategyRecommendation {
+  market_judgment?: string;
+  channels?: string[];
+  positioning?: string;
+  content_strategy?: string;
+  timing?: string;
+  format?: string;
+}
+
+export interface Method {
+  name: string;
+  steps: string[];
+  metrics?: string[];
+}
+
+export interface ContentPlan {
+  articles: Array<{
+    title: string;
+    outline: string;
+    estimated_length?: string;
+  }>;
+  social_posts: Array<{
+    platform: string;
+    content: string;
+    hashtags?: string[];
+  }>;
+  video_ideas: Array<{
+    title: string;
+    script_outline: string;
+    estimated_duration?: string;
+  }>;
+  poster_ideas: Array<{
+    headline: string;
+    key_message: string;
+    cta_text?: string;
+  }>;
+}
+
+export interface AIReport {
+  executive_summary: string;
+  market_analysis: string;
+  key_findings: string[];
+  strategy_recommendations: StrategyRecommendation[];
+  methods: Method[];
+  content_plan: ContentPlan;
+}
+
+// 更新 FullAnalysisResponse，添加 report 字段
 export interface FullAnalysisResponse {
   status?: string;
   query: string;
@@ -82,4 +131,5 @@ export interface FullAnalysisResponse {
   x_analysis?: XAnalysis;
   gap_analysis: GapAnalysis;
   content_ideas: ContentIdea[];
+  report?: AIReport;  // ← 添加 report 字段（占位实现）
 }

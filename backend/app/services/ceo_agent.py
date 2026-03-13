@@ -7,11 +7,12 @@ CEO Agent Service (Orchestrator)
 - Aggregate: 聚合各 agent 结果为统一格式
 """
 
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 import logging
 from .reddit_agent import reddit_agent
 from .seo_agent import seo_agent
 from .xai_search import xai_search_service
+from .ai_report_service import ai_report_service
 from ..analysis.gap_analysis import analyze_keyword_gap
 from ..analysis.content_ideas import generate_content_ideas
 
@@ -102,6 +103,7 @@ class CEOAgent:
         self.reddit_agent = reddit_agent
         self.seo_agent = seo_agent
         self.x_agent = xai_search_service
+        self.ai_report_service = ai_report_service
 
     # ========== 1. CLASSIFY LAYER ==========
 
@@ -231,6 +233,45 @@ class CEOAgent:
                 "topics": []
             }
 
+    async def _call_ai_report_analysis(
+        self,
+        query: str,
+        reddit_result: Dict[str, Any],
+        seo_result: Dict[str, Any],
+        x_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        调用 AI Report Service 生成咨询报告（占位实现）
+
+        返回标准化的报告结构
+        """
+        logger.info(f"[CEO_DISPATCH] Calling AI Report Service for: {query}")
+
+        try:
+            report = await self.ai_report_service.generate_ai_report(
+                query=query,
+                reddit_result=reddit_result,
+                seo_result=seo_result,
+                x_result=x_result
+            )
+            return report
+        except Exception as e:
+            logger.error(f"[CEO_DISPATCH] AI Report Service failed: {str(e)}")
+            # 返回标准空对象，确保 schema 一致
+            return {
+                "executive_summary": f"无法生成 {query} 的 AI 咨询报告",
+                "market_analysis": "暂无市场分析",
+                "key_findings": [],
+                "strategy_recommendations": [],
+                "methods": [],
+                "content_plan": {
+                    "articles": [],
+                    "social_posts": [],
+                    "video_ideas": [],
+                    "poster_ideas": []
+                }
+            }
+
     # ========== 3. AGGREGATE LAYER ==========
 
     async def _extract_topics(self, reddit_result: Dict, seo_result: Dict) -> tuple:
@@ -290,6 +331,14 @@ class CEOAgent:
             gap_result.get("opportunities", [])
         )
 
+        # ========== AI REPORT LAYER (占位实现) ==========
+        ai_report = await self._call_ai_report_analysis(
+            query=query,
+            reddit_result=reddit_result,
+            seo_result=seo_result,
+            x_result=x_result
+        )
+
         # 构建统一结果
         result = {
             "query": query,
@@ -297,7 +346,8 @@ class CEOAgent:
             "seo_analysis": seo_result,
             "x_analysis": x_result,  # X 作为独立结果
             "gap_analysis": gap_result,
-            "content_ideas": content_ideas
+            "content_ideas": content_ideas,
+            "report": ai_report,
         }
 
         logger.info(f"[CEO_AGGREGATE] Full analysis complete")
