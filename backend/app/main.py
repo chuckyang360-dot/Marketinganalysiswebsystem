@@ -21,6 +21,9 @@ from .api.ceo_agent import router as ceo_agent_router
 # This must be done before calling init_db()
 from .models import user, x_analysis
 
+# Import analyze router
+from .api.analyze.routes import router as analyze_router
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -76,6 +79,7 @@ app.include_router(seo_analysis_router, prefix="/api/seo-analysis", tags=["SEO A
 app.include_router(gap_analysis_router, prefix="/api/gap-analysis", tags=["Gap Analysis"])
 app.include_router(content_ideas_router, prefix="/api/content-ideas", tags=["Content Ideas"])
 app.include_router(ceo_agent_router, prefix="/api/full-analysis", tags=["Full Analysis"])
+app.include_router(analyze_router, prefix="/api/analyze", tags=["Evidence Analysis"])
 
 # Static files (for frontend integration) - only mount if directory exists
 # This allows backend to work independently of frontend (deployed on Vercel)

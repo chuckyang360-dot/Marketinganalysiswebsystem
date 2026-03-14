@@ -1,3 +1,71 @@
+export type Platform = "x" | "reddit" | "seo" | "youtube" | "instagram";
+export type SourceType = "individual" | "brand" | "media" | "community" | "site";
+export type ContentType = "post" | "comment" | "tweet" | "article" | "video" | "caption";
+export type SentimentType = "positive" | "negative" | "neutral" | "mixed";
+
+// 原始来源字段 - 从平台原始数据直接获取
+export interface EvidenceSource {
+  username?: string;
+  display_name?: string;
+  author_id?: string;
+  follower_count?: number;
+  subscriber_count?: number;
+  author_karma?: number;
+  verified?: boolean;
+  domain_authority?: number;
+  source_type?: SourceType;
+}
+
+// 原始指标字段 - 从平台原始数据直接获取
+export interface EvidenceMetrics {
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  reposts?: number;
+  views?: number;           // 查看次数
+  reach?: number;           // 触达人数
+  impressions?: number;      // 展示次数
+  upvotes?: number;
+  downvotes?: number;
+  score?: number;
+}
+
+// 派生分析字段 - 系统计算的分析结果
+export interface EvidenceAnalysis {
+  sentiment?: SentimentType;
+  relevance_score?: number;
+  quality_score?: number;
+  authority_score?: number;
+  overall_weight?: number;
+  engagement_rate?: number;
+}
+
+// 平台特定元数据
+export interface EvidenceMetadata {
+  subreddit?: string;
+  domain?: string;
+  published_at?: string;
+  media_type?: string;
+  content_type?: ContentType;
+}
+
+// 兼容性：保留旧结构中的 sentiment 在 metadata 中
+export interface EvidenceMetadataCompat extends EvidenceMetadata {
+  sentiment?: string;
+}
+
+export interface EvidenceItem {
+  platform: Platform;
+  author: string;
+  content: string;
+  url: string;
+  title?: string;
+  source?: EvidenceSource;
+  metrics?: EvidenceMetrics;
+  analysis?: EvidenceAnalysis;
+  metadata?: EvidenceMetadata;
+}
+
 export interface Sentiment {
   positive: number;
   negative: number;

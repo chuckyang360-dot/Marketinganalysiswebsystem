@@ -1,0 +1,450 @@
+{
+  "request": {
+    "evidence": [
+      {
+        "platform": "x",
+        "author": "TechGuru23",
+        "content": "Just tried the new AI writing assistant from Vibe Marketing. Actually impressed with how it understands brand voice. The content suggestions are way better than ChatGPT for marketing copy.",
+        "url": "https://x.com/TechGuru23/status/1234567890",
+        "source": {
+          "username": "TechGuru23",
+          "display_name": "Tech Guru",
+          "follower_count": 45000,
+          "verified": true
+        },
+        "metrics": {
+          "likes": 2340,
+          "comments": 156,
+          "reposts": 423,
+          "views": 89000
+        },
+        "analysis": {
+          "sentiment": "positive",
+          "engagement_rate": 3.2
+        },
+        "metadata": {
+          "published_at": "2026-03-14T10:30:00Z",
+          "content_type": "tweet"
+        }
+      },
+      {
+        "platform": "x",
+        "author": "MarketingPro",
+        "content": "Vibe Marketing's CEO Agent feature is a game-changer for small teams. No more juggling multiple tools - one dashboard that actually coordinates everything.",
+        "url": "https://x.com/MarketingPro/status/1234567891",
+        "source": {
+          "username": "MarketingPro",
+          "display_name": "Sarah Chen - Marketing",
+          "follower_count": 120000,
+          "verified": true
+        },
+        "metrics": {
+          "likes": 5670,
+          "comments": 412,
+          "reposts": 890,
+          "views": 245000
+        },
+        "analysis": {
+          "sentiment": "positive",
+          "engagement_rate": 2.8
+        },
+        "metadata": {
+          "published_at": "2026-03-14T09:15:00Z",
+          "content_type": "tweet"
+        }
+      },
+      {
+        "platform": "x",
+        "author": "DisappointedUser",
+        "content": "Tried Vibe Marketing for a week. The Reddit monitoring is decent but the SEO analyzer keeps crashing. Support ticket has been open for 3 days now.",
+        "url": "https://x.com/DisappointedUser/status/1234567892",
+        "source": {
+          "username": "DisappointedUser",
+          "display_name": "John Smith",
+          "follower_count": 3200,
+          "verified": false
+        },
+        "metrics": {
+          "likes": 89,
+          "comments": 234,
+          "reposts": 45,
+          "views": 12000
+        },
+        "analysis": {
+          "sentiment": "negative",
+          "engagement_rate": 1.95
+        },
+        "metadata": {
+          "published_at": "2026-03-14T08:45:00Z",
+          "content_type": "tweet"
+        }
+      },
+      {
+        "platform": "reddit",
+        "author": "digital_marketer_2024",
+        "content": "Been using Vibe Marketing for my agency for 2 months now. The Reddit monitoring is surprisingly good - catches brand mentions across multiple subreddits. However, the sentiment analysis seems to misinterpret sarcasm about 30% of the time.",
+        "url": "https://reddit.com/r/marketing/comments/abc123",
+        "title": "Review: Vibe Marketing after 2 months",
+        "source": {
+          "username": "digital_marketer_2024",
+          "author_karma": 12000
+        },
+        "metrics": {
+          "upvotes": 234,
+          "downvotes": 12,
+          "score": 222,
+          "comments": 89
+        },
+        "analysis": {
+          "sentiment": "mixed"
+        },
+        "metadata": {
+          "subreddit": "r/marketing",
+          "published_at": "2026-03-14T06:00:00Z",
+          "content_type": "post"
+        }
+      },
+      {
+        "platform": "reddit",
+        "author": "SEO_specialist",
+        "content": "The SEO analyzer is missing a key feature: keyword gap analysis by search intent. I can see what keywords competitors rank for, but not whether those are informational, transactional, or navigational queries.",
+        "url": "https://reddit.com/r/SEO/comments/abc124",
+        "title": "Feature request: Intent-based keyword analysis",
+        "source": {
+          "username": "SEO_specialist",
+          "author_karma": 5600
+        },
+        "metrics": {
+          "upvotes": 156,
+          "downvotes": 3,
+          "score": 153,
+          "comments": 45
+        },
+        "analysis": {
+          "sentiment": "neutral"
+        },
+        "metadata": {
+          "subreddit": "r/SEO",
+          "published_at": "2026-03-14T05:30:00Z",
+          "content_type": "post"
+        }
+      },
+      {
+        "platform": "reddit",
+        "author": "brand_manager",
+        "content": "Vibe Marketing's CEO Agent saved us during a PR crisis last week. We detected a negative trend on Reddit and the agent coordinated our response across all channels. The recommended content angles were spot-on.",
+        "url": "https://reddit.com/r/marketing/comments/abc125",
+        "title": "How the CEO Agent handled our crisis",
+        "source": {
+          "username": "brand_manager",
+          "author_karma": 2800
+        },
+        "metrics": {
+          "upvotes": 445,
+          "downvotes": 8,
+          "score": 437,
+          "comments": 112
+        },
+        "analysis": {
+          "sentiment": "positive"
+        },
+        "metadata": {
+          "subreddit": "r/marketing",
+          "published_at": "2026-03-14T04:15:00Z",
+          "content_type": "post"
+        }
+      },
+      {
+        "platform": "seo",
+        "author": "Ahrefs Blog",
+        "content": "Vibe Marketing has emerged as a strong competitor in the marketing intelligence space, particularly with its multi-agent approach to social listening.",
+        "url": "https://ahrefs.com/blog/marketing-tools-2026",
+        "title": "Top Marketing Intelligence Tools of 2026",
+        "source": {
+          "domain": "ahrefs.com",
+          "domain_authority": 92
+        },
+        "metrics": {
+          "traffic": 2500000,
+          "backlinks": 15600
+        },
+        "analysis": {
+          "sentiment": "neutral",
+          "authority_score": 92.0
+        },
+        "metadata": {
+          "domain": "ahrefs.com",
+          "published_at": "2026-03-13T15:00:00Z",
+          "content_type": "article"
+        }
+      },
+      {
+        "platform": "seo",
+        "author": "Moz",
+        "content": "The CEO Agent feature in Vibe Marketing represents a shift toward AI orchestration in marketing. Rather than replacing human marketers, it automates coordination and frees up strategic thinking.",
+        "url": "https://moz.com/blog/ai-orchestration-marketing",
+        "title": "AI Orchestration: The Future of Marketing",
+        "source": {
+          "domain": "moz.com",
+          "domain_authority": 95
+        },
+        "metrics": {
+          "traffic": 1800000,
+          "backlinks": 12400
+        },
+        "analysis": {
+          "sentiment": "positive",
+          "authority_score": 95.0
+        },
+        "metadata": {
+          "domain": "moz.com",
+          "published_at": "2026-03-13T12:00:00Z",
+          "content_type": "article"
+        }
+      }
+    ],
+    "max_items": 10,
+    "query": "Vibe Marketing platform analysis"
+  },
+  "response": {
+    "topics": [
+      {
+        "name": "CEO Agent coordinating responses during PR crises",
+        "frequency": 2,
+        "platforms": [
+          "reddit",
+          "x"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "Reddit monitoring catching brand mentions across subreddits",
+        "frequency": 2,
+        "platforms": [
+          "reddit"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "Sentiment analysis seems to misclassify",
+        "frequency": 1,
+        "platforms": [
+          "reddit"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "SEO analyzer missing keyword gap analysis by search intent",
+        "frequency": 1,
+        "platforms": [
+          "reddit"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "AI writing assistant understanding brand voice",
+        "frequency": 1,
+        "platforms": [
+          "x"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "SEO analyzer keeps crashing",
+        "frequency": 1,
+        "platforms": [
+          "x"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "Multi-agent approach to social listening",
+        "frequency": 1,
+        "platforms": [
+          "seo"
+        ],
+        "sentiment": null
+      },
+      {
+        "name": "CEO Agent automating coordination for small teams",
+        "frequency": 1,
+        "platforms": [
+          "seo",
+          "x"
+        ],
+        "sentiment": null
+      }
+    ],
+    "key_insights": [
+      {
+        "category": "opportunity",
+        "title": "Users share stories about CEO Agent saving PR crises",
+        "description": "Users describe how the CEO Agent detected a negative trend on Reddit and coordinated responses across channels during a PR crisis",
+        "supporting_evidence": 1,
+        "platforms": [
+          "reddit"
+        ]
+      },
+      {
+        "category": "opportunity",
+        "title": "People are impressed with AI writing assistant for brand voice",
+        "description": "Users say the AI writing assistant understands brand voice and provides better content suggestions than ChatGPT for marketing copy",
+        "supporting_evidence": 1,
+        "platforms": [
+          "x"
+        ]
+      },
+      {
+        "category": "risk",
+        "title": "Users complain that SEO analyzer keeps crashing",
+        "description": "Users report the SEO analyzer keeps crashing and support tickets remain open for days",
+        "supporting_evidence": 1,
+        "platforms": [
+          "x"
+        ]
+      },
+      {
+        "category": "gap",
+        "title": "SEO analyzer missing keyword gap analysis by search intent",
+        "description": "Users point out the SEO analyzer shows competitor keywords but not whether they are informational, transactional, or navigational",
+        "supporting_evidence": 1,
+        "platforms": [
+          "reddit"
+        ]
+      },
+      {
+        "category": "gap",
+        "title": "Sentiment analysis seems to misclassify",
+        "description": "Users note that while Reddit monitoring catches brand mentions, the sentiment analysis seems to misclassify them",
+        "supporting_evidence": 1,
+        "platforms": [
+          "reddit"
+        ]
+      },
+      {
+        "category": "trend",
+        "title": "CEO Agent seen as game-changer for small teams",
+        "description": "Users and articles discuss the CEO Agent as a shift toward AI orchestration that automates coordination and frees up strategic thinking for small teams",
+        "supporting_evidence": 2,
+        "platforms": [
+          "x",
+          "seo"
+        ]
+      },
+      {
+        "category": "trend",
+        "title": "Multi-agent approach emerging in social listening",
+        "description": "Discussions highlight Vibe Marketing's multi-agent approach as a strong competitor in marketing intelligence for social listening",
+        "supporting_evidence": 1,
+        "platforms": [
+          "seo"
+        ]
+      }
+    ],
+    "sentiment_summary": {
+      "positive": 4,
+      "negative": 1,
+      "neutral": 2,
+      "mixed": 1,
+      "dominant": "positive"
+    },
+    "emerging_patterns": [
+      {
+        "pattern": "Users praising CEO Agent for crisis coordination and team efficiency",
+        "evidence_count": 3,
+        "confidence": "high",
+        "platforms": [
+          "reddit",
+          "x",
+          "seo"
+        ],
+        "timeframe": "recent"
+      },
+      {
+        "pattern": "Complaints about technical issues like crashing and inaccurate sentiment",
+        "evidence_count": 2,
+        "confidence": "medium",
+        "platforms": [
+          "reddit",
+          "x"
+        ],
+        "timeframe": "ongoing"
+      },
+      {
+        "pattern": "Discussions on AI features matching brand voice and automating tasks",
+        "evidence_count": 2,
+        "confidence": "medium",
+        "platforms": [
+          "x",
+          "seo"
+        ],
+        "timeframe": "recent"
+      }
+    ],
+    "recommended_angles": [
+      {
+        "angle": "Write a detailed case study: how a brand manager used the CEO Agent to detect a negative trend on Reddit and coordinate a multi-channel response during a PR crisis",
+        "rationale": "Users are sharing real stories of PR crisis detection and response, which would resonate by mirroring their experiences",
+        "target_audience": "brand managers and PR teams",
+        "content_type": "article",
+        "platforms": [
+          "reddit",
+          "x",
+          "seo"
+        ]
+      },
+      {
+        "angle": "Create a before/after comparison: show how sentiment analysis misclassified a Reddit brand mention, then demonstrate the corrected classification",
+        "rationale": "Users directly complain about sentiment analysis seeming to misclassify, so this would address their specific frustration",
+        "target_audience": "digital marketers monitoring social media",
+        "content_type": "post",
+        "platforms": [
+          "reddit",
+          "x"
+        ]
+      },
+      {
+        "angle": "Produce a short video demo: illustrate keyword gap analysis by search intent using competitor examples like informational vs transactional keywords",
+        "rationale": "Users express need for missing keyword gap analysis by search intent in SEO, making a visual demo appealing to their unmet need",
+        "target_audience": "SEO specialists",
+        "content_type": "video",
+        "platforms": [
+          "x",
+          "youtube",
+          "reddit"
+        ]
+      },
+      {
+        "angle": "Share a user testimonial thread: compile stories of small teams using CEO Agent to automate coordination without juggling multiple tools",
+        "rationale": "Multiple users and articles highlight CEO Agent as a game-changer for small teams, tapping into their positive experiences",
+        "target_audience": "small marketing teams",
+        "content_type": "post",
+        "platforms": [
+          "x",
+          "reddit"
+        ]
+      },
+      {
+        "angle": "Develop an article on fixing SEO analyzer crashes: step-by-step troubleshooting based on common user reports like open support tickets",
+        "rationale": "Users report SEO analyzer keeping crashing with delayed support, so practical fixes would engage those facing reliability issues",
+        "target_audience": "frustrated SEO users",
+        "content_type": "article",
+        "platforms": [
+          "reddit",
+          "seo",
+          "x"
+        ]
+      }
+    ],
+    "meta": {
+      "total_evidence_analyzed": 8,
+      "platforms_covered": [
+        "x",
+        "seo",
+        "reddit"
+      ],
+      "analysis_timestamp": "2026-03-14T06:53:26.307218"
+    }
+  },
+  "is_fallback": false
+}
