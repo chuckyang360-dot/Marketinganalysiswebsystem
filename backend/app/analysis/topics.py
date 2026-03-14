@@ -161,10 +161,10 @@ def is_valid_phrase(phrase: str) -> bool:
         if word.lower().strip(strip_chars) in CONTRACTIONS:
             return False
 
-    # Filter out phrases with very short words (< 3)
+    # Filter out phrases with very short words (< 2) - relaxed from < 3 to < 2
     for word in words:
         word = word.strip(strip_chars)
-        if len(word) < 3:
+        if len(word) < 2:
             return False
 
     # Check if this is a known product - always allow (after basic validation)

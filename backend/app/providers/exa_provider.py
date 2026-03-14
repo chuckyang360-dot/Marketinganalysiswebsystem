@@ -244,11 +244,20 @@ class ExaProvider(BaseProvider):
 
             # Extract author info based on platform
             author_info = {"author": "", "author_username": "", "author_display_name": ""}
-            if platform == "reddit":
+
+            # Use Exa API's author field if available
+            if result.get("author"):
+                author_name = result.get("author", "")
+                author_info["author"] = author_name
+                author_info["author_username"] = author_name
+                author_info["author_display_name"] = author_name
+
+            # For Reddit, also try to extract from URL as fallback
+            if platform == "reddit" and not author_info["author"]:
                 author_info = self._extract_reddit_author(url, title)
             elif platform == "x" or platform == "twitter":
                 # Try to extract from title for Twitter/X
-                if title:
+                if title and not author_info["author"]:
                     twitter_match = re.search(r'@\w+', title)
                     if twitter_match:
                         username = twitter_match.group(0).lstrip('@')
@@ -257,7 +266,8 @@ class ExaProvider(BaseProvider):
                         author_info["author_display_name"] = username
 
             # Use the title as the text if snippet is empty
-            text = snippet if snippet else title
+            # Use text field (contains full content including Score) or snippet as fallback
+            text = result.get("text", snippet)
 
             if not text:
                 logger.warning(f"[EXA_PROVIDER] No text or title found for URL: {url}")
@@ -279,6 +289,37 @@ class ExaProvider(BaseProvider):
                     logger.debug(f"[EXA_PROVIDER] Extracted subreddit: {subreddit_match.group(1)}")
                     print(f"[EXA_PROVIDER] Extracted subreddit: {subreddit_match.group(1)}")
 
+            # Get timestamp from result (Exa API uses publishedDate for all platforms)
+            timestamp = None
+            if result.get("publishedDate"):
+                try:
+                    timestamp = datetime.fromisoformat(result["publishedDate"].replace("Z", "+00:00"))
+                except:
+                    pass
+            if not timestamp:
+                timestamp = datetime.utcnow()
+
+            # Parse engagement metrics from text content for Reddit posts
+            # Exa API embeds Reddit score in text format: "Score: XXX"
+            likes = 0
+            comments = 0
+            if platform == "reddit" and text:
+                # Parse score from text (e.g., "Score: 352")
+                score_match = re.search(r'Score:\s*(-?\d+)', text, re.IGNORECASE)
+                if score_match:
+                    likes = int(score_match.group(1))
+
+                # Parse comment count from text (e.g., "215 Comments")
+                comments_match = re.search(r'(\d+)\s+Comments?', text, re.IGNORECASE)
+                if comments_match:
+                    comments = int(comments_match.group(1))
+
+            shares = result.get("quote_count", 0) if platform == "x" else 0
+            followers = result.get("follower_count", 0)
+
+            # Get sentiment from result
+            sentiment = result.get("sentiment", "neutral")
+
             # Create mention structure
             mention = Mention(
                 id=self._generate_id(result),
@@ -288,12 +329,12 @@ class ExaProvider(BaseProvider):
                 author_display_name=author_info["author_display_name"],
                 text=text,
                 url=url,
-                timestamp=datetime.utcnow(),
-                likes=0,
-                comments=0,
-                shares=0,
-                followers=0,
-                sentiment="neutral",
+                timestamp=timestamp,
+                likes=likes,
+                comments=comments,
+                shares=shares,
+                followers=followers,
+                sentiment=sentiment,
                 sentiment_score=0.0,
                 influencer_tier="unknown",
                 platform_metadata=metadata,

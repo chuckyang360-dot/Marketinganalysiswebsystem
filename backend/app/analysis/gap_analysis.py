@@ -25,6 +25,8 @@ class KeywordOpportunity(BaseModel):
 class GapAnalysisResult(BaseModel):
     """Result of gap analysis."""
     opportunities: List[KeywordOpportunity]
+    reddit_topics: List[str]
+    seo_topics: List[str]
 
 
 def normalize_topic(topic: str) -> str:
@@ -130,6 +132,8 @@ def analyze_keyword_gap(
     top_opportunities = opportunities[:10]
 
     return {
+        "reddit_topics": reddit_topics,
+        "seo_topics": seo_topics,
         "opportunities": [
             {
                 "keyword": opp.keyword,
