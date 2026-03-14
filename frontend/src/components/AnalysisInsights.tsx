@@ -169,28 +169,6 @@ export function AnalysisInsights({ data }: Props) {
     return null;
   }
 
-  const sentimentTotal = (
-    (analysis.sentiment_summary.positive || 0) +
-    (analysis.sentiment_summary.negative || 0) +
-    (analysis.sentiment_summary.neutral || 0) +
-    (analysis.sentiment_summary.mixed || 0)
-  );
-
-  const getSentimentColor = (sentiment: string): string => {
-    switch (sentiment) {
-      case 'positive':
-        return 'text-green-600 bg-green-50';
-      case 'negative':
-        return 'text-red-600 bg-red-50';
-      case 'neutral':
-        return 'text-gray-600 bg-gray-50';
-      case 'mixed':
-        return 'text-yellow-600 bg-yellow-50';
-      default:
-        return 'text-gray-600 bg-gray-50';
-    }
-  };
-
   const getCategoryIcon = (category: string): string => {
     switch (category) {
       case 'opportunity':

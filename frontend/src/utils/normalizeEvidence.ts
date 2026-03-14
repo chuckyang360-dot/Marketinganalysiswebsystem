@@ -1,9 +1,5 @@
 import type {
   EvidenceItem,
-  EvidenceSource,
-  EvidenceMetrics,
-  EvidenceAnalysis,
-  EvidenceMetadata,
   SourceType,
   ContentType,
   SentimentType,
@@ -32,16 +28,9 @@ export function normalizeXMention(mention: {
   const totalEngagement = likes + replies + reposts;
 
   // TODO: Replace with proper influence calculation when backend provides data
-  // Current heuristic: log10(follower_count) * 10 is a temporary proxy
-  const influenceScore = followerCount > 0 ? Math.log10(followerCount) * 10 : 0;
-
   // TODO: Replace with proper authority calculation
-  // Current: reserved for future implementation
-  const authorityScore: number | undefined = undefined;
-
   // TODO: Replace with proper overall_weight calculation
   // Should combine relevance, quality, authority, and engagement
-  const overallWeight: number | undefined = undefined;
 
   return {
     platform: 'x',
@@ -65,8 +54,6 @@ export function normalizeXMention(mention: {
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
       engagement_rate: totalEngagement > 0 && followerCount > 0 ? (totalEngagement / followerCount) * 100 : undefined,
-      authority_score: authorityScore,
-      overall_weight: overallWeight,
     },
     metadata: {
       published_at: mention.created_at,
@@ -100,14 +87,8 @@ export function normalizeRedditMention(mention: {
   const comments = mention.num_comments ?? 0;
 
   // TODO: Replace with proper influence calculation
-  // Current heuristic: log10(author_karma) * 5 is a temporary proxy
-  const influenceScore = authorKarma > 0 ? Math.log10(authorKarma) * 5 : 0;
-
   // TODO: Replace with proper authority calculation
-  const authorityScore: number | undefined = undefined;
-
   // TODO: Replace with proper overall_weight calculation
-  const overallWeight: number | undefined = undefined;
 
   return {
     platform: 'reddit',
@@ -130,8 +111,6 @@ export function normalizeRedditMention(mention: {
     },
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
-      authority_score: authorityScore,
-      overall_weight: overallWeight,
     },
     metadata: {
       subreddit: mention.subreddit,
@@ -157,14 +136,9 @@ export function normalizeSEOMention(mention: {
 }): EvidenceItem {
   const domainAuthority = mention.domain_authority ?? 0;
   const traffic = mention.traffic ?? 0;
-  const backlinks = mention.backlinks ?? 0;
 
   // TODO: Replace with proper authority calculation
-  // Current heuristic: domain_authority is used directly as proxy
-  const authorityScore = domainAuthority > 0 ? domainAuthority : undefined;
-
   // TODO: Replace with proper overall_weight calculation
-  const overallWeight: number | undefined = undefined;
 
   return {
     platform: 'seo',
@@ -182,8 +156,6 @@ export function normalizeSEOMention(mention: {
     },
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
-      authority_score: authorityScore,
-      overall_weight: overallWeight,
     },
     metadata: {
       domain: mention.domain,
@@ -216,14 +188,8 @@ export function normalizeYouTubeMention(mention: {
   const comments = mention.comments ?? 0;
 
   // TODO: Replace with proper influence calculation
-  // Current heuristic: log10(subscriber_count) * 10 is a temporary proxy
-  const influenceScore = subscriberCount > 0 ? Math.log10(subscriberCount) * 10 : 0;
-
   // TODO: Replace with proper authority calculation
-  const authorityScore: number | undefined = undefined;
-
   // TODO: Replace with proper overall_weight calculation
-  const overallWeight: number | undefined = undefined;
 
   return {
     platform: 'youtube',
@@ -247,8 +213,6 @@ export function normalizeYouTubeMention(mention: {
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
       engagement_rate: views > 0 ? ((likes + comments) / views) * 100 : undefined,
-      authority_score: authorityScore,
-      overall_weight: overallWeight,
     },
     metadata: {
       published_at: mention.published_at,
@@ -277,14 +241,8 @@ export function normalizeInstagramMention(mention: {
   const comments = mention.comments ?? 0;
 
   // TODO: Replace with proper influence calculation
-  // Current heuristic: log10(follower_count) * 10 is a temporary proxy
-  const influenceScore = followerCount > 0 ? Math.log10(followerCount) * 10 : 0;
-
   // TODO: Replace with proper authority calculation
-  const authorityScore: number | undefined = undefined;
-
   // TODO: Replace with proper overall_weight calculation
-  const overallWeight: number | undefined = undefined;
 
   return {
     platform: 'instagram',
@@ -307,8 +265,6 @@ export function normalizeInstagramMention(mention: {
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
       engagement_rate: followerCount > 0 ? ((likes + comments) / followerCount) * 100 : undefined,
-      authority_score: authorityScore,
-      overall_weight: overallWeight,
     },
     metadata: {
       media_type: mention.media_type,
