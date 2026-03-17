@@ -65,8 +65,10 @@ export function normalizeXMention(mention: {
     },
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
-      sentiment_score: mention.sentiment_score,
-      engagement_rate: totalEngagement > 0 && followerCount > 0 ? (totalEngagement / followerCount) * 100 : undefined,
+      engagement_rate:
+        totalEngagement > 0 && followerCount > 0
+          ? (totalEngagement / followerCount) * 100
+          : undefined,
     },
     metadata: {
       published_at: mention.timestamp || mention.created_at,

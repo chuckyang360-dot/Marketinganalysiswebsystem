@@ -131,9 +131,25 @@ export function WorkspaceResultView({ data }: Props) {
               <button className="text-blue-600 text-sm">生成内容 →</button>
             </div>
             <ul className="list-disc list-inside space-y-1 text-gray-700">
-              {(safeData.report?.content_plan?.articles || []).map((item, i) => (
-                <li key={i}>{item}</li>
-              ))}
+              {(safeData.report?.content_plan?.articles || []).map((item, i) => {
+                const outline =
+                  Array.isArray(item.outline) ? item.outline.join('\n') : item.outline || '';
+                return (
+                  <li key={i}>
+                    <div className="font-semibold">{item.title}</div>
+                    {outline && (
+                      <div className="text-sm text-gray-600 whitespace-pre-line mt-1">
+                        {outline}
+                      </div>
+                    )}
+                    {item.estimated_length && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        预估长度：{item.estimated_length}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
 
@@ -145,7 +161,21 @@ export function WorkspaceResultView({ data }: Props) {
             </div>
             <ul className="list-disc list-inside space-y-1 text-gray-700">
               {(safeData.report?.content_plan?.social_posts || []).map((item, i) => (
-                <li key={i}>{item}</li>
+                <li key={i}>
+                  <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
+                    <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                      {item.platform}
+                    </span>
+                    {item.hashtags && item.hashtags.length > 0 && (
+                      <span className="text-gray-400">
+                        {item.hashtags.map((h: string) => `#${h}`).join(' ')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-gray-700 whitespace-pre-line">
+                    {item.content}
+                  </div>
+                </li>
               ))}
             </ul>
           </div>
@@ -157,9 +187,27 @@ export function WorkspaceResultView({ data }: Props) {
               <button className="text-blue-600 text-sm">生成内容 →</button>
             </div>
             <ul className="list-disc list-inside space-y-1 text-gray-700">
-              {(safeData.report?.content_plan?.video_ideas || []).map((item, i) => (
-                <li key={i}>{item}</li>
-              ))}
+              {(safeData.report?.content_plan?.video_ideas || []).map((item, i) => {
+                const scriptOutline =
+                  Array.isArray(item.script_outline)
+                    ? item.script_outline.join('\n')
+                    : item.script_outline || '';
+                return (
+                  <li key={i}>
+                    <div className="font-semibold">{item.title}</div>
+                    {scriptOutline && (
+                      <div className="text-sm text-gray-600 whitespace-pre-line mt-1">
+                        {scriptOutline}
+                      </div>
+                    )}
+                    {item.estimated_duration && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        预估时长：{item.estimated_duration}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
 
@@ -171,7 +219,15 @@ export function WorkspaceResultView({ data }: Props) {
             </div>
             <ul className="list-disc list-inside space-y-1 text-gray-700">
               {(safeData.report?.content_plan?.poster_ideas || []).map((item, i) => (
-                <li key={i}>{item}</li>
+                <li key={i}>
+                  <div className="font-semibold">{item.headline}</div>
+                  {item.key_message && (
+                    <div className="text-sm text-gray-700 mt-1">{item.key_message}</div>
+                  )}
+                  {item.cta_text && (
+                    <div className="text-xs text-gray-500 mt-1">CTA：{item.cta_text}</div>
+                  )}
+                </li>
               ))}
             </ul>
           </div>
