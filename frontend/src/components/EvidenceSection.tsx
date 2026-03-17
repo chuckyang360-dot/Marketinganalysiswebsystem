@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import type { FullAnalysisResponse, EvidenceItem } from '../types/analysis';
 import { EvidenceCard } from './EvidenceCard';
-import { normalizeXMention, normalizeRedditMention, normalizeSEOMention } from '../utils/normalizeEvidence';
+import { normalizeSentiment, normalizeXMention, normalizeRedditMention, normalizeSEOMention } from '../utils/normalizeEvidence';
 
 interface Props {
   data: FullAnalysisResponse;
@@ -50,18 +50,18 @@ export function EvidenceSection({ data }: Props) {
     mentions: []
   };
 
-  // Normalize all mentions to unified EvidenceItem format
-  const allRedditEvidence: EvidenceItem[] = (reddit_analysis.mentions ?? [])
-    .slice(0, 5)
-    .map(normalizeRedditMention);
+  // Normalize all mentions to unified EvidenceItem format（不再前端截断为 5 条）
+  const allRedditEvidence: EvidenceItem[] = (reddit_analysis.mentions ?? []).map(
+    normalizeRedditMention
+  );
 
-  const allSeoEvidence: EvidenceItem[] = (seo_analysis.mentions ?? [])
-    .slice(0, 5)
-    .map(normalizeSEOMention);
+  const allSeoEvidence: EvidenceItem[] = (seo_analysis.mentions ?? []).map(
+    normalizeSEOMention
+  );
 
-  const allXEvidence: EvidenceItem[] = (x_analysis.mentions ?? [])
-    .slice(0, 5)
-    .map(normalizeXMention);
+  const allXEvidence: EvidenceItem[] = (x_analysis.mentions ?? []).map(
+    normalizeXMention
+  );
 
   // 获取受众规模（仅使用 follower_count 和 subscriber_count）
   const getAudienceSize = (item: EvidenceItem): number => {
@@ -184,6 +184,79 @@ export function EvidenceSection({ data }: Props) {
     return filtered;
   }, [allXEvidence, filters]);
 
+  // visibleMentions：真正参与渲染的证据列表（经过所有清洗 + 筛选）
+  const redditVisible = redditEvidence;
+  const seoVisible = seoEvidence;
+  const xVisible = xEvidence;
+
+  // 真实 DOM 计数
+  const [domCounts, setDomCounts] = useState({ reddit: 0, seo: 0, x: 0 });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const redditDom = document.querySelectorAll('[data-evidence-card="reddit"]').length;
+    const seoDom = document.querySelectorAll('[data-evidence-card="seo"]').length;
+    const xDom = document.querySelectorAll('[data-evidence-card="x"]').length;
+    setDomCounts({ reddit: redditDom, seo: seoDom, x: xDom });
+  }, [redditVisible, seoVisible, xVisible]);
+
+  // 统一情绪统计：基于 visibleMentions 重新计算
+  const countSentiments = (items: EvidenceItem[]) => {
+    return items.reduce(
+      (acc, item) => {
+        const s = normalizeSentiment(item.analysis?.sentiment);
+        if (s === 'positive') acc.positive += 1;
+        else if (s === 'negative') acc.negative += 1;
+        else acc.neutral += 1;
+        return acc;
+      },
+      { positive: 0, negative: 0, neutral: 0 }
+    );
+  };
+
+  const redditSentiments = countSentiments(redditVisible);
+  const seoSentiments = countSentiments(seoVisible);
+  const xSentiments = countSentiments(xVisible);
+
+  // Debug: log backend-provided sentiment for Reddit / SEO
+  useEffect(() => {
+    if (!reddit_analysis || !seo_analysis) return;
+
+    const redditFirst5 = (reddit_analysis.mentions ?? []).slice(0, 5).map((m: any, idx: number) => ({
+      idx,
+      sentiment: m.sentiment ?? null,
+      sentiment_score: m.sentiment_score ?? null,
+    }));
+    const seoFirst5 = (seo_analysis.mentions ?? []).slice(0, 5).map((m: any, idx: number) => ({
+      idx,
+      sentiment: m.sentiment ?? null,
+      sentiment_score: m.sentiment_score ?? null,
+    }));
+
+    // Aggregate (backend-provided) – if present
+    const redditAgg = (reddit_analysis as any).sentiment ?? null;
+    const seoAgg = (seo_analysis as any).sentiment ?? null;
+
+    // Console debug output
+    // You can copy these objects directly from DevTools console
+    // to verify per-item vs aggregate sentiment for current request.
+    // Example key: REDDIT_SENTIMENT_DEBUG, SEO_SENTIMENT_DEBUG.
+    // This uses the actual /api/full-analysis response already loaded on the page.
+    // No mock data.
+    // eslint-disable-next-line no-console
+    console.log('REDDIT_SENTIMENT_DEBUG =', {
+      aggregate: redditAgg,
+      first5: redditFirst5,
+    });
+    // eslint-disable-next-line no-console
+    console.log('SEO_SENTIMENT_DEBUG =', {
+      aggregate: seoAgg,
+      first5: seoFirst5,
+    });
+  }, [reddit_analysis, seo_analysis]);
+
   return (
     <div className="space-y-6">
       {/* Filter Controls */}
@@ -250,7 +323,7 @@ export function EvidenceSection({ data }: Props) {
               </div>
             </div>
             <div className="text-xs text-gray-500">
-              总计: {redditEvidence.length + seoEvidence.length + xEvidence.length} 条证据
+              总计: {redditVisible.length + seoVisible.length + xVisible.length} 条证据
             </div>
           </div>
         </div>
@@ -281,30 +354,33 @@ export function EvidenceSection({ data }: Props) {
             <span className="text-white font-bold">💬</span>
           </div>
           <h2 className="text-2xl font-bold text-gray-900">Reddit 证据</h2>
-          <span className="text-sm text-gray-500 ml-2">
-            {reddit_analysis.mentions?.length || 0} 条讨论
-          </span>
+          <div className="ml-2 text-xs text-gray-500 space-y-0.5">
+            <div>{redditVisible.length} 条讨论</div>
+            <div>
+              raw {allRedditEvidence.length} / filtered {redditEvidence.length} / visible {redditVisible.length} / realDOM {domCounts.reddit} / sentiment {redditSentiments.positive}-{redditSentiments.negative}-{redditSentiments.neutral}
+            </div>
+          </div>
         </div>
 
         {/* Reddit Sentiment */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-green-50 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-green-600">{reddit_analysis.sentiment.positive}</div>
+            <div className="text-3xl font-bold text-green-600">{redditSentiments.positive}</div>
             <div className="text-sm text-gray-600 mt-1">正面</div>
           </div>
           <div className="bg-red-50 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-red-600">{reddit_analysis.sentiment.negative}</div>
+            <div className="text-3xl font-bold text-red-600">{redditSentiments.negative}</div>
             <div className="text-sm text-gray-600 mt-1">负面</div>
           </div>
           <div className="bg-gray-50 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-gray-600">{reddit_analysis.sentiment.neutral}</div>
+            <div className="text-3xl font-bold text-gray-600">{redditSentiments.neutral}</div>
             <div className="text-sm text-gray-600 mt-1">中性</div>
           </div>
         </div>
 
         {/* Reddit Evidence Cards */}
         <div className="space-y-3">
-          {redditEvidence.map((item, idx) => (
+          {redditVisible.map((item, idx) => (
             <EvidenceCard key={`reddit-${idx}`} item={item} />
           ))}
         </div>
@@ -317,67 +393,73 @@ export function EvidenceSection({ data }: Props) {
             <span className="text-white font-bold">🔍</span>
           </div>
           <h2 className="text-2xl font-bold text-gray-900">SEO 证据</h2>
-          <span className="text-sm text-gray-500 ml-2">
-            {seo_analysis.mentions?.length || 0} 条内容
-          </span>
+          <div className="ml-2 text-xs text-gray-500 space-y-0.5">
+            <div>{seoVisible.length} 条内容</div>
+            <div>
+              raw {allSeoEvidence.length} / filtered {seoEvidence.length} / visible {seoVisible.length} / realDOM {domCounts.seo} / sentiment {seoSentiments.positive}-{seoSentiments.negative}-{seoSentiments.neutral}
+            </div>
+          </div>
         </div>
 
         {/* SEO Sentiment */}
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-green-50 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-green-600">{seo_analysis.sentiment.positive}</div>
+            <div className="text-3xl font-bold text-green-600">{seoSentiments.positive}</div>
             <div className="text-sm text-gray-600 mt-1">正面</div>
           </div>
           <div className="bg-red-50 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-red-600">{seo_analysis.sentiment.negative}</div>
+            <div className="text-3xl font-bold text-red-600">{seoSentiments.negative}</div>
             <div className="text-sm text-gray-600 mt-1">负面</div>
           </div>
           <div className="bg-gray-50 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-gray-600">{seo_analysis.sentiment.neutral}</div>
+            <div className="text-3xl font-bold text-gray-600">{seoSentiments.neutral}</div>
             <div className="text-sm text-gray-600 mt-1">中性</div>
           </div>
         </div>
 
         {/* SEO Evidence Cards */}
         <div className="space-y-3">
-          {seoEvidence.map((item, idx) => (
+          {seoVisible.map((item, idx) => (
             <EvidenceCard key={`seo-${idx}`} item={item} />
           ))}
         </div>
       </div>
 
       {/* X Sentiment Evidence */}
-      {x_analysis && x_analysis.stats.total_mentions > 0 && (
+      {xVisible.length > 0 && (
         <div id="section-x-sentiment" className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm">
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center">
               <span className="text-white font-bold">X</span>
             </div>
             <h2 className="text-2xl font-bold text-gray-900">X 舆情证据</h2>
-            <span className="text-sm text-gray-500 ml-2">
-              {x_analysis.stats.total_mentions} 条提及
-            </span>
+            <div className="ml-2 text-xs text-gray-500 space-y-0.5">
+              <div>{xVisible.length} 条提及</div>
+              <div>
+                raw {allXEvidence.length} / filtered {xEvidence.length} / visible {xVisible.length} / realDOM {domCounts.x} / sentiment {xSentiments.positive}-{xSentiments.negative}-{xSentiments.neutral}
+              </div>
+            </div>
           </div>
 
           {/* X Sentiment */}
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-green-50 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-green-600">{x_analysis.stats.positive_count}</div>
+              <div className="text-3xl font-bold text-green-600">{xSentiments.positive}</div>
               <div className="text-sm text-gray-600 mt-1">正面</div>
             </div>
             <div className="bg-red-50 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-red-600">{x_analysis.stats.negative_count}</div>
+              <div className="text-3xl font-bold text-red-600">{xSentiments.negative}</div>
               <div className="text-sm text-gray-600 mt-1">负面</div>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-center">
-              <div className="text-3xl font-bold text-gray-600">{x_analysis.stats.neutral_count}</div>
+              <div className="text-3xl font-bold text-gray-600">{xSentiments.neutral}</div>
               <div className="text-sm text-gray-600 mt-1">中性</div>
             </div>
           </div>
 
           {/* X Evidence Cards */}
           <div className="space-y-3">
-            {xEvidence.map((item, idx) => (
+            {xVisible.map((item, idx) => (
               <EvidenceCard key={`x-${idx}`} item={item} />
             ))}
           </div>

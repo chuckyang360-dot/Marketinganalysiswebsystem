@@ -5,6 +5,32 @@ import type {
   SentimentType,
 } from '../types/analysis';
 
+export function normalizeSentiment(value?: string | null): SentimentType {
+  const v = (value ?? '').toString().trim().toLowerCase();
+  if (!v) return 'neutral';
+
+  // Positive variants
+  if (v === 'positive' || v === 'pos' || v === 'p' || v === '积极' || v === '正面' || v === '好评') {
+    return 'positive';
+  }
+
+  // Negative variants
+  if (v === 'negative' || v === 'neg' || v === 'n' || v === '消极' || v === '负面' || v === '差评') {
+    return 'negative';
+  }
+
+  // Neutral variants / fallbacks
+  if (v === 'neutral' || v === 'neu' || v === '中性' || v === '一般' || v === '0') {
+    return 'neutral';
+  }
+
+  // Some backends may return sentiment_label
+  if (v.includes('pos') || v.includes('positive') || v.includes('积极') || v.includes('正面')) return 'positive';
+  if (v.includes('neg') || v.includes('negative') || v.includes('消极') || v.includes('负面')) return 'negative';
+
+  return 'neutral';
+}
+
 // X platform normalization
 export function normalizeXMention(mention: {
   text: string;
@@ -24,6 +50,10 @@ export function normalizeXMention(mention: {
   sentiment?: string;
   sentiment_score?: number;  // Backend field
   url?: string;
+  tweet_url?: string;    // Backend field
+  status_url?: string;   // Backend field
+  permalink?: string;    // Backend field
+  tweet_id?: string;     // Backend field
   created_at?: string;
   timestamp?: string;  // Backend field
   platform_metadata?: Record<string, any>;  // Backend field
@@ -37,7 +67,22 @@ export function normalizeXMention(mention: {
 
   // Map backend fields to frontend display name
   const authorName = mention.author_display_name || mention.author || 'Unknown';
-  const authorHandle = mention.author_username || mention.author;
+  // Prefer explicit author_username; if缺失但 author 看起来像 handle（无空格，仅字母数字下划线），用 author 兜底
+  let authorHandle = mention.author_username;
+  if (!authorHandle && mention.author && /^[A-Za-z0-9_]+$/.test(mention.author)) {
+    authorHandle = mention.author;
+  }
+
+  // Resolve best-effort URL for original tweet
+  let resolvedUrl = mention.url
+    || mention.tweet_url
+    || mention.status_url
+    || mention.permalink;
+
+  // If no direct URL but we have tweet_id + author_username, construct standard X status URL
+  if (!resolvedUrl && mention.tweet_id && authorHandle) {
+    resolvedUrl = `https://x.com/${authorHandle}/status/${mention.tweet_id}`;
+  }
 
   // TODO: Replace with proper influence calculation when backend provides data
   // TODO: Replace with proper authority calculation
@@ -48,7 +93,7 @@ export function normalizeXMention(mention: {
     platform: 'x',
     author: authorName,
     content: mention.text || '',
-    url: mention.url || '',
+    url: resolvedUrl || '',
     source: {
       username: authorHandle,
       display_name: authorName,
@@ -64,7 +109,7 @@ export function normalizeXMention(mention: {
       reach: followerCount, // TODO: Replace with actual reach from API
     },
     analysis: {
-      sentiment: mention.sentiment as SentimentType | undefined,
+      sentiment: normalizeSentiment(mention.sentiment),
       engagement_rate:
         totalEngagement > 0 && followerCount > 0
           ? (totalEngagement / followerCount) * 100
@@ -141,7 +186,7 @@ export function normalizeRedditMention(mention: {
       reach: upvotes + comments, // TODO: Replace with actual reach from API
     },
     analysis: {
-      sentiment: mention.sentiment as SentimentType | undefined,
+      sentiment: normalizeSentiment(mention.sentiment),
     },
     metadata: {
       subreddit: mention.subreddit,
@@ -198,7 +243,7 @@ export function normalizeSEOMention(mention: {
       reach: traffic,
     },
     analysis: {
-      sentiment: mention.sentiment as SentimentType | undefined,
+      sentiment: normalizeSentiment(mention.sentiment),
     },
     metadata: {
       domain: mention.domain,

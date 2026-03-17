@@ -15,7 +15,7 @@ from datetime import datetime
 import logging
 import re
 from .reddit_search import reddit_search_service
-from ..analysis.sentiment import analyze_sentiment
+from ..analysis.sentiment import analyze_sentiment, analyze_sentiment_per_item
 from ..analysis.summary import summary_generator
 from ..analysis.topics import get_topics
 from ..analysis.alerts import detect_alerts
@@ -188,6 +188,29 @@ class RedditAgent:
             original_text = getattr(mention, 'text', '') or ''
             cleaned_text = self.clean_text(original_text)
 
+            # === D.A: Reddit noise cleaning ===
+            REDDIT_NOISE_PATTERNS = [
+                "Reddit - The heart of the internet",
+                "Skip to main content",
+                "User Agreement",
+                "Privacy Policy",
+                "Read more",
+                "Promoted",
+                "Continue this thread",
+                "AutoModerator",
+            ]
+
+            for p in REDDIT_NOISE_PATTERNS:
+                cleaned_text = cleaned_text.replace(p, " ")
+
+            # remove escape / html artifacts
+            cleaned_text = cleaned_text.replace("\\-", " ")
+            cleaned_text = cleaned_text.replace("\\", " ")
+
+            import html, re
+            cleaned_text = html.unescape(cleaned_text)
+            cleaned_text = re.sub(r"\s+", " ", cleaned_text).strip()
+
             if hasattr(mention, 'model_copy'):
                 # For Pydantic models, use model_copy
                 mention = mention.model_copy(update={"text": cleaned_text})
@@ -342,6 +365,19 @@ class RedditAgent:
         print("[REDDIT_AGENT] Step 6: Performing sentiment analysis...")
 
         sentiment_result = await analyze_sentiment(mentions)
+
+        # Write per-mention sentiment back onto Mention objects
+        per_item = await analyze_sentiment_per_item(mentions)
+        if per_item and len(per_item) == len(mentions):
+            updated = []
+            for m, s in zip(mentions, per_item):
+                if hasattr(m, "model_copy"):
+                    updated.append(m.model_copy(update={"sentiment": s.label, "sentiment_score": s.score}))
+                else:
+                    m.sentiment = s.label
+                    m.sentiment_score = s.score
+                    updated.append(m)
+            mentions = updated
 
         logger.info(f"[REDDIT_AGENT] Step 6: Sentiment result - positive: {sentiment_result.positive}, negative: {sentiment_result.negative}, neutral: {sentiment_result.neutral}")
         print(f"[REDDIT_AGENT] Step 6: Sentiment result - positive: {sentiment_result.positive}, negative: {sentiment_result.negative}, neutral: {sentiment_result.neutral}")

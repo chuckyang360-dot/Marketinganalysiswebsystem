@@ -11,6 +11,8 @@ AI Report Service
 from typing import Dict, Any, List, Optional
 import logging
 import json
+import re
+print("🔥 AI_REPORT_SERVICE MODULE LOADED 🔥")
 
 from .analysis_agent import call_grok_analysis
 
@@ -27,6 +29,140 @@ class AIReportService:
         """初始化 AI Report Service"""
         pass
 
+    async def _parse_grok_response(self, raw: Any) -> Dict[str, Any]:
+        """
+        解析 Grok 返回内容，尽可能从字符串中提取合法 JSON。
+
+        支持：
+        - 直接 JSON 字符串
+        - 被 ``` / ```json 包裹的 markdown
+        - 前后有解释性文字，但中间有一段 { ... } JSON
+        """
+        logger.error("=== ENTER _parse_grok_response ===")
+        # 入口日志
+        logger.info("=== PARSE_GROK_RESPONSE START ===")
+        logger.info(f"Grok raw type: {type(raw)}")
+
+        # 已经是 dict，直接返回
+        if isinstance(raw, dict):
+            return raw
+
+        if not isinstance(raw, str):
+            raise ValueError(f"Unexpected Grok response type: {type(raw)}")
+
+        text = raw.strip()
+
+        # 原始字符串调试输出
+        try:
+            logger.info("=== RAW STRING START ===")
+            logger.info(text[:2000])
+            if len(text) > 2000:
+                logger.info("=== RAW STRING END TAIL ===")
+                logger.info(text[-500:])
+        except Exception:
+            logger.warning("[AI_REPORT_SERVICE] Failed to log raw Grok string preview")
+
+        # 兼容 markdown ```json ... ``` 或 ``` ... ```
+        if text.startswith("```"):
+            # 去掉起始 ```json / ``` 这一行
+            text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", text, count=1)
+            # 去掉结尾 ```
+            if text.endswith("```"):
+                text = text.rsplit("```", 1)[0].strip()
+
+        # markdown 清洗后的字符串调试输出
+        try:
+            logger.info("=== CLEANED STRING FOR JSON PARSE ===")
+            logger.info(text[:2000])
+            if len(text) > 2000:
+                logger.info("=== CLEANED STRING END TAIL ===")
+                logger.info(text[-500:])
+        except Exception:
+            logger.warning("[AI_REPORT_SERVICE] Failed to log cleaned Grok string preview")
+
+        # 1) 直接尝试整体解析
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("[AI_REPORT_SERVICE] Direct JSON parse failed, trying extraction from response text")
+
+        # 2) 尝试从第一个 '{' 到最后一个 '}' 提取子串
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+            candidate = text[first_brace : last_brace + 1]
+
+            # 提取 JSON 片段调试输出
+            try:
+                logger.info("=== EXTRACTED JSON CANDIDATE ===")
+                logger.info(candidate[:2000])
+                if len(candidate) > 2000:
+                    logger.info("=== EXTRACTED JSON CANDIDATE END TAIL ===")
+                    logger.info(candidate[-500:])
+            except Exception:
+                logger.warning("[AI_REPORT_SERVICE] Failed to log extracted JSON candidate")
+
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError as e:
+                logger.error(
+                    "[AI_REPORT_SERVICE] Failed to parse extracted JSON candidate. Preview (first 1000 chars): "
+                    f"{candidate[:1000]}"
+                )
+                logger.error("=== FINAL JSON PARSE ERROR ===")
+                logger.error(repr(e))
+
+        # 3) 仍然失败，进入 repair pass 之前，先记录原始内容预览
+        try:
+            logger.error(
+                "[AI_REPORT_SERVICE] Unable to parse Grok JSON response via primary strategies. "
+                f"Raw preview (first 1000 chars): {text[:1000]}"
+            )
+        except Exception:
+            logger.warning("[AI_REPORT_SERVICE] Failed to log final raw preview for Grok response")
+
+        # ========== Repair pass：调用 Grok 作为 JSON 修复工具 ==========
+        repair_source = text
+        try:
+            repair_prompt = (
+                "You are a JSON repair tool. Fix the following malformed JSON and return VALID JSON ONLY. "
+                "Do not explain anything. Keep all original keys and values as much as possible.\n\n"
+                f"{repair_source}"
+            )
+            repaired_raw = await call_grok_analysis(repair_prompt)
+
+            if isinstance(repaired_raw, dict):
+                return repaired_raw
+
+            if not isinstance(repaired_raw, str):
+                raise ValueError(f"Unexpected repair response type: {type(repaired_raw)}")
+
+            repaired_text = repaired_raw.strip()
+
+            # 去 markdown 包裹
+            if repaired_text.startswith("```"):
+                repaired_text = re.sub(r"^```[a-zA-Z0-9]*\s*", "", repaired_text, count=1)
+                if repaired_text.endswith("```"):
+                    repaired_text = repaired_text.rsplit("```", 1)[0].strip()
+
+            # 先整体解析
+            try:
+                return json.loads(repaired_text)
+            except json.JSONDecodeError:
+                # 再从 { ... } 中提取
+                rb_first = repaired_text.find("{")
+                rb_last = repaired_text.rfind("}")
+                if rb_first != -1 and rb_last != -1 and rb_first < rb_last:
+                    repaired_candidate = repaired_text[rb_first : rb_last + 1]
+                    return json.loads(repaired_candidate)
+        except Exception:
+            # 修复失败则退回原有报错逻辑
+            pass
+
+        logger.error("=== FINAL JSON PARSE ERROR ===")
+        logger.error("ValueError: Failed to parse Grok JSON response")
+        raise ValueError("Failed to parse Grok JSON response")
+
     async def generate_ai_report(
         self,
         query: str,
@@ -34,6 +170,7 @@ class AIReportService:
         seo_result: Optional[Dict[str, Any]] = None,
         x_result: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        logger.error("🔥 ENTER generate_ai_report 🔥")
         """
         生成 AI 咨询报告（占位实现）
 
@@ -196,11 +333,44 @@ Instructions:
 """
 
         logger.info("[AI_REPORT_SERVICE] Sending prompt to Grok for structured report generation")
+        # 调试日志：Grok 调用前
+        try:
+            logger.info("=== GROK CALL START ===")
+            logger.info(f"Grok query: {query}")
+            logger.info(f"Grok prompt (first 800 chars): {grok_prompt[:800]}")
+        except Exception:
+            # 日志本身不应影响主流程
+            logger.warning("[AI_REPORT_SERVICE] Failed to log Grok call start details")
 
         try:
-            grok_response = await call_grok_analysis(grok_prompt)
+            grok_raw = await call_grok_analysis(grok_prompt)
+            print("=== AFTER GROK CALL ===")
+            print(type(grok_raw))
+
+            # 调试日志：Grok 返回后（原始）
+            try:
+                logger.info("=== GROK CALL RESULT ===")
+                logger.info(f"Grok raw response type: {type(grok_raw)}")
+                if isinstance(grok_raw, str):
+                    logger.info(f"Grok raw response preview (first 1000 chars): {grok_raw[:1000]}")
+                elif isinstance(grok_raw, dict):
+                    logger.info(f"Grok raw response dict keys: {list(grok_raw.keys())}")
+                else:
+                    logger.info(f"Grok raw response repr: {repr(grok_raw)[:1000]}")
+            except Exception:
+                logger.warning("[AI_REPORT_SERVICE] Failed to log Grok call result details")
+
+            # 在 ai_report_service 内部做一次健壮的 JSON 解析
+            logger.error("=== CALLING _parse_grok_response ===")
+            grok_response = await self._parse_grok_response(grok_raw)
+
         except Exception as e:
             logger.error(f"[AI_REPORT_SERVICE] Grok analysis failed: {e}")
+            try:
+                logger.error("=== GROK CALL ERROR ===")
+                logger.error(f"Grok exception: {repr(e)}")
+            except Exception:
+                logger.warning("[AI_REPORT_SERVICE] Failed to log Grok call error details")
             # Grok 调用失败时，仅返回「报告不可用」的空结构，避免伪策略误导
             fallback_result: Dict[str, Any] = {
                 "executive_summary": "",

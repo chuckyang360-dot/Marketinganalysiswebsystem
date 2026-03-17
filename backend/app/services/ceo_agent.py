@@ -153,9 +153,7 @@ class CEOAgent:
     ) -> Dict[str, Any]:
         """
         封装 X Agent 调用（独立 agent）
-
         调用 x_provider.search_mentions，返回统一格式
-
         失败或无数据时返回标准空对象，确保 schema 一致
         """
         logger.info(f"[CEO_DISPATCH] Calling X Agent for: {query}")
@@ -164,45 +162,76 @@ class CEOAgent:
         from ..config import settings
 
         try:
-            # 调用 X Provider 获取 mentions
             mentions = await x_provider.search_mentions(query, limit)
 
-            # 防空处理 mentions
+            texts = [m.text for m in mentions if m and getattr(m, "text", None)]
+            sentiments = await xai_search_service.analyze_sentiment_batch(texts) if texts else []
+
             processed_mentions = []
             positive_count = 0
             negative_count = 0
             neutral_count = 0
 
-            for m in mentions:
+            for i, m in enumerate(mentions):
                 if not m:
                     continue
 
-                # 防空处理各字段
-                author_display = getattr(m, 'author_display_name', None) or getattr(m, 'author', '') or ''
-                author = getattr(m, 'author', '') or ''
-                likes = getattr(m, 'likes', 0)
-                comments = getattr(m, 'comments', 0)
-                shares = getattr(m, 'shares', 0)
-                sentiment = getattr(m, 'sentiment', 'neutral')
-                text = getattr(m, 'text', '')
+                sentiment_data = sentiments[i] if i < len(sentiments) else {}
 
-                # 统计情绪
-                if sentiment == "positive":
+                raw_label = (
+                    sentiment_data.get("label")
+                    or sentiment_data.get("sentiment")
+                    or "neutral"
+                )
+
+                label = str(raw_label).strip().lower()
+
+                if label in ("积极", "positive", "pos"):
+                    final_label = "positive"
+                elif label in ("消极", "negative", "neg"):
+                    final_label = "negative"
+                else:
+                    final_label = "neutral"
+
+                score = sentiment_data.get("score") or sentiment_data.get("sentiment_score", 0.0)
+
+                if final_label == "positive":
                     positive_count += 1
-                elif sentiment == "negative":
+                elif final_label == "negative":
                     negative_count += 1
                 else:
                     neutral_count += 1
+
+                author_display = getattr(m, "author_display_name", None) or getattr(m, "author", "") or ""
+                author = getattr(m, "author", "") or ""
+                likes = getattr(m, "likes", 0) or 0
+                comments = getattr(m, "comments", 0) or 0
+                shares = getattr(m, "shares", 0) or 0
+                text = getattr(m, "text", "") or ""
+                tweet_id = getattr(m, "id", "") or getattr(m, "tweet_id", "") or ""
+                author_username = getattr(m, "author_username", "") or ""
+                url = getattr(m, "url", "") or ""
+
+                created_at = ""
+                timestamp = getattr(m, "timestamp", None)
+                if timestamp:
+                    try:
+                        created_at = timestamp.isoformat()
+                    except Exception:
+                        created_at = ""
 
                 processed_mentions.append({
                     "text": text,
                     "author": author_display or author,
                     "engagement": likes + comments + shares,
-                    "sentiment": "积极" if sentiment == "positive" else
-                                "消极" if sentiment == "negative" else "中性"
+                    "sentiment": "积极" if final_label == "positive" else "消极" if final_label == "negative" else "中性",
+                    "sentiment_score": score,
+                    "tweet_id": tweet_id,
+                    "author_username": author_username,
+                    "url": url,
+                    "created_at": created_at,
                 })
 
-            # 构建返回结果（严格对齐后端 schema）
             result = {
                 "mentions": processed_mentions,
                 "stats": {
@@ -211,21 +240,25 @@ class CEOAgent:
                     "negative_count": negative_count,
                     "neutral_count": neutral_count
                 },
-                "sentimentTrend": [],  # 第一版不生成
-                "influencers": [],  # 第一版不生成
+                "sentimentTrend": [],
+                "influencers": [],
                 "alerts": [],
                 "summary": f"关于 {query} 的 X 平台相关讨论",
-                "topics": []  # 第一版不提取
+                "topics": []
             }
 
             return result
 
         except Exception as e:
             logger.error(f"[CEO_DISPATCH] X agent failed: {str(e)}")
-            # 返回标准空对象，确保 schema 一致
             return {
                 "mentions": [],
-                "stats": {"total_mentions": 0, "positive_count": 0, "negative_count": 0, "neutral_count": 0},
+                "stats": {
+                    "total_mentions": 0,
+                    "positive_count": 0,
+                    "negative_count": 0,
+                    "neutral_count": 0
+                },
                 "sentimentTrend": [],
                 "influencers": [],
                 "alerts": [f"X 分析失败: {str(e)}"],
@@ -338,6 +371,30 @@ class CEOAgent:
             seo_result=seo_result,
             x_result=x_result
         )
+
+        # 调试：打印原始 mentions 样本（便于排查脏数据来源）
+        try:
+            import json as _json
+
+            if reddit_result.get("mentions"):
+                logger.info("=== REDDIT MENTION SAMPLE ===")
+                logger.info(
+                    _json.dumps(reddit_result.get("mentions", [])[:3], ensure_ascii=False, indent=2)
+                )
+
+            if seo_result.get("mentions"):
+                logger.info("=== SEO MENTION SAMPLE ===")
+                logger.info(
+                    _json.dumps(seo_result.get("mentions", [])[:3], ensure_ascii=False, indent=2)
+                )
+
+            if x_result.get("mentions"):
+                logger.info("=== X MENTION SAMPLE ===")
+                logger.info(
+                    _json.dumps(x_result.get("mentions", [])[:3], ensure_ascii=False, indent=2)
+                )
+        except Exception as _e:
+            logger.warning(f"[CEO_AGGREGATE] Failed to log mention samples: {_e}")
 
         # 构建统一结果
         result = {

@@ -354,36 +354,10 @@ async def call_grok_analysis(prompt: str) -> Dict:
                 raise ValueError("No content in Grok response")
 
             logger.info(f"📥 Response content length: {len(content)} characters")
+            logger.info("=" * 80)
 
-            # Try to parse JSON from response
-            try:
-                import json
-                parsed = json.loads(content)
-                logger.info(f"✓ JSON parsed successfully")
-
-                # Log summary of parsed data
-                logger.info(f"✓ Topics found: {len(parsed.get('topics', []))}")
-                logger.info(f"✓ Key insights: {len(parsed.get('key_insights', []))}")
-                logger.info(f"✓ Sentiment summary: {parsed.get('sentiment_summary', {})}")
-                logger.info(f"✓ Emerging patterns: {len(parsed.get('emerging_patterns', []))}")
-                logger.info(f"✓ Recommended angles: {len(parsed.get('recommended_angles', []))}")
-                logger.info("=" * 80)
-
-                return parsed
-            except json.JSONDecodeError:
-                # Try to extract JSON from markdown
-                logger.warning("⚠ Direct JSON parse failed, attempting to extract from markdown")
-                import re
-                json_match = re.search(r"\{[\s\S]*\}", content)
-                if json_match:
-                    extracted = json.loads(json_match.group(0))
-                    logger.info(f"✓ JSON extracted from markdown successfully")
-                    logger.info(f"✓ Topics found: {len(extracted.get('topics', []))}")
-                    logger.info("=" * 80)
-                    return extracted
-                logger.error("❌ Failed to parse Grok response as JSON")
-                logger.error(f"❌ Content preview: {content[:500]}...")
-                raise ValueError("Failed to parse Grok response as JSON")
+            # IMPORTANT: 返回 Grok 的原始文本内容，由上层负责解析
+            return content
 
     except httpx.TimeoutException:
         logger.error("❌ Grok API request timed out")
@@ -551,6 +525,8 @@ async def analyze_evidence(
 
     # Step 1: Clean obvious noisy evidence (UI 文本、极短/无意义片段等)
     logger.info("Step 1: Cleaning noisy evidence items...")
+    # 调试：原始条数
+    logger.info(f"=== ANALYZE_EVIDENCE RAW COUNT === {len(evidence)}")
     mention_dicts = [
         {
             "title": getattr(item, "title", None),
@@ -567,9 +543,32 @@ async def analyze_evidence(
     cleaned_evidence = [
         item for idx, item in enumerate(evidence) if idx in cleaned_indices
     ]
-    logger.info(
-        f"  Cleaned evidence: {len(cleaned_evidence)} items (from {len(evidence)})"
-    )
+    # 调试：清洗后条数
+    logger.info(f"=== ANALYZE_EVIDENCE CLEANED COUNT === {len(cleaned_evidence)}")
+
+    # 调试：原始样本前 3 条
+    try:
+        for idx, item in enumerate(evidence[:3]):
+            title = getattr(item, "title", "") or ""
+            content = getattr(item, "content", "") or ""
+            logger.info(
+                f"=== RAW SAMPLE === idx={idx}, "
+                f"title={title[:120]!r}, content={content[:120]!r}"
+            )
+    except Exception:
+        logger.warning("Failed to log RAW SAMPLE for analyze_evidence")
+
+    # 调试：清洗后样本前 3 条
+    try:
+        for idx, item in enumerate(cleaned_evidence[:3]):
+            title = getattr(item, "title", "") or ""
+            content = getattr(item, "content", "") or ""
+            logger.info(
+                f"=== CLEANED SAMPLE === idx={idx}, "
+                f"title={title[:120]!r}, content={content[:120]!r}"
+            )
+    except Exception:
+        logger.warning("Failed to log CLEANED SAMPLE for analyze_evidence")
 
     if not cleaned_evidence:
         logger.warning("All evidence items filtered out as noise, returning empty response")

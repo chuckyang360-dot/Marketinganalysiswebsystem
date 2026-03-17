@@ -192,6 +192,9 @@ async def run_xai_analysis(
                 'text': mention.text,
                 'author': mention.author_username or mention.author,
                 'author_display': mention.author_display_name or mention.author,
+                # Expose raw handle & url so frontend can build stable links
+                'author_username': getattr(mention, 'author_username', None),
+                'url': getattr(mention, 'url', None),
                 'sentiment_score': int(score * 100),
                 'sentiment_label': label,
                 'engagement': engagement,

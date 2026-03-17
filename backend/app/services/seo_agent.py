@@ -15,7 +15,7 @@ from datetime import datetime
 import logging
 import re
 from .seo_search import seo_search_service
-from ..analysis.sentiment import analyze_sentiment
+from ..analysis.sentiment import analyze_sentiment, analyze_sentiment_per_item
 from ..analysis.summary import summary_generator
 from ..analysis.topics import get_topics
 from ..analysis.alerts import detect_alerts
@@ -336,6 +336,19 @@ class SEOAgent:
         print("[SEO_AGENT] Step 5: Performing sentiment analysis...")
 
         sentiment_result = await analyze_sentiment(mentions)
+
+        # Write per-mention sentiment back onto Mention objects
+        per_item = await analyze_sentiment_per_item(mentions)
+        if per_item and len(per_item) == len(mentions):
+            updated = []
+            for m, s in zip(mentions, per_item):
+                if hasattr(m, "model_copy"):
+                    updated.append(m.model_copy(update={"sentiment": s.label, "sentiment_score": s.score}))
+                else:
+                    m.sentiment = s.label
+                    m.sentiment_score = s.score
+                    updated.append(m)
+            mentions = updated
 
         logger.info(f"[SEO_AGENT] Step 5: Sentiment result - positive: {sentiment_result.positive}, negative: {sentiment_result.negative}, neutral: {sentiment_result.neutral}")
         print(f"[SEO_AGENT] Step 5: Sentiment result - positive: {sentiment_result.positive}, negative: {sentiment_result.negative}, neutral: {sentiment_result.neutral}")
