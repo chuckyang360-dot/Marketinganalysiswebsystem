@@ -9,23 +9,35 @@ import type {
 export function normalizeXMention(mention: {
   text: string;
   author: string;
+  author_username?: string;  // Backend field
   author_id?: string;
   author_display_name?: string;
   follower_count?: number;
+  followers?: number;  // Backend field
   verified?: boolean;
   engagement?: number;
   likes?: number;
   replies?: number;
   reposts?: number;
+  shares?: number;  // Backend field
+  comments?: number;  // Backend field
   sentiment?: string;
+  sentiment_score?: number;  // Backend field
   url?: string;
   created_at?: string;
+  timestamp?: string;  // Backend field
+  platform_metadata?: Record<string, any>;  // Backend field
+  raw?: Record<string, any>;  // Backend field
 }): EvidenceItem {
-  const followerCount = mention.follower_count ?? 0;
+  const followerCount = mention.follower_count ?? mention.followers ?? 0;
   const likes = mention.likes ?? 0;
-  const replies = mention.replies ?? 0;
-  const reposts = mention.reposts ?? 0;
+  const replies = mention.replies ?? mention.comments ?? 0;
+  const reposts = mention.reposts ?? mention.shares ?? 0;
   const totalEngagement = likes + replies + reposts;
+
+  // Map backend fields to frontend display name
+  const authorName = mention.author_display_name || mention.author || 'Unknown';
+  const authorHandle = mention.author_username || mention.author;
 
   // TODO: Replace with proper influence calculation when backend provides data
   // TODO: Replace with proper authority calculation
@@ -34,12 +46,12 @@ export function normalizeXMention(mention: {
 
   return {
     platform: 'x',
-    author: mention.author_display_name || mention.author || 'Unknown',
+    author: authorName,
     content: mention.text || '',
     url: mention.url || '',
     source: {
-      username: mention.author,
-      display_name: mention.author_display_name,
+      username: authorHandle,
+      display_name: authorName,
       author_id: mention.author_id,
       follower_count: followerCount,
       verified: mention.verified,
@@ -53,10 +65,11 @@ export function normalizeXMention(mention: {
     },
     analysis: {
       sentiment: mention.sentiment as SentimentType | undefined,
+      sentiment_score: mention.sentiment_score,
       engagement_rate: totalEngagement > 0 && followerCount > 0 ? (totalEngagement / followerCount) * 100 : undefined,
     },
     metadata: {
-      published_at: mention.created_at,
+      published_at: mention.timestamp || mention.created_at,
       content_type: 'tweet' as ContentType,
     },
   };
@@ -64,27 +77,40 @@ export function normalizeXMention(mention: {
 
 // Reddit platform normalization
 export function normalizeRedditMention(mention: {
+  text?: string;  // Backend sends 'text' field
   title?: string;
   content?: string;
   url?: string;
   platform?: string;
   subreddit?: string;
   author?: string;
+  author_username?: string;  // Backend field
+  author_display_name?: string;  // Backend field
   author_id?: string;
   author_karma?: number;
+  timestamp?: string;  // Backend field
   date?: string;
   score?: number;
   upvotes?: number;
   downvotes?: number;
+  comments?: number;  // Backend field
   num_comments?: number;
   post_type?: 'post' | 'comment';
   sentiment?: string;
+  sentiment_score?: number;  // Backend field
+  followers?: number;  // Backend field
+  platform_metadata?: Record<string, any>;  // Backend field
+  raw?: Record<string, any>;  // Backend field
 }): EvidenceItem {
-  const isComment = mention.post_type === 'comment' || (mention.content && !mention.title);
+  const isComment = mention.post_type === 'comment' || (mention.text && !mention.title);
   const authorKarma = mention.author_karma ?? 0;
   const score = mention.score ?? (mention.upvotes ?? 0) - (mention.downvotes ?? 0);
   const upvotes = mention.upvotes ?? Math.max(0, score);
-  const comments = mention.num_comments ?? 0;
+  const comments = mention.comments ?? mention.num_comments ?? 0;
+
+  // Map backend 'text' field to frontend 'content' field
+  // Backend: text, Frontend: content
+  const content = mention.text || mention.content || mention.title || '';
 
   // TODO: Replace with proper influence calculation
   // TODO: Replace with proper authority calculation
@@ -92,17 +118,20 @@ export function normalizeRedditMention(mention: {
 
   return {
     platform: 'reddit',
-    author: mention.author || mention.platform || 'Reddit',
-    content: mention.content || mention.title || '',
+    author: mention.author_display_name || mention.author_username || mention.author || 'Reddit',
+    content: content,
     url: mention.url || '',
     title: mention.title,
     source: {
-      username: mention.author,
+      username: mention.author_username,
+      display_name: mention.author_display_name,
       author_id: mention.author_id,
       author_karma: authorKarma,
+      follower_count: mention.followers,
       source_type: 'community' as SourceType,
     },
     metrics: {
+      likes: score,  // Map backend 'score' to frontend 'likes'
       upvotes,
       downvotes: mention.downvotes,
       score,
@@ -114,7 +143,7 @@ export function normalizeRedditMention(mention: {
     },
     metadata: {
       subreddit: mention.subreddit,
-      published_at: mention.date,
+      published_at: mention.timestamp || mention.date,
       content_type: isComment ? 'comment' : 'post' as ContentType,
     },
   };
@@ -122,6 +151,7 @@ export function normalizeRedditMention(mention: {
 
 // SEO platform normalization
 export function normalizeSEOMention(mention: {
+  text?: string;  // Backend sends 'text' field
   title?: string;
   content?: string;
   url?: string;
@@ -129,26 +159,37 @@ export function normalizeSEOMention(mention: {
   domain?: string;
   domain_authority?: number;
   author?: string;
+  author_display_name?: string;  // Backend field
   published_at?: string;
+  timestamp?: string;  // Backend field
   traffic?: number;
-  backlinks?: number;
+  followers?: number;  // Backend field
   sentiment?: string;
+  sentiment_score?: number;  // Backend field
+  platform_metadata?: Record<string, any>;  // Backend field
+  raw?: Record<string, any>;  // Backend field
 }): EvidenceItem {
   const domainAuthority = mention.domain_authority ?? 0;
   const traffic = mention.traffic ?? 0;
+
+  // Map backend 'text' field to frontend 'content' field
+  // Backend: text, Frontend: content
+  const content = mention.text || mention.content || mention.title || '';
 
   // TODO: Replace with proper authority calculation
   // TODO: Replace with proper overall_weight calculation
 
   return {
     platform: 'seo',
-    author: mention.domain || mention.author || mention.platform || 'Unknown',
-    content: mention.content || mention.title || '',
+    author: mention.author_display_name || mention.domain || mention.author || mention.platform || 'Unknown',
+    content: content,
     url: mention.url || '',
     title: mention.title,
     source: {
       username: mention.domain,
+      display_name: mention.author_display_name,
       domain_authority: domainAuthority,
+      follower_count: mention.followers,
       source_type: 'site' as SourceType,
     },
     metrics: {
@@ -159,7 +200,7 @@ export function normalizeSEOMention(mention: {
     },
     metadata: {
       domain: mention.domain,
-      published_at: mention.published_at,
+      published_at: mention.timestamp || mention.published_at,
       content_type: 'article' as ContentType,
     },
   };

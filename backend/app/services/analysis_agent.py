@@ -1,6 +1,6 @@
 import httpx
 import logging
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set, Tuple, Any
 from datetime import datetime
 from difflib import SequenceMatcher
 from ..config import settings
@@ -134,6 +134,51 @@ def build_evidence_summary(items: List[EvidenceItem]) -> str:
         summary_lines.append(summary)
 
     return "\n---\n".join(summary_lines)
+
+
+def clean_mentions(mentions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    基础 mentions 清洗：
+    - 过滤空内容、超短文本、UI 垃圾词、纯数字、碎片文本
+    """
+    cleaned: List[Dict[str, Any]] = []
+
+    for m in mentions:
+        if not isinstance(m, dict):
+            continue
+
+        title = m.get("title") or ""
+        text = m.get("text") or ""
+        content = f"{title} {text}".strip()
+
+        # 1. 空内容过滤
+        if not content:
+            continue
+
+        # 2. 超短文本过滤
+        if len(content) < 15:
+            continue
+
+        # 3. UI / 垃圾词过滤
+        blacklist = [
+            "read article", "read story", "click here",
+            "sign up", "log in", "view more",
+            "home", "menu",
+        ]
+        if any(b in content.lower() for b in blacklist):
+            continue
+
+        # 4. 纯数字 / 垃圾文本
+        if content.replace(" ", "").isdigit():
+            continue
+
+        # 5. 单词过少（碎片文本）
+        if len(content.split()) <= 3:
+            continue
+
+        cleaned.append(m)
+
+    return cleaned
 
 
 def generate_analysis_prompt(items: List[EvidenceItem], query: str = None) -> str:
@@ -504,14 +549,53 @@ async def analyze_evidence(
             ),
         )
 
-    # Step 1: Deduplicate evidence before analysis
-    logger.info("Step 1: Deduplicating evidence...")
-    deduplicated = deduplicate_evidence(evidence, similarity_threshold=0.85)
-    logger.info(f"  Original: {len(evidence)} items")
+    # Step 1: Clean obvious noisy evidence (UI 文本、极短/无意义片段等)
+    logger.info("Step 1: Cleaning noisy evidence items...")
+    mention_dicts = [
+        {
+            "title": getattr(item, "title", None),
+            "text": getattr(item, "content", None),
+        }
+        for item in evidence
+    ]
+    cleaned_dicts = clean_mentions(mention_dicts)
+    cleaned_indices = {
+        idx
+        for idx, md in enumerate(mention_dicts)
+        if md in cleaned_dicts
+    }
+    cleaned_evidence = [
+        item for idx, item in enumerate(evidence) if idx in cleaned_indices
+    ]
+    logger.info(
+        f"  Cleaned evidence: {len(cleaned_evidence)} items (from {len(evidence)})"
+    )
+
+    if not cleaned_evidence:
+        logger.warning("All evidence items filtered out as noise, returning empty response")
+        return AnalyzeResponse(
+            topics=[],
+            key_insights=[],
+            sentiment_summary=SentimentSummary(
+                positive=0, negative=0, neutral=0, dominant=None
+            ),
+            emerging_patterns=[],
+            recommended_angles=[],
+            meta=AnalysisMeta(
+                total_evidence_analyzed=0,
+                platforms_covered=[],
+                analysis_timestamp=datetime.utcnow().isoformat(),
+            ),
+        )
+
+    # Step 2: Deduplicate evidence before analysis
+    logger.info("Step 2: Deduplicating evidence...")
+    deduplicated = deduplicate_evidence(cleaned_evidence, similarity_threshold=0.85)
+    logger.info(f"  Original after cleaning: {len(cleaned_evidence)} items")
     logger.info(f"  After deduplication: {len(deduplicated)} items")
 
-    # Step 2: Sort by engagement and limit to top N
-    logger.info("Step 2: Sorting by engagement and selecting top N...")
+    # Step 3: Sort by engagement and limit to top N
+    logger.info("Step 3: Sorting by engagement and selecting top N...")
     items_with_score = [(item, calculate_engagement_score(item)) for item in deduplicated]
     items_with_score.sort(key=lambda x: x[1], reverse=True)
     top_items = [item for item, _ in items_with_score[:max_items]]

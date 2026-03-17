@@ -257,10 +257,10 @@ class CEOAgent:
             return report
         except Exception as e:
             logger.error(f"[CEO_DISPATCH] AI Report Service failed: {str(e)}")
-            # 返回标准空对象，确保 schema 一致
+            # 返回「报告不可用」的空结构，避免伪造策略内容，保持 schema 一致
             return {
-                "executive_summary": f"无法生成 {query} 的 AI 咨询报告",
-                "market_analysis": "暂无市场分析",
+                "executive_summary": "",
+                "market_analysis": "",
                 "key_findings": [],
                 "strategy_recommendations": [],
                 "methods": [],

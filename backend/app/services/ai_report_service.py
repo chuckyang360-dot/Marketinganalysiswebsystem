@@ -1,19 +1,18 @@
 """
-AI Report Service (AI Report Layer 占位实现 + Schema 打通)
-
-定位：
-- 这是一个占位实现，未来将接入真实的 Grok/xAI
-- 目的是打通前后端的数据流程
-- 所有 mock 数据都需要基于真实数据源的结构生成
+AI Report Service
 
 职责：
 - 接收来自 CEO Orchestrator 的原始证据（Reddit/SEO/X）
-- 生成标准化的报告结构
-- 返回 JSON 格式的完整报告
+- 将 query + 各 Agent 结果打包为统一 prompt
+- 调用 Grok（x.ai）生成最终报告（JSON）
+- 返回 JSON 格式的完整报告，结构与前端完全一致
 """
 
 from typing import Dict, Any, List, Optional
 import logging
+import json
+
+from .analysis_agent import call_grok_analysis
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class AIReportService:
     """
-    AI Report Service (占位实现)
+    AI Report Service
     """
 
     def __init__(self):
@@ -64,183 +63,247 @@ class AIReportService:
         logger.info(f"[AI_REPORT_SERVICE] SEO result: {seo_result is not None}")
         logger.info(f"[AI_REPORT_SERVICE] X result: {x_result is not None}")
 
-        # 收集 evidence samples（用于 prompt，让 AI 理解数据结构）
-        evidence_samples = []
+        # 收集精简 evidence 样本（帮助 Grok 理解数据结构）
+        evidence_samples: List[Dict[str, Any]] = []
 
-        # 从 Reddit 结果中提取 sample
+        # 从 Reddit 结果中提取 sample（最多 3 条）
         if reddit_result:
-            reddit_mentions = reddit_result.get("mentions", [])
-            if len(reddit_mentions) > 0:
-                evidence_samples.extend([
+            reddit_mentions = reddit_result.get("mentions", []) or []
+            for m in reddit_mentions[:3]:
+                evidence_samples.append(
                     {
                         "source": "reddit",
                         "type": "mention",
                         "sample": {
-                            "text": reddit_mentions[0].get("text", ""),
-                            "author": reddit_mentions[0].get("author", ""),
-                            "subreddit": reddit_mentions[0].get("subreddit", ""),
-                            "created_at": reddit_mentions[0].get("created_at", "")
+                            "text": m.get("text", ""),
+                            "author": m.get("author", ""),
+                            "subreddit": m.get("subreddit", ""),
+                            "created_at": m.get("created_at", ""),
                         },
-                    },
-                    {  # 第 2 条
-                        "source": "reddit",
-                        "type": "mention",
-                        "sample": {
-                            "text": reddit_mentions[1].get("text", ""),
-                            "author": reddit_mentions[1].get("author", ""),
-                            "subreddit": reddit_mentions[1].get("subreddit", ""),
-                            "created_at": reddit_mentions[1].get("created_at", "")
-                        },
-                    },
-                    {  # 第 3 条
-                        "source": "reddit",
-                        "type": "mention",
-                        "sample": {
-                            "text": reddit_mentions[2].get("text", ""),
-                            "author": reddit_mentions[2].get("author", ""),
-                            "subreddit": reddit_mentions[2].get("subreddit", ""),
-                            "created_at": reddit_mentions[2].get("created_at", "")
-                        },
-                    },
-                ])
+                    }
+                )
 
-        # 从 SEO 结果中提取 sample
+        # 从 SEO 结果中提取 sample（最多 3 条）
         if seo_result:
-            seo_mentions = seo_result.get("mentions", [])
-            if len(seo_mentions) > 0:
-                evidence_samples.extend([
+            seo_mentions = seo_result.get("mentions", []) or []
+            for m in seo_mentions[:3]:
+                evidence_samples.append(
                     {
                         "source": "seo",
                         "type": "mention",
                         "sample": {
-                            "title": seo_mentions[0].get("title", ""),
-                            "url": seo_mentions[0].get("url", ""),
-                            "domain": seo_mentions[0].get("domain", "")
+                            "title": m.get("title", ""),
+                            "url": m.get("url", ""),
+                            "domain": m.get("domain", ""),
                         },
-                    },
-                    {  # 第 2 条
-                        "source": "seo",
-                        "type": "mention",
-                        "sample": {
-                            "title": seo_mentions[1].get("title", ""),
-                            "url": seo_mentions[1].get("url", ""),
-                            "domain": seo_mentions[1].get("domain", "")
-                        },
-                    },
-                    {  # 第 3 条
-                        "source": "seo",
-                        "type": "mention",
-                        "sample": {
-                            "title": seo_mentions[2].get("title", ""),
-                            "url": seo_mentions[2].get("url", ""),
-                            "domain": seo_mentions[2].get("domain", "")
-                        },
-                    },
-                ])
+                    }
+                )
 
-        # 从 X 结果中提取 sample
+        # 从 X 结果中提取 sample（最多 3 条）
         if x_result:
-            x_mentions = x_result.get("mentions", [])
-            if len(x_mentions) > 0:
-                evidence_samples.extend([
+            x_mentions = x_result.get("mentions", []) or []
+            for m in x_mentions[:3]:
+                evidence_samples.append(
                     {
                         "source": "x",
-                        "type": "mention",
-                        "sample": {
-                            "text": x_mentions[0].get("text", ""),
-                            "author": x_mentions[0].get("author", ""),
-                            "engagement": x_mentions[0].get("engagement", 0)
-                        },
-                    },
-                    {  # 第 2 条
-                        "source": "x",
-                        "type": "mention",
-                        "sample": {
-                            "text": x_mentions[1].get("text", ""),
-                            "author": x_mentions[1].get("author", ""),
-                            "engagement": x_mentions[1].get("engagement", 0)
-                        },
-                    },
-                    {  # 第 3 条
-                        "source": "x",
-                        "type": "mention",
-                        "sample": {
-                            "text": x_mentions[2].get("text", ""),
-                            "author": x_mentions[2].get("author", ""),
-                            "engagement": x_mentions[2].get("engagement", 0)
-                        },
-                    },
-                ])
+                            "type": "mention",
+                            "sample": {
+                                "text": m.get("text", ""),
+                                "author": m.get("author", ""),
+                                "engagement": m.get("engagement", 0),
+                            },
+                    }
+                )
 
-        logger.info(f"[AI_REPORT_SERVICE] Collected {len(evidence_samples)} evidence samples")
+        logger.info(f"[AI_REPORT_SERVICE] Collected {len(evidence_samples)} evidence samples for Grok prompt")
 
-        # 生成 executive summary（占位实现）
-        executive_summary = f"基于 {query} 的市场数据分析，已收集来自 Reddit、SEO、X 等多个数据源的原始信息。本报告将提供整体的市场洞察、机会识别和策略建议。"
+        # 组装传给 Grok 的原始数据（避免过大，只保留核心字段）
+        grok_input = {
+            "query": query,
+            "reddit_result": reddit_result or {},
+            "seo_result": seo_result or {},
+            "x_result": x_result or {},
+            "evidence_samples": evidence_samples,
+        }
 
-        # 生成 market analysis（占位实现）
-        market_analysis = f"当前市场环境下，{query} 相关领域存在明确的增长机会。Reddit 社区讨论活跃，用户对专业内容的需求在上升。SEO 内容供给相对分散，高质量的行业分析内容仍有空间。X 平台舆情整体中性，品牌认知度有待提升。"
+        # 构造 Grok prompt
+        grok_prompt = f"""
+You are a **CEO-level marketing strategy expert**.
 
-        # 生成 key findings（占位实现）
-        key_findings = [
-            "Reddit 社区是获取真实用户反馈的黄金渠道，讨论话题直接反映用户需求和痛点",
-            "SEO 侧更偏重产品对比和教程，用户在购买决策阶段使用",
-            "X 平台内容传播速度较快，适合新品发布和营销活动"
-        ]
+Your task:
+- Based on the following cross-platform evidence (Reddit / SEO / X) about a market topic,
+- Produce an integrated, board-ready marketing intelligence report for a startup CEO.
 
-        # 生成 strategy recommendations（占位实现）
-        strategy_recommendations = [
-            {
-                "market_judgment": f"{query} 处于成长型市场，建议采用差异化策略，突出专业性和解决方案导向",
-                "channels": ["Reddit", "产品官网", "专业博客"],
-                "positioning": "专业可靠的解决方案提供商"
-            },
-            {
-                "content_strategy": "建立专业内容矩阵，覆盖意识、考虑、决策全阶段。优先长文形式输出行业洞察，配合短视频社交媒体内容",
-                "timing": "立即启动，3 个月内建立完整内容体系",
-                "format": "长文为主（60%），短视频辅助（30%），社交媒体互动（10%）"
+Persona & tone:
+- Speak as a senior marketing & growth strategy leader to a CEO / founder.
+- Be sharp, concise, insight-driven, and execution-oriented.
+
+STRICT OUTPUT FORMAT (IMPORTANT):
+- You MUST output **VALID JSON ONLY**.
+- Do NOT add markdown, explanations, comments or backticks.
+- The JSON MUST strictly match the following schema and key names:
+
+{{
+  "executive_summary": "string (1-3 段，对全局机会和风险的高层总结，用中文)",
+  "market_analysis": "string (市场格局 + 需求侧/供给侧 + 渠道格局分析，用中文)",
+  "key_findings": [
+    "string (每条是一句话的关键发现，用中文，面向 CEO)"
+  ],
+  "strategy_recommendations": [
+    {{
+      "market_judgment": "string (对当前市场机会/风险的判断，用中文)",
+      "channels": [
+        "string (建议重点发力的渠道名称，如：X、Reddit、SEO、YouTube、短视频平台等)"
+      ],
+      "positioning": "string (品牌/产品在该话题下的建议定位，用中文)"
+    }}
+  ],
+  "methods": [
+    {{
+      "name": "string (方法名称，例如「建立话题占位」)",
+      "steps": [
+        "string (执行步骤，按顺序，用中文)"
+      ],
+      "metrics": [
+        "string (衡量这套方法效果的核心指标，如「曝光量」「互动率」「线索数」等)"
+      ]
+    }}
+  ],
+  "content_plan": {{
+    "articles": [
+      "string (长文/博客/专栏选题标题，用中文)"
+    ],
+    "social_posts": [
+      "string (X/微博/社区短帖选题，用中文)"
+    ],
+    "video_ideas": [
+      "string (视频选题，如 B 站/抖音，用中文)"
+    ],
+    "poster_ideas": [
+      "string (海报/配图创意标题，用中文)"
+    ]
+  }}
+}}
+
+Input data (JSON,来自不同 Agent 的原始结果，仅用于参考，不要原样复述)：
+{json.dumps(grok_input, ensure_ascii=False)[:6000]}
+
+Instructions:
+1. 深度理解用户在不同平台上的真实讨论、情绪和需求，不要只是重复关键词。
+2. 优先输出「可执行的 CEO 级别决策信息」，而不是教科书式概念。
+3. 确保所有字段都被填充，列表字段至少给出 2-3 条有差异化的选项。
+4. 严格保证输出是合法可解析的 JSON。
+"""
+
+        logger.info("[AI_REPORT_SERVICE] Sending prompt to Grok for structured report generation")
+
+        try:
+            grok_response = await call_grok_analysis(grok_prompt)
+        except Exception as e:
+            logger.error(f"[AI_REPORT_SERVICE] Grok analysis failed: {e}")
+            # Grok 调用失败时，仅返回「报告不可用」的空结构，避免伪策略误导
+            fallback_result: Dict[str, Any] = {
+                "executive_summary": "",
+                "market_analysis": "",
+                "key_findings": [],
+                "strategy_recommendations": [],
+                "methods": [],
+                "content_plan": {
+                    "articles": [],
+                    "social_posts": [],
+                    "video_ideas": [],
+                    "poster_ideas": [],
+                },
             }
-        ]
 
-        # 生成 methods（占位实现）
-        methods = [
-            {
-                "name": "建立用户信任体系",
-                "steps": [
-                    "收集并展示用户真实案例和评价",
-                    "发布专业的产品白皮书和技术文档",
-                    "建立透明的定价和服务承诺",
-                    "提供产品试用和退款政策"
-                ],
-                "metrics": ["信任度提升", "转化率提高", "客户留存率"]
-            },
-            {
-                "name": "优化 SEO 内容策略",
-                "steps": [
-                    "创建行业问题解决方案内容系列",
-                    "建立权威的 SEO 友情链接",
-                    "定期更新技术博客和知识库",
-                    "优化目标关键词排名和自然流量"
-                ],
-                "metrics": ["搜索排名提升", "自然流量增长", "外链质量改善"]
-            }
-        ]
+            logger.info(f"[AI_REPORT_SERVICE] Returning EMPTY fallback report for: {query}")
+            return fallback_result
 
-        # 构建返回结果
-        result = {
+        # 对 Grok 返回结果做容错 & 归一化，确保完全符合前端 JSON 结构
+        logger.info("[AI_REPORT_SERVICE] Normalizing Grok response to frontend schema")
+
+        def _ensure_str_list(value: Any) -> List[str]:
+            if not value:
+                return []
+            if isinstance(value, list):
+                return [str(v) for v in value]
+            return [str(value)]
+
+        # 顶层字段
+        executive_summary = str(grok_response.get("executive_summary", "") or "")
+        market_analysis = str(grok_response.get("market_analysis", "") or "")
+        key_findings = _ensure_str_list(grok_response.get("key_findings"))
+
+        # strategy_recommendations 归一化
+        raw_strategies = grok_response.get("strategy_recommendations") or []
+        strategy_recommendations: List[Dict[str, Any]] = []
+        if isinstance(raw_strategies, list):
+            for item in raw_strategies:
+                if not isinstance(item, dict):
+                    continue
+                strategy_recommendations.append(
+                    {
+                        "market_judgment": str(item.get("market_judgment", "") or ""),
+                        "channels": _ensure_str_list(item.get("channels")),
+                        "positioning": str(item.get("positioning", "") or ""),
+                    }
+                )
+
+        if not strategy_recommendations:
+            strategy_recommendations = [
+                {
+                    "market_judgment": "暂无足够信息生成可靠的市场判断。",
+                    "channels": [],
+                    "positioning": "",
+                }
+            ]
+
+        # methods 归一化
+        raw_methods = grok_response.get("methods") or []
+        methods: List[Dict[str, Any]] = []
+        if isinstance(raw_methods, list):
+            for item in raw_methods:
+                if not isinstance(item, dict):
+                    continue
+                methods.append(
+                    {
+                        "name": str(item.get("name", "") or ""),
+                        "steps": _ensure_str_list(item.get("steps")),
+                        "metrics": _ensure_str_list(item.get("metrics")),
+                    }
+                )
+
+        if not methods:
+            methods = [
+                {
+                    "name": "占位方法",
+                    "steps": ["Grok 返回结果中未包含 methods 字段，使用占位数据。"],
+                    "metrics": [],
+                }
+            ]
+
+        # content_plan 归一化
+        raw_content_plan = grok_response.get("content_plan") or {}
+        if not isinstance(raw_content_plan, dict):
+            raw_content_plan = {}
+
+        content_plan = {
+            "articles": _ensure_str_list(raw_content_plan.get("articles")),
+            "social_posts": _ensure_str_list(raw_content_plan.get("social_posts")),
+            "video_ideas": _ensure_str_list(raw_content_plan.get("video_ideas")),
+            "poster_ideas": _ensure_str_list(raw_content_plan.get("poster_ideas")),
+        }
+
+        result: Dict[str, Any] = {
             "executive_summary": executive_summary,
             "market_analysis": market_analysis,
             "key_findings": key_findings,
             "strategy_recommendations": strategy_recommendations,
             "methods": methods,
-            "content_plan": {
-                "articles": [],
-                "social_posts": [],
-                "video_ideas": [],
-                "poster_ideas": []
-            }
+            "content_plan": content_plan,
         }
 
-        logger.info(f"[AI_REPORT_SERVICE] AI report generated for: {query}")
+        logger.info(f"[AI_REPORT_SERVICE] AI report generated via Grok for: {query}")
         return result
 
 

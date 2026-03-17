@@ -63,6 +63,8 @@ STOPWORDS = {
     "icon", "img", "image", "photo", "video", "audio", "svg", "png", "jpg", "jpeg", "gif", "webp",
     # Code/implementation words
     "fixed", "fixing", "broken", "working", "works", "worked", "running", "runs", "ran", "implement", "implemented", "implementing",
+    # Chinese stopwords (Chinese words to filter)
+    "还是", "年", "约为", "可以", "会", "没有", "有", "在", "这", "那", "这个", "那个", "的", "了", "和", "与", "或", "但是", "而且", "因为", "所以", "如果", "那么", "对于", "关于", "以及", "并且",
 }
 
 # Generic/meaningless words to filter out
@@ -212,10 +214,303 @@ def is_valid_phrase(phrase: str) -> bool:
     if re.match(r'^[\d_]+$', cleaned_phrase):
         return False
 
-    # Filter out phrases with too many symbols
+    # Filter out fragmented number patterns with comma/semicolon at end
+    # E.g., "约为 ,000；", "000；" (broken salary figures)
+    # Only filter if the phrase ends with punctuation + number
+    phrase_stripped = phrase.replace("_", " ").strip()
+    if re.match(r'.*[，;]\s*\d+[，;.。；]?$', phrase_stripped):
+        return False
+
+    # Filter out phone number fragments (e.g., "+65 6601")
+    if re.match(r'^\+\d+\s+\d+', phrase_stripped):
+        return False
+
+    # Filter out phrases starting with year + Chinese comma (year fragments)
+    # E.g., "2034 年，电子商务", "年，电子商务"
+    if re.match(r'^\d+\s*年[，]', phrase_stripped) or re.match(r'^年[，]', phrase_stripped):
+        return False
+
+    # Filter out phrases with only Chinese fillers + punctuation + number
+    # E.g., "平均年薪约为 ,000；" (broken salary figure)
+    if re.match(r'.*约为.*[,，].*\d+[，;.。；]?$', phrase_stripped):
+        return False
+
+    # Filter out sentence fragments starting with Chinese connecting words
+    # E.g., "及软件公司", "而且在生成式" (starting mid-sentence)
+    if re.match(r'^(及|而且|但是|因此|所以|另外|同时|如果|或者)', phrase_stripped):
+        return False
+
+    # Filter out long sentence fragments with punctuation in the middle
+    # E.g., "AI 从硅谷席卷全球的这两年，软件产业也最先被" (full sentence fragment)
+    if phrase_stripped.count('，') > 1 or phrase_stripped.count(',') > 1:
+        return False
+
+    # Filter out phrases with apostrophe fragments (broken contractions)
+    # E.g., "Here'S", "Don'T", "Player'S Choice", "Tiktok Shop'S", "Tony Hawk'S"
+    # Check in both phrase format (with underscores) and stripped format (with spaces)
+    if "'" in phrase:
+        # Check for apostrophe followed by capital letter (indicates broken contraction)
+        # This pattern catches: "Player'S_Choice", "Shop'S", "Hawk'S"
+        if re.search(r"[A-Za-z]+'[A-Z]", phrase):  # With underscores
+            return False
+        if re.search(r"[A-Za-z]+'[A-Z]", phrase_stripped):  # With spaces
+            return False
+        # Also filter phrases ending with 's (apostrophe + s)
+        if phrase.lower().endswith("_'s"):
+            return False
+        if phrase_stripped.lower().endswith("'s"):
+            return False
+
+    # Filter out patterns that are just symbols (no alphanumeric content)
+    # E.g., "—— ——", "----"
+    if not re.search(r'[a-zA-Z0-9\u4e00-\u9fff]', phrase):
+        return False
+
+    # Filter out number + direction fragments (e.g., "3223 North", "4152 East")
+    # These are typically location coordinates, not topics
+    if re.match(r'^\d+\s+(North|South|East|West|Northeast|Southeast|Northwest|Southwest)(\s|$)', phrase_stripped, re.IGNORECASE):
+        return False
+
+    # Filter out direction + geographic name fragments (e.g., "North Ocean", "South Pacific")
+    if re.match(r'^(North|South|East|West)\s+(Ocean|Pacific|Atlantic|Indian|Sea|Lake|Coast|Shore|Region|Area|Stream|Gulf)$', phrase_stripped, re.IGNORECASE):
+        return False
+
+    # Filter out fragmented platform/brand names - ONLY single words
+    # E.g., single "Tik", "Tok" words are fragments, but "Tiktok Shop" is valid
+    words = phrase_stripped.lower().split()
+    if len(words) == 1:
+        word = words[0]
+        if word in ['tik', 'tok']:
+            return False
+    # Also filter 2-word phrases that are just fragments like "Tik Tok"
+    elif len(words) == 2:
+        if sorted(words) == sorted(['tik', 'tok']):
+            return False
+        if sorted(words) == sorted(['tok', 'shop']):
+            return False
+
+    # Filter out navigation and UI words (single words)
+    # But only if the phrase is ONLY these words (not part of valid topic)
+    if len(words) == 1:
+        word = words[0]
+        if word.lower() in ['shop', 'seller', 'center', 'shipping', 'benefits', 'program', 'read', 'level', 'free', 'offer']:
+            return False
+    # Filter phrases that are navigation words repeated (e.g., "Free Shipping Free", "Level Free Level")
+    if len(words) > 1:
+        nav_words = {'shop', 'seller', 'center', 'shipping', 'benefits', 'program', 'read', 'level', 'free', 'offer'}
+        # If more than half the words are navigation words, reject
+        nav_count = sum(1 for w in words if w.lower() in nav_words)
+        if nav_count > len(words) / 2:
+            return False
+
+    # Filter out question fragments (ending with ?)
+    if phrase_stripped.endswith('?'):
+        return False
+
+    # Filter out URL fragments and navigation words
+    # E.g., "If You'Re", "Shop Seller", "Seller Center", "Car China.Com."
+    if re.match(r'^(If You|If You\'|You\'|Shop Seller|Seller Center|Sign Up|Log In|View Plans|Back To|Skip To|Go To)', phrase_stripped, re.IGNORECASE):
+        return False
+
+    # Filter out domain fragments and URL-like patterns
+    # E.g., "Car China.Com.", "China.Com. Retrieved"
+    if re.match(r'.*\.(com|org|net|io|co|ai|app|site)\.*', phrase_stripped, re.IGNORECASE):
+        return False
+
+    # Filter out product structure fields and table headers (NEW)
+    # E.g., "Name Description", "Description Condition", "Condition Notes", "Sold Cib", "Cover Art"
+    # Match single words starting with these terms
+    if re.match(r'^(Name|Description|Condition|Notes|Cover|Sold|Cib|Games|Art|Acceptable|Included|Greatest|Hits|Misc)\b', phrase_stripped, re.IGNORECASE):
+        return False
+
+    # Filter out generic navigation/template phrases (NEW)
+    # E.g., "Top Posts", "Our Tiktok", "If You're", "Shop Seller"
+    generic_nav_patterns = [
+        r'^top\s+posts$',
+        r'^our\s+tiktok',
+        r'^if\s+you\'re',
+        r'^shop\s+seller$',
+        r'^sold\s+cib$',
+        r'^cover\s+art$',
+        r'^name\s+description$',
+        r'^description\s+condition$',
+        r'^condition\s+notes$',
+        r'^cib\s+acceptable$',
+        r'^games\s+name$',
+        r'^greatest\s+hits$',
+        r'^misc\s*\(\s*games\s*\)',
+    ]
+    for pattern in generic_nav_patterns:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out patterns with parentheses containing noise
+    if re.search(r'\([^)]*\)', phrase_stripped):
+        return False
+
+    # Filter out game-related content and user names (NEW)
+    # E.g., "Super Mario", "Dave Mirra", "Mirra Freestyle", "Xiaomi 15", "Xiaomi 17"
+    game_user_patterns = [
+        r'^super\s+(mario|marioland|smash|bros|kart|world)\b',
+        r'^mario\s+(kart|world|bros|party|golf)\b',
+        r'^dave\s+mirra',
+        r'^mirra\s+freestyle',
+        r'^\w+\s+\d+\s*$',  # Product numbers like "Xiaomi 15", "Xiaomi 17"
+    ]
+    for pattern in game_user_patterns:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out platform fragments and product accessories (NEW)
+    # E.g., "Club Nintendo", "Nintendo Insert", "Mi Tv", "Galaxy Watch", "Smoke Damage"
+    platform_fragments = [
+        r'^club\s+(nintendo|sony|xbox|playstation)\b',
+        r'^(nintendo|sony|xbox|playstation)\s+insert\b',
+        r'^(mi|xiaomi|poco|su7)\s+(tv|watch|band|pad|pro|ultra|max)\b',
+        r'^\w+\s+insert\b',
+        r'^smoke\s+damage\b',
+    ]
+    for pattern in platform_fragments:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out sports/games content and product accessories (NEW)
+    # E.g., "Poor Smoke", "Freestyle Bmx", "Nba Live", "Player's Choice", "X7 Pro", "Tv Box"
+    sports_game_patterns = [
+        r'^poor\s+(smoke|damage|shot|putt|golf|tennis|basketball)\b',
+        r'^\w+\s+(bmx|skate|snowboard|surf|ski)\b',
+        r'^(nba|nfl|mlb|nhl|fifa|uefa)\s+(live|game|score|news)\b',
+        r'^players\s+(choice|rank|stats|card)\b',
+        r'^(freestyle|pro\s+|ultra\s+|max\s+)\s+(bmx|skate|skateboard|snowboard|surf|ski)\b',
+        r'^(mi|xiaomi|poco|su7)\s+(pro|ultra|max|box|band|case|cover|screen)\b',
+        r'^(tv|box)\s+\w+\b',
+    ]
+    for pattern in sports_game_patterns:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out platform-specific phrases (NEW)
+    # E.g., "Join Our", "Our Discord", "Shop-Level Free", "3D", "Discord"
+    platform_patterns = [
+        r'^(Join|Our)\s+(Our|Server|Group|Chat|Discord|Community|Club|Channel)\b',
+        r'^(Discord|Telegram|Slack)\s+\w+\b',
+        r'^\w+\s+(Discord|Telegram|Slack|Group|Channel)\b',
+        r'^Shop[\s\-]*(Level|Level\s*\-*\s*Free|Center|Affiliate|Global|Agency|Live|Seller)\b',
+        r'^Our\s+\$\w+\b',  # "Our $100K+" type patterns
+        r'^My\s+(Shop|Tiktok|Store|Market|Discord|Channel|Group)\b',
+        r'^Your\s+(Shop|Tiktok|Store|Market|Discord)\b',
+        r'^Player[\'’]?\s+Choice\b',
+        r'^\w+\s+3D\b',
+    ]
+    for pattern in platform_patterns:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out generic phrases with "Sell" prefix (NEW)
+    # E.g., "Sell My", "Sell Your", "Sell My Car"
+    if re.match(r'^(Sell|Sell\s+(My|Your|Our|This))\b', phrase_stripped, re.IGNORECASE):
+        return False
+    # Also filter "Sell My" at the end (e.g., "Car China.Com Sell My")
+    if phrase_stripped.lower().endswith('sell my'):
+        return False
+
+    # Filter out username-like patterns (mixed case + numbers)
+    # E.g., "Chapulintacos13 3Mo", "WonderWhyhow", "Chapulintacos13", "Noalvin 1d"
+    # Check both phrase (underscores) and phrase_stripped (spaces)
+    if re.search(r'\d+', phrase) or re.search(r'\d+', phrase_stripped):
+        # Pattern: "Chapulintacos13_3Mo" - ends with short abbreviation after number
+        if re.match(r'^[a-zA-Z]+\d+_[A-Z][a-z]+$', phrase):
+            return False
+        # Pattern: "Noalvin_1d" - word + number + short abbreviation (username pattern)
+        if re.match(r'^[a-zA-Z]+\d+_[a-z]+$', phrase):
+            return False
+        # Pattern: "Poor_Case_1d" etc - general word + number + short word
+        if re.match(r'^[a-zA-Z]+\d+_[a-z]+$', phrase):
+            return False
+        # Check if this looks like a username (mix of numbers and capital letters in non-standard places)
+        words = phrase_stripped.split()
+        # Pattern: "Chapulintacos13 3Mo" - ends with short abbreviation
+        if len(words) == 2 and re.search(r'\d+', words[0]) and len(words[1]) <= 4:
+            return False
+        # Pattern: Both words have numbers (username with numbers)
+        if len(words) == 2 and re.search(r'\d+', words[0]) and re.search(r'\d+', words[1]):
+            return False
+        # Pattern: Single word with number + capital (e.g., "Chapulintacos13")
+        if len(words) == 1 and re.search(r'\d+[A-Z]', words[0]):
+            return False
+        # Check for patterns like "WonderWhyhow" (multiple consecutive capital letters in non-standard places)
+        if re.search(r'[a-z][A-Z]{3,}[a-z]', phrase_stripped):
+            return False
+
+    # Filter out generic time/month phrases
+    # E.g., "Month Tiktok", "Average Speed"
+    generic_time_patterns = [
+        r'^Month\s+\w+\b',
+        r'^Average\s+\w+\b',
+        r'^Daily\s+\w+\b',
+        r'^Weekly\s+\w+\b',
+        r'^Monthly\s+\w+\b',
+        r'^Yearly\s+\w+\b',
+        r'^Speed\s*$',
+    ]
+    for pattern in generic_time_patterns:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out UI/automated text patterns (NEW)
+    # E.g., "Promoted Developers", "My Car", "Shop Growth"
+    ui_patterns = [
+        r'^Promoted\s+\w+',
+        r'^My\s+(Car|Shop|Store|Tiktok|App|Account)',
+        r'^Shop\s+Growth\b',
+        r'^Growth\s+System\b',
+        r'^System\s+We\b',
+        r'^Chinese\s+Xiaomi\b',
+        r'^Chinese\s+\w+$',
+        r'^Discuss\s+\w+$',
+        r'^Codex\s+\w+$',
+        r'^Developers\s+\w+$',
+        r'^Sd\s+Card\b',
+        r'^Micro\s+Sd\b',
+        r'^Expand\s+\w+$',
+        r'^Poor\s+Case\b',
+        r'^Player\'s\s+Choice\b',
+    ]
+    for pattern in ui_patterns:
+        if re.match(pattern, phrase_stripped, re.IGNORECASE):
+            return False
+
+    # Filter out repeated patterns (e.g., "Su7 Xiaomi Su7")
+    words = phrase_stripped.lower().split()
+    if len(words) >= 3 and len(set(words)) < len(words):
+        return False
+
+    # Filter out phrases with too many symbols or starting/ending with symbols
     symbol_count = sum(1 for c in phrase if c in ".,!?;:\"'()[]{}:-+/*=<>")
     if symbol_count > len(phrase) / 2:
         return False
+    # Filter phrases that start with symbol (e.g., '"xiaomi_su7', '(something')
+    if phrase and phrase[0] in ".,!?;:\"'()[]{}:-+/*=<>":
+        return False
+    # Filter phrases that have symbols at non-standard positions
+    # E.g., "2025)._"xiaomi" has symbols in the middle that look like noise
+    if re.search(r'^[^a-zA-Z_]+[a-zA-Z_]+', phrase):
+        return False
+    # Filter phrases ending with symbols (e.g., "Tiktok Shop,", "Xiaomi Su7.")
+    if phrase_stripped and phrase_stripped[-1] in ".,!?;:\"'()[]{}:-+/*=<>":
+        return False
+
+    # Filter out phrases with emoji or non-ASCII characters
+    if re.search(r'[^\x00-\x7F]+', phrase):
+        return False
+
+    # Filter out Chinese text with only filler words
+    # E.g., "还是", "年，电子商务" (year + topic fragment)
+    chinese_chars = sum(1 for c in phrase if '\u4e00' <= c <= '\u9fff')
+    if chinese_chars > 0 and chinese_chars == len(phrase.replace("_", " ").strip()):
+        # If phrase is only Chinese characters and very short (< 3 chars), filter out
+        if chinese_chars < 3:
+            return False
 
     return True
 
@@ -230,7 +525,9 @@ def format_topic(phrase: str) -> str:
     Returns:
         Formatted phrase with spaces
     """
-    formatted = phrase.replace("_", " ").title()
+    # Split by underscore and capitalize each word properly
+    words = phrase.split("_")
+    formatted = " ".join([w.capitalize() for w in words])
     # Fix common acronyms
     formatted = formatted.replace("Cli", "CLI")
     formatted = formatted.replace("Api", "API")
@@ -331,6 +628,9 @@ async def get_topics(mentions: List[Mention], top_n: int = 5) -> List[str]:
                     word.lower() not in SYSTEM_WORDS and
                     word.lower() not in GENERIC_WORDS and
                     word.lower() not in CONTRACTIONS):
+                    # Also filter words that start with symbols (e.g., '"Xiaomi')
+                    if word and word[0] in ".,!?;:\"'()[]{}:-+/*=<>":
+                        continue
                     valid_words.append(word)
 
         word_counts = Counter(valid_words)
@@ -353,7 +653,43 @@ async def get_topics(mentions: List[Mention], top_n: int = 5) -> List[str]:
     logger.info(f"[TOPICS] Final topics: {topics}")
     print(f"[TOPICS] Final topics: {topics}")
 
-    return topics[:top_n]
+    # Clean up topics - remove low quality and noise topics
+    cleaned_topics = clean_topics(topics[:top_n])
+
+    logger.info(f"[TOPICS] Final topics: {cleaned_topics}")
+    print(f"[TOPICS] Final topics: {cleaned_topics}")
+
+    return cleaned_topics
+
+
+def clean_topics(topics: List[str]) -> List[str]:
+    """
+    Clean up topics by removing low-quality and noise topics.
+
+    Args:
+        topics: List of topic strings
+
+    Returns:
+        List of cleaned topic strings
+    """
+    # Only filter obvious noise: question fragments
+    # Topics have already passed is_valid_phrase, so we keep most of them
+    cleaned = []
+    for topic in topics:
+        # Filter out question fragments (ending with ?)
+        if topic.endswith('?'):
+            continue
+        cleaned.append(topic)
+
+    # If cleaning removes too many topics, return original list
+    # This preserves valid topics from over-filtering
+    if len(cleaned) < len(topics) / 2:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"[TOPICS] clean_topics filtered too aggressively ({len(cleaned)}/{len(topics)}). Using original topics.")
+        return topics
+
+    return cleaned
 
 
 async def analyze_topic_trends(

@@ -120,17 +120,8 @@ class RedditAgent:
         # Log sample before cleaning
         original_sample = text[:200]
         logger.debug(f"[REDDIT_AGENT] clean_text - BEFORE: {original_sample}")
-        print(f"[REDDIT_AGENT] clean_text - BEFORE: {original_sample}")
 
         cleaned = text
-
-        # 0. Remove table formatting (handle Markdown tables)
-        cleaned = re.sub(r'\|{2,}', ' ', cleaned)
-        cleaned = re.sub(r'\|:?-{3,}:?\|?', ' ', cleaned)
-        cleaned = re.sub(r'^:?-{3,}:?\s*$', ' ', cleaned, flags=re.MULTILINE)
-        cleaned = re.sub(r'^:{2,}\s*$', ' ', cleaned, flags=re.MULTILINE)
-        cleaned = re.sub(r'\|{1,}', ' ', cleaned)
-        cleaned = re.sub(r'\s*:-\s*', ' ', cleaned)
 
         # 1. Remove HTML tags
         cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
