@@ -20,7 +20,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
 from ..adapters.seo_adapter import create_seo_adapter
-from ..providers.exa_provider import exa_provider
+from ..providers.tavily_provider import tavily_provider
 from ..providers.base import SearchResult, Mention, ProviderError
 
 # Configure logging
@@ -43,8 +43,8 @@ class SEOSearchService:
 
     def __init__(self):
         """Initialize SEO search service."""
-        # Create adapter with ExaProvider via dependency injection
-        self.adapter = create_seo_adapter(exa_provider)
+        # Temporary switch: use TavilyProvider via dependency injection
+        self.adapter = create_seo_adapter(tavily_provider)
 
     async def search_by_keyword(
         self,

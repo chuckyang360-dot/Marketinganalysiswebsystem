@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
 from ..adapters.reddit_adapter import create_reddit_adapter
-from ..providers.exa_provider import exa_provider
+from ..providers.tavily_provider import tavily_provider
 from ..providers.base import SearchResult, Mention
 
 # Configure logging
@@ -39,8 +39,8 @@ class RedditSearchService:
 
     def __init__(self):
         """Initialize Reddit search service with injected adapter."""
-        # Create adapter with ExaProvider via dependency injection
-        self.adapter = create_reddit_adapter(exa_provider)
+        # Temporary switch: use TavilyProvider via dependency injection
+        self.adapter = create_reddit_adapter(tavily_provider)
 
     async def search_by_keywords(
         self,

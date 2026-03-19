@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Exa API Configuration
     EXA_API_KEY: Optional[str] = None  # API key for Exa.ai neural search
 
+    # Tavily API Configuration
+    TAVILY_API_KEY: Optional[str] = None
+    TAVILY_API_URL: str = "https://api.tavily.com"
+
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
