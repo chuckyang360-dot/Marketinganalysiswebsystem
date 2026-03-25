@@ -3,16 +3,33 @@ import { Navbar } from '../components/Navbar';
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
 import { WorkspaceWelcome } from '../components/WorkspaceWelcome';
 import { WorkspaceResultView } from '../components/WorkspaceResultView';
+import EcomProductResultView from '../components/EcomProductResultView';
 import { runFullAnalysis } from '../services/api';
-import type { FullAnalysisResponse } from '../types/analysis';
+import type { WorkspaceAnalysisResult } from '../types/analysis';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function Workspace() {
   const { language: lang } = useLanguage();
   const [currentQuery, setCurrentQuery] = useState('');
-  const [currentResult, setCurrentResult] = useState<FullAnalysisResponse | null>(null);
+  const [currentResult, setCurrentResult] = useState<WorkspaceAnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isEcomUrl = (input: string) => {
+    const trimmed = (input || '').trim().toLowerCase();
+    if (!trimmed.startsWith('http')) return false;
+    return (
+      trimmed.includes('amazon.') ||
+      trimmed.includes('shopify.') ||
+      trimmed.includes('taobao.') ||
+      trimmed.includes('tmall.') ||
+      trimmed.includes('jd.com') ||
+      trimmed.includes('ebay.') ||
+      trimmed.includes('walmart.') ||
+      trimmed.includes('lazada.') ||
+      trimmed.includes('shopee.')
+    );
+  };
 
   const handleAnalyze = async (query: string) => {
     setCurrentQuery(query);
@@ -23,16 +40,6 @@ export function Workspace() {
     try {
       const data = await runFullAnalysis(query);
       console.log("FULL_ANALYSIS_RESPONSE", data);
-
-      // 验证返回数据结构
-      if (!data || typeof data !== 'object') {
-        throw new Error('Invalid response data');
-      }
-
-      // 验证必要字段存在
-      if (!data.query || !data.reddit_analysis || !data.seo_analysis) {
-        throw new Error('Missing required fields in response');
-      }
 
       setCurrentResult(data);
     } catch (err) {
@@ -91,7 +98,13 @@ export function Workspace() {
             <div className="h-full flex items-center justify-center">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-16 w-16 border-4 border-gray-200 border-t-blue-600 mb-4 mx-auto"></div>
-                <p className="text-gray-600">{lang === 'zh' ? '正在分析...' : 'Analyzing...'}</p>
+                <p className="text-gray-600">
+                  {isEcomUrl(currentQuery)
+                    ? (lang === 'zh'
+                        ? '正在抓取商品信息并生成 Vibe 分析...'
+                        : 'Fetching product info and running CEO Vibe analysis...')
+                    : (lang === 'zh' ? '正在分析...' : 'Analyzing...')}
+                </p>
               </div>
             </div>
           ) : error ? (
@@ -131,7 +144,11 @@ export function Workspace() {
                 </div>
               </div>
               <div className="p-6">
-                {currentResult && <WorkspaceResultView data={currentResult} />}
+                {currentResult?.type === 'ecom_product_analysis' ? (
+                  <EcomProductResultView data={currentResult} />
+                ) : (
+                  currentResult && <WorkspaceResultView data={currentResult} />
+                )}
               </div>
             </div>
           )}

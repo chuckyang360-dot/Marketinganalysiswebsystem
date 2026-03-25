@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 from typing import Optional
 
 
@@ -36,6 +37,9 @@ class Settings(BaseSettings):
     # Tavily API Configuration
     TAVILY_API_KEY: Optional[str] = None
     TAVILY_API_URL: str = "https://api.tavily.com"
+
+    # Scrape.do API Configuration
+    SCRAPE_DO_API_TOKEN: Optional[str] = Field(default=None, env="SCRAPE_DO_API_TOKEN")
 
     # Redis Configuration
     REDIS_HOST: str = "localhost"

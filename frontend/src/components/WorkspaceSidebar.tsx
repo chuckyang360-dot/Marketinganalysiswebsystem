@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { FullAnalysisResponse } from '../types/analysis';
+import type { WorkspaceAnalysisResult } from '../types/analysis';
 import type { ReportSection } from '../types/report';
 import { getWorkspaceReportSections } from '../utils/reportSections';
 
 interface Props {
-  currentResult?: FullAnalysisResponse | null;
+  currentResult?: WorkspaceAnalysisResult | null;
   onBackToWelcome?: () => void;
   onNewAnalysis?: () => void;
   onScrollToSection?: (sectionId: string) => void;
@@ -21,7 +21,10 @@ export function WorkspaceSidebar({
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>('executive-summary');
 
-  const currentTitle = currentResult?.query || (lang === 'zh' ? '无' : 'None');
+  const isEcom = (currentResult as any)?.type === 'ecom_product_analysis';
+  const currentTitle =
+    (isEcom ? (currentResult as any)?.parse_data?.title : (currentResult as any)?.query) ||
+    (lang === 'zh' ? '无' : 'None');
 
   const t = {
     zh: {
@@ -77,6 +80,21 @@ export function WorkspaceSidebar({
     evidence: '🧾',
   };
 
+  const ecomSections = [
+    { id: 'product-overview', label: lang === 'zh' ? '商品概览' : 'Product overview', order: 1, icon: '🛒' },
+    { id: 'vibe-diagnosis', label: lang === 'zh' ? 'Vibe 诊断' : 'Vibe diagnosis', order: 2, icon: '🧠' },
+    { id: 'bullet-points', label: lang === 'zh' ? '卖点提炼' : 'Bullet points', order: 3, icon: '✨' },
+    {
+      id: 'image-optimization',
+      label: lang === 'zh' ? '视觉诊断 / 主图优化' : 'Visual / Image optimization',
+      order: 4,
+      icon: '🖼️',
+    },
+    { id: 'title-optimization', label: lang === 'zh' ? '标题优化' : 'Title optimization', order: 5, icon: '📝' },
+    { id: 'pricing-strategy', label: lang === 'zh' ? '定价策略' : 'Pricing strategy', order: 6, icon: '💲' },
+    { id: 'reviews-insights', label: lang === 'zh' ? '用户评价洞察' : 'Review insights', order: 7, icon: '💬' },
+  ];
+
   const handleSectionClick = (sectionId: string) => {
     setActiveSection(sectionId);
     if (onScrollToSection) {
@@ -88,7 +106,7 @@ export function WorkspaceSidebar({
   useEffect(() => {
     if (currentResult === null) return;
 
-    const ids = reportSections.map(s => s.id);
+    const ids = (isEcom ? ecomSections : reportSections).map((s: any) => s.id);
     const elements = ids
       .map(id => (typeof document !== 'undefined' ? document.getElementById(id) : null))
       .filter(Boolean) as HTMLElement[];
@@ -115,7 +133,7 @@ export function WorkspaceSidebar({
 
     elements.forEach(el => observer.observe(el));
     return () => observer.disconnect();
-  }, [currentResult, lang]); // reportSections 由 lang 决定
+  }, [currentResult, lang, isEcom]); // reportSections 由 lang 决定
 
   return (
     <aside className={`${isWelcomeState ? 'w-16' : 'w-56'} bg-white border-r border-gray-200 flex flex-col flex-shrink-0 transition-all`}>
@@ -156,10 +174,10 @@ export function WorkspaceSidebar({
       {/* Result State Directory Navigation */}
       {!isWelcomeState && (
         <nav className="flex-1 flex flex-col py-3">
-          {reportSections
+          {(isEcom ? ecomSections : reportSections)
             .slice()
-            .sort((a, b) => a.order - b.order)
-            .map(section => (
+            .sort((a: any, b: any) => a.order - b.order)
+            .map((section: any) => (
             <button
               key={section.id}
               onClick={() => handleSectionClick(section.id)}
@@ -169,7 +187,9 @@ export function WorkspaceSidebar({
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
-              <span className="text-base flex-shrink-0">{iconById[section.id] ?? '•'}</span>
+              <span className="text-base flex-shrink-0">
+                {isEcom ? section.icon : (iconById[section.id] ?? '•')}
+              </span>
               <span className="flex-1 text-left truncate">{section.label}</span>
             </button>
           ))}

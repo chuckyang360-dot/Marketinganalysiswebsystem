@@ -13,6 +13,8 @@ from .reddit_agent import reddit_agent
 from .seo_agent import seo_agent
 from .xai_search import xai_search_service
 from .ai_report_service import ai_report_service
+from .scrape_do_service import ScrapeDoService
+from .analysis_agent import call_grok_analysis
 from ..analysis.gap_analysis import analyze_keyword_gap
 from ..analysis.content_ideas import generate_content_ideas
 
@@ -145,6 +147,100 @@ class CEOAgent:
         """封装 SEO agent 调用"""
         logger.info(f"[CEO_DISPATCH] Calling SEO Agent")
         return await self.seo_agent.run_analysis(keywords=[query], site_url=None, limit=limit)
+
+    async def _call_ecom_parser(self, url: str) -> Dict[str, Any]:
+        """封装电商商品URL解析：调用 scrape.do 并返回结构化结果"""
+        logger.info(f"[CEO_DISPATCH] Calling Ecom Parser for URL: {url}")
+
+        try:
+            scrape_service = ScrapeDoService()
+            parse_result = await scrape_service.scrape_and_parse(url)
+
+            structured = parse_result.get("structured_data", {})
+
+            enhanced_query = f"""
+你是 Vibe Marketing 的 CEO，请用**专业、锐利、带营销洞察的中文**，对这个 Amazon 商品进行完整营销诊断和优化建议。
+
+商品基础信息：
+- 标题：{structured.get('title', 'N/A')}
+- 价格：{structured.get('price', 'N/A')}
+- 原价：{structured.get('original_price', 'N/A')}
+- 评分：{structured.get('rating', 'N/A')} 分（{structured.get('review_count', 0)} 条评价）
+- 主图：{structured.get('main_image', 'N/A')}
+- 主图/图片列表（最多展示前 8 张）：{(structured.get('images') or [])[:8]}
+- 品牌：{structured.get('brand', 'N/A')}
+- Bullet Points（若有）：{(structured.get('bullet_points') or [])[:8]}
+- 简短描述（若有）：{structured.get('description', '')}
+- URL：{url}
+
+请严格按照以下结构输出（使用 Markdown 格式）：
+
+# Vibe Marketing 商品分析报告
+
+## 1. 当前 Vibe 诊断
+（从视觉、卖点、竞争力三个维度分析当前页面氛围和问题）
+
+## 2. 标题优化建议
+给出 3 个更吸引人的标题版本（带理由）
+
+## 3. 主图与视觉优化建议
+基于「当前主图 + 图片列表 + bullet points」，给出可直接执行的主图/视觉优化清单：
+- 现有主图的主要问题（3-5条）
+- 新主图的构图/元素/文案建议（3套方向）
+- 详情图（若有多图）如何分镜与信息层级
+- 颜色/字体/对比度/信任背书（评分、认证、对比图）如何呈现
+
+## 4. 定价与促销策略
+当前定价是否合理？建议怎么调价、用什么促销手段
+
+## 5. 卖点提炼（推荐 Bullet Points）
+给出 5-7 条高转化率的 bullet points
+
+语气要专业、自信、带干货，像顶级营销顾问在给客户做方案。全部用中文输出。
+"""
+
+            grok_analysis = await self._call_grok_analysis(enhanced_query)
+
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": {
+                    "title": structured.get("title", "N/A"),
+                    "price": structured.get("price", "N/A"),
+                    "original_price": structured.get("original_price", "N/A"),
+                    "rating": structured.get("rating", 0.0),
+                    "review_count": structured.get("review_count", 0),
+                    "reviews": structured.get("reviews", []) or [],
+                    "main_image": structured.get("main_image", ""),
+                    "images": structured.get("images", []) or [],
+                    "brand": structured.get("brand", "N/A"),
+                    "bullet_points": structured.get("bullet_points", []) or [],
+                    "description": structured.get("description", ""),
+                    "url": url,
+                    "platform": "amazon"
+                },
+                "ceo_analysis": grok_analysis,
+                "status": "success",
+                "message": "Vibe Marketing 商品解析完成"
+            }
+
+        except Exception as e:
+            logger.error(f"[CEO_DISPATCH] Ecom Parser failed for {url}: {str(e)}")
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": {
+                    "title": "解析失败",
+                    "price": "N/A",
+                    "rating": 0.0,
+                    "review_count": 0,
+                    "reviews": [],
+                    "main_image": "",
+                    "brand": "N/A",
+                    "url": url,
+                    "platform": "amazon"
+                },
+                "ceo_analysis": f"解析失败: {str(e)}",
+                "status": "error"
+            }
 
     async def _call_x_agent(
         self,
@@ -427,18 +523,23 @@ class CEOAgent:
         """
         logger.info(f"[CEO_ORCHESTRATOR] Starting analysis for: '{query}'")
 
-        # 1. CLASSIFY: 决定激活哪些 agents
-        enabled_agents = {"reddit", "seo"}  # 基础 agents 始终启用
+        # ==================== Vibe Marketing V1.0 - 电商URL优先处理 ====================
+        if self._is_ecom_product_url(query):
+            logger.info(f"[CEO] Detected ecom product URL → routing to ecom parser")
+            parse_result = await self._call_ecom_parser(query)
+            return parse_result   # 直接返回 _call_ecom_parser 构造好的结果（包含 parse_data 和 ceo_analysis）
 
-        # 动态判断是否启用 X
+        # ==================== 普通关键词分析走原有逻辑 ====================
+        logger.info(f"[CEO] Regular query detected, routing to SEO/Reddit/X agents")
+        
+        # 1. CLASSIFY: 决定激活哪些 agents
+        enabled_agents = {"reddit", "seo"}
         if self._should_enable_x_analysis(query):
             enabled_agents.add("x")
-
         logger.info(f"[CEO_CLASSIFY] Enabled agents: {enabled_agents}")
 
         # 2. DISPATCH: 分发任务
         agent_results = {}
-
         if "reddit" in enabled_agents:
             agent_results["reddit"] = await self._call_reddit_agent(query, limit)
         if "seo" in enabled_agents:
@@ -448,8 +549,33 @@ class CEOAgent:
 
         # 3. AGGREGATE: 聚合结果
         result = await self._aggregate_full_result(query, agent_results)
-
         return result
+
+    async def _call_grok_analysis(self, prompt: str) -> Any:
+        """
+        复用现有 Grok 调用函数（analysis_agent.call_grok_analysis）。
+        返回 Grok 的原始文本结果，由上层决定如何展示/解析。
+        """
+        return await call_grok_analysis(prompt)
+
+    def _is_ecom_product_url(self, input_str: str) -> bool:
+        """判断输入是否为电商商品URL"""
+        if not input_str or not input_str.startswith(("http://", "https://")):
+            return False
+
+        ecom_domains = [
+            "amazon.",
+            "shopify.",
+            "taobao.",
+            "tmall.",
+            "jd.com",
+            "ebay.",
+            "walmart.",
+            "lazada.",
+            "shopee.",
+        ]
+        input_lower = input_str.lower()
+        return any(domain in input_lower for domain in ecom_domains)
 
 
 # Singleton instance

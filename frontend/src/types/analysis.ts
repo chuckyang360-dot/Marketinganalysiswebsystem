@@ -190,6 +190,29 @@ export interface AIReport {
   content_plan: ContentPlan;
 }
 
+export interface EcomStructuredData {
+  title?: string;
+  price?: string;
+  original_price?: string;
+  rating?: number;
+  review_count?: number;
+  main_image?: string;
+  images?: string[];
+  brand?: string;
+  bullet_points?: string[];
+  description?: string;
+  platform?: string;
+  url?: string;
+}
+
+export interface EcomProductAnalysisResult {
+  status?: string;
+  type: 'ecom_product_analysis';
+  parse_data: EcomStructuredData;
+  ceo_analysis: string;
+  message?: string;
+}
+
 // 更新 FullAnalysisResponse，添加 report 字段
 export interface FullAnalysisResponse {
   status?: string;
@@ -201,3 +224,5 @@ export interface FullAnalysisResponse {
   content_ideas: ContentIdea[];
   report?: AIReport;  // ← 添加 report 字段（占位实现）
 }
+
+export type WorkspaceAnalysisResult = FullAnalysisResponse | EcomProductAnalysisResult;

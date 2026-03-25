@@ -41,10 +41,10 @@ const EMPTY_DATA: FullAnalysisResponse = {
 
 export function WorkspaceResultView({ data }: Props) {
   const { language: lang } = useLanguage();
-  const safeData = data || EMPTY_DATA;
+  const safeData = (data as FullAnalysisResponse) || EMPTY_DATA;
 
   const reportSections = getWorkspaceReportSections(lang);
-  const labelById = Object.fromEntries(reportSections.map(s => [s.id, s.label])) as Record<
+  const labelById = Object.fromEntries(reportSections.map((s) => [s.id, s.label])) as Record<
     string,
     string
   >;
@@ -240,7 +240,9 @@ export function WorkspaceResultView({ data }: Props) {
                 return (
                   <li key={i}>
                     <div className="font-semibold">{item.title}</div>
-                    {outline && <div className="text-sm text-gray-600 whitespace-pre-line mt-1">{outline}</div>}
+                    {outline && (
+                      <div className="text-sm text-gray-600 whitespace-pre-line mt-1">{outline}</div>
+                    )}
                     {item.estimated_length && (
                       <div className="text-xs text-gray-500 mt-1">预估长度：{item.estimated_length}</div>
                     )}
@@ -291,7 +293,9 @@ export function WorkspaceResultView({ data }: Props) {
                 return (
                   <li key={i}>
                     <div className="font-semibold">{item.title}</div>
-                    {scriptOutline && <div className="text-sm text-gray-600 whitespace-pre-line mt-1">{scriptOutline}</div>}
+                    {scriptOutline && (
+                      <div className="text-sm text-gray-600 whitespace-pre-line mt-1">{scriptOutline}</div>
+                    )}
                     {item.estimated_duration && (
                       <div className="text-xs text-gray-500 mt-1">预估时长：{item.estimated_duration}</div>
                     )}

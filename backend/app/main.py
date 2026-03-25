@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Query
 
 print("=== MAIN.PY VERSION MARKER: CORS_DEBUG_V5 ===")
 
@@ -16,6 +16,7 @@ from .api.x_analysis.routes import router as x_analysis_router
 from .api.gap_analysis import router as gap_analysis_router
 from .api.content_ideas import router as content_ideas_router
 from .api.ceo_agent import router as ceo_agent_router
+from .services.ceo_agent import ceo_agent
 
 # Import all models to ensure they're registered with Base.metadata
 # This must be done before calling init_db()
@@ -80,6 +81,23 @@ app.include_router(gap_analysis_router, prefix="/api/gap-analysis", tags=["Gap A
 app.include_router(content_ideas_router, prefix="/api/content-ideas", tags=["Content Ideas"])
 app.include_router(ceo_agent_router, prefix="/api/full-analysis", tags=["Full Analysis"])
 app.include_router(analyze_router, prefix="/api/analyze", tags=["Evidence Analysis"])
+
+# CEO analyze routes (non-/api paths) to prevent 404
+# /ceo/analyze?query=...
+app.include_router(ceo_agent_router, prefix="/ceo", tags=["ceo"])
+
+
+@app.get("/analyze")
+@app.post("/analyze")
+async def analyze(
+    query: str = Query(..., description="关键词或电商商品URL"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum results per agent"),
+):
+    """
+    Convenience endpoint so /analyze doesn't 404.
+    Internally proxies to CEO agent full analysis entry.
+    """
+    return await ceo_agent.run_full_analysis(query=query, limit=limit)
 
 # Static files (for frontend integration) - only mount if directory exists
 # This allows backend to work independently of frontend (deployed on Vercel)

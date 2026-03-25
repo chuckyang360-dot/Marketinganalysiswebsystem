@@ -6,7 +6,7 @@ Orchestrates Reddit, SEO, Gap Analysis, and Content Ideas agents
 into a single unified workflow.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Dict, Any
 from pydantic import BaseModel, Field
 import logging
@@ -64,3 +64,19 @@ async def full_analysis(request: FullAnalysisRequest):
             status_code=500,
             detail=str(e)
         )
+
+
+@router.get("/analyze")
+@router.post("/analyze")
+async def analyze(
+    query: str = Query(..., description="用户输入的关键词或电商商品URL"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum results per agent"),
+):
+    """Vibe Marketing + Global PulseAI 统一分析入口"""
+    try:
+        result = await ceo_agent.run_full_analysis(query=query, limit=limit)
+        return {"status": "success", **result}
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"[CEO_AGENT] Error in analyze: {str(e)}")
+        return {"status": "error", "error": str(e)}

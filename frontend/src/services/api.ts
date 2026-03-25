@@ -1,8 +1,8 @@
-import type { FullAnalysisResponse } from '../types/analysis';
+import type { FullAnalysisResponse, WorkspaceAnalysisResult } from '../types/analysis';
 
 const API_BASE_URL = 'http://localhost:8000';
 
-export async function runFullAnalysis(query: string): Promise<FullAnalysisResponse> {
+export async function runFullAnalysis(query: string): Promise<WorkspaceAnalysisResult> {
   console.log("API_FULL_ANALYSIS_REQUEST", { query, limit: 20 });
 
   const response = await fetch(`${API_BASE_URL}/api/full-analysis`, {
@@ -24,7 +24,7 @@ export async function runFullAnalysis(query: string): Promise<FullAnalysisRespon
   const text = await response.text();
   console.log("API_FULL_ANALYSIS_RESPONSE_TEXT", text.substring(0, 500));
 
-  let data: FullAnalysisResponse;
+  let data: any;
   try {
     data = JSON.parse(text);
   } catch (parseError) {
@@ -34,16 +34,23 @@ export async function runFullAnalysis(query: string): Promise<FullAnalysisRespon
 
   console.log("API_FULL_ANALYSIS_RESPONSE", data);
 
-  // 验证必要字段存在
+  // 基础校验（兼容关键词分析 + 电商 URL 分析）
   if (!data || typeof data !== 'object') {
     throw new Error('Invalid response: data is null or not an object');
   }
 
-  if (!data.query || !data.reddit_analysis || !data.seo_analysis) {
+  // 电商解析结果（后端会返回 type=ecom_product_analysis）
+  if (data.type === 'ecom_product_analysis') {
+    return data as WorkspaceAnalysisResult;
+  }
+
+  // 兼容原 full-analysis 结构（可能包裹了 status）
+  const maybeFull = (data.query ? data : data) as FullAnalysisResponse;
+  if (!maybeFull.query || !maybeFull.reddit_analysis || !maybeFull.seo_analysis) {
     throw new Error('Invalid response: missing required fields (query, reddit_analysis, seo_analysis)');
   }
 
-  return data;
+  return maybeFull as WorkspaceAnalysisResult;
 }
 
 // Auth API functions
