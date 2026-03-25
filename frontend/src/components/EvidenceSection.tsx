@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import type { FullAnalysisResponse, EvidenceItem } from '../types/analysis';
 import { EvidenceCard } from './EvidenceCard';
 import { normalizeSentiment, normalizeXMention, normalizeRedditMention, normalizeSEOMention } from '../utils/normalizeEvidence';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface Props {
   data: FullAnalysisResponse;
@@ -27,6 +28,25 @@ export function EvidenceSection({ data }: Props) {
     sortBy: 'latest',
     minEngagement: 'all',
   });
+
+  const { language: lang } = useLanguage();
+  const platformTitles =
+    lang === 'en'
+      ? {
+          reddit: 'Reddit Evidence',
+          seo: 'SEO Evidence',
+          x: 'X Sentiment',
+        }
+      : {
+          reddit: 'Reddit证据',
+          seo: 'SEO证据',
+          x: 'X舆情',
+        };
+
+  const sentimentCaptions =
+    lang === 'en'
+      ? { positive: 'Positive', negative: 'Negative', neutral: 'Neutral' }
+      : { positive: '正面', negative: '负面', neutral: '中性' };
 
   const reddit_analysis = data?.reddit_analysis || {
     summary: '',
@@ -189,19 +209,6 @@ export function EvidenceSection({ data }: Props) {
   const seoVisible = seoEvidence;
   const xVisible = xEvidence;
 
-  // 真实 DOM 计数
-  const [domCounts, setDomCounts] = useState({ reddit: 0, seo: 0, x: 0 });
-
-  useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    const redditDom = document.querySelectorAll('[data-evidence-card="reddit"]').length;
-    const seoDom = document.querySelectorAll('[data-evidence-card="seo"]').length;
-    const xDom = document.querySelectorAll('[data-evidence-card="x"]').length;
-    setDomCounts({ reddit: redditDom, seo: seoDom, x: xDom });
-  }, [redditVisible, seoVisible, xVisible]);
-
   // 统一情绪统计：基于 visibleMentions 重新计算
   const countSentiments = (items: EvidenceItem[]) => {
     return items.reduce(
@@ -348,17 +355,17 @@ export function EvidenceSection({ data }: Props) {
         </div>
       </div>
       {/* Reddit Evidence */}
-      <div id="section-reddit-evidence" className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm">
+      <div
+        id="evidence-reddit"
+        className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm hover:shadow-md transition-shadow"
+      >
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center">
             <span className="text-white font-bold">💬</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Reddit 证据</h2>
-          <div className="ml-2 text-xs text-gray-500 space-y-0.5">
-            <div>{redditVisible.length} 条讨论</div>
-            <div>
-              raw {allRedditEvidence.length} / filtered {redditEvidence.length} / visible {redditVisible.length} / realDOM {domCounts.reddit} / sentiment {redditSentiments.positive}-{redditSentiments.negative}-{redditSentiments.neutral}
-            </div>
+          <h2 className="text-2xl font-bold text-gray-900">{platformTitles.reddit}</h2>
+          <div className="ml-2 text-xs text-gray-500">
+            {redditVisible.length} 条讨论
           </div>
         </div>
 
@@ -366,15 +373,15 @@ export function EvidenceSection({ data }: Props) {
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-green-50 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-green-600">{redditSentiments.positive}</div>
-            <div className="text-sm text-gray-600 mt-1">正面</div>
+            <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.positive}</div>
           </div>
           <div className="bg-red-50 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-red-600">{redditSentiments.negative}</div>
-            <div className="text-sm text-gray-600 mt-1">负面</div>
+            <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.negative}</div>
           </div>
           <div className="bg-gray-50 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-gray-600">{redditSentiments.neutral}</div>
-            <div className="text-sm text-gray-600 mt-1">中性</div>
+            <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.neutral}</div>
           </div>
         </div>
 
@@ -387,17 +394,17 @@ export function EvidenceSection({ data }: Props) {
       </div>
 
       {/* SEO Evidence */}
-      <div id="section-seo-evidence" className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm">
+      <div
+        id="evidence-seo"
+        className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm hover:shadow-md transition-shadow"
+      >
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
             <span className="text-white font-bold">🔍</span>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">SEO 证据</h2>
-          <div className="ml-2 text-xs text-gray-500 space-y-0.5">
-            <div>{seoVisible.length} 条内容</div>
-            <div>
-              raw {allSeoEvidence.length} / filtered {seoEvidence.length} / visible {seoVisible.length} / realDOM {domCounts.seo} / sentiment {seoSentiments.positive}-{seoSentiments.negative}-{seoSentiments.neutral}
-            </div>
+          <h2 className="text-2xl font-bold text-gray-900">{platformTitles.seo}</h2>
+          <div className="ml-2 text-xs text-gray-500">
+            {seoVisible.length} 条内容
           </div>
         </div>
 
@@ -405,15 +412,15 @@ export function EvidenceSection({ data }: Props) {
         <div className="grid grid-cols-3 gap-4 mb-6">
           <div className="bg-green-50 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-green-600">{seoSentiments.positive}</div>
-            <div className="text-sm text-gray-600 mt-1">正面</div>
+            <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.positive}</div>
           </div>
           <div className="bg-red-50 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-red-600">{seoSentiments.negative}</div>
-            <div className="text-sm text-gray-600 mt-1">负面</div>
+            <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.negative}</div>
           </div>
           <div className="bg-gray-50 rounded-xl p-4 text-center">
             <div className="text-3xl font-bold text-gray-600">{seoSentiments.neutral}</div>
-            <div className="text-sm text-gray-600 mt-1">中性</div>
+            <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.neutral}</div>
           </div>
         </div>
 
@@ -427,17 +434,17 @@ export function EvidenceSection({ data }: Props) {
 
       {/* X Sentiment Evidence */}
       {xVisible.length > 0 && (
-        <div id="section-x-sentiment" className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm">
+        <div
+          id="evidence-x"
+          className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm hover:shadow-md transition-shadow"
+        >
           <div className="flex items-center gap-3 mb-6">
             <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center">
               <span className="text-white font-bold">X</span>
             </div>
-            <h2 className="text-2xl font-bold text-gray-900">X 舆情证据</h2>
-            <div className="ml-2 text-xs text-gray-500 space-y-0.5">
-              <div>{xVisible.length} 条提及</div>
-              <div>
-                raw {allXEvidence.length} / filtered {xEvidence.length} / visible {xVisible.length} / realDOM {domCounts.x} / sentiment {xSentiments.positive}-{xSentiments.negative}-{xSentiments.neutral}
-              </div>
+            <h2 className="text-2xl font-bold text-gray-900">{platformTitles.x}</h2>
+            <div className="ml-2 text-xs text-gray-500">
+              {xVisible.length} 条提及
             </div>
           </div>
 
@@ -445,15 +452,15 @@ export function EvidenceSection({ data }: Props) {
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-green-50 rounded-xl p-4 text-center">
               <div className="text-3xl font-bold text-green-600">{xSentiments.positive}</div>
-              <div className="text-sm text-gray-600 mt-1">正面</div>
+              <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.positive}</div>
             </div>
             <div className="bg-red-50 rounded-xl p-4 text-center">
               <div className="text-3xl font-bold text-red-600">{xSentiments.negative}</div>
-              <div className="text-sm text-gray-600 mt-1">负面</div>
+              <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.negative}</div>
             </div>
             <div className="bg-gray-50 rounded-xl p-4 text-center">
               <div className="text-3xl font-bold text-gray-600">{xSentiments.neutral}</div>
-              <div className="text-sm text-gray-600 mt-1">中性</div>
+              <div className="text-sm text-gray-600 mt-1">{sentimentCaptions.neutral}</div>
             </div>
           </div>
 
