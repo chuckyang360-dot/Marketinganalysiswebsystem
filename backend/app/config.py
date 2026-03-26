@@ -53,9 +53,12 @@ class Settings(BaseSettings):
         env="GEMINI_API_URL",
     )
     GEMINI_IMAGE_MODEL: str = Field(
-        default="gemini-2.0-flash-preview-image-generation",
+        default="gemini-2.5-flash-image",
         env="GEMINI_IMAGE_MODEL",
     )
+
+    # Alibaba DashScope（Qwen 图片生成备选）
+    DASHSCOPE_API_KEY: Optional[str] = Field(default=None, env="DASHSCOPE_API_KEY")
 
     # Redis Configuration
     REDIS_HOST: str = "localhost"

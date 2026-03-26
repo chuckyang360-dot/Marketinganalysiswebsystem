@@ -1,11 +1,7 @@
 """
 Image generation tool.
-- Google Gemini 优先（仅需 GEMINI_API_KEY）
-- 失败回退 xAI grok-2-image
-
-说明：公开的 gemini-1.5-flash / gemini-1.5-pro 不承担文生图；需使用支持
-responseModalities 含 IMAGE 的模型。默认 GEMINI_IMAGE_MODEL 为官方预览出图模型，
-可通过环境变量覆盖；若改用 1.5 仅用于探测，接口通常会返回错误并走 Grok。
+- Preferred: Google Gemini image model (gemini-2.5-flash-image)
+- Fallback: Alibaba Qwen image model (qwen-image-2.0-pro)
 """
 
 from __future__ import annotations
@@ -22,24 +18,28 @@ logger = logging.getLogger(__name__)
 
 class ImageGenerationTool:
     PROVIDER_GEMINI = "Gemini"
-    PROVIDER_GROK = "GrokImage"
+    PROVIDER_QWEN = "QwenImage"
     _LOG_PREFIX = "[ImageGenTool]"
     _MAX_IMAGES = 4
     _MAX_REFS = 6
+    _GEMINI_MODEL = "gemini-2.5-flash-image"
+    _QWEN_MODEL = "qwen-image-2.0-pro"
+    _QWEN_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 
     async def generate(self, user_prompt: str, reference_images: List[str]) -> Tuple[List[str], str]:
         prompt, refs = self._validate_inputs(user_prompt, reference_images)
 
-        try:
-            images = await self._generate_via_gemini(prompt, refs)
-            logger.info("%s provider=%s count=%s", self._LOG_PREFIX, self.PROVIDER_GEMINI, len(images))
-            return images, self.PROVIDER_GEMINI
-        except Exception as e:
-            logger.warning("%s gemini failed, fallback grok: %s", self._LOG_PREFIX, e)
+        gemini_images = await self._generate_via_gemini(prompt, refs)
+        if gemini_images:
+            logger.info("%s provider=%s count=%s", self._LOG_PREFIX, self.PROVIDER_GEMINI, len(gemini_images))
+            return gemini_images, self.PROVIDER_GEMINI
 
-        images = await self._generate_via_grok(prompt, refs)
-        logger.info("%s provider=%s count=%s", self._LOG_PREFIX, self.PROVIDER_GROK, len(images))
-        return images, self.PROVIDER_GROK
+        qwen_images = await self._generate_via_qwen(prompt, refs)
+        if qwen_images:
+            logger.info("%s provider=%s count=%s", self._LOG_PREFIX, self.PROVIDER_QWEN, len(qwen_images))
+            return qwen_images, self.PROVIDER_QWEN
+
+        raise ValueError("Gemini 和 Qwen 均未能生成图片，请检查 GEMINI_API_KEY 和 DASHSCOPE_API_KEY")
 
     def _validate_inputs(self, user_prompt: str, reference_images: List[str]) -> Tuple[str, List[str]]:
         prompt = (user_prompt or "").strip()
@@ -93,21 +93,20 @@ class ImageGenerationTool:
     async def _generate_via_gemini(self, prompt: str, refs: List[str]) -> List[str]:
         api_key = (settings.GEMINI_API_KEY or "").strip()
         if not api_key:
-            raise ValueError("未配置 GEMINI_API_KEY")
+            logger.warning("%s GEMINI_API_KEY 未配置，跳过 Gemini", self._LOG_PREFIX)
+            return []
 
         base = (settings.GEMINI_API_URL or "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
-        model = (settings.GEMINI_IMAGE_MODEL or "gemini-2.0-flash-preview-image-generation").strip()
+        model = self._GEMINI_MODEL
         endpoint = f"{base}/models/{model}:generateContent"
-
-        logger.info("%s try gemini model=%s", self._LOG_PREFIX, model)
         body_prompt = self._compose_prompt(prompt, refs)
-        collected: List[str] = []
-
         generation_config: Dict[str, Any] = {
             "responseModalities": ["TEXT", "IMAGE"],
             "temperature": 0.9,
         }
 
+        logger.info("%s try gemini model=%s", self._LOG_PREFIX, model)
+        collected: List[str] = []
         async with httpx.AsyncClient(timeout=120.0) as client:
             for attempt in range(1, self._MAX_IMAGES + 1):
                 text = body_prompt
@@ -120,13 +119,19 @@ class ImageGenerationTool:
                     "contents": [{"parts": [{"text": text}]}],
                     "generationConfig": generation_config,
                 }
-                resp = await client.post(
-                    endpoint,
-                    params={"key": api_key},
-                    json=payload,
-                )
+                resp = await client.post(endpoint, params={"key": api_key}, json=payload)
+                if resp.status_code == 404:
+                    logger.warning("%s model=%s HTTP 404，不可用，回退 Qwen", self._LOG_PREFIX, model)
+                    return []
                 if resp.status_code != 200:
-                    raise ValueError(f"Gemini HTTP {resp.status_code}: {resp.text[:500]}")
+                    logger.warning(
+                        "%s model=%s HTTP %s: %s，回退 Qwen",
+                        self._LOG_PREFIX,
+                        model,
+                        resp.status_code,
+                        resp.text[:300],
+                    )
+                    return []
                 data = resp.json()
                 batch = self._extract_inline_images(data)
                 for img in batch:
@@ -138,41 +143,115 @@ class ImageGenerationTool:
                     break
 
         if len(collected) < self._MAX_IMAGES:
-            raise ValueError(f"Gemini 仅产出 {len(collected)} 张，需要 {self._MAX_IMAGES} 张")
+            logger.warning(
+                "%s model=%s 仅产出 %s 张，少于 %s 张，回退 Qwen",
+                self._LOG_PREFIX,
+                model,
+                len(collected),
+                self._MAX_IMAGES,
+            )
+            return []
         return collected[: self._MAX_IMAGES]
 
-    async def _generate_via_grok(self, prompt: str, refs: List[str]) -> List[str]:
-        api_key = settings.XAI_API_KEY
-        if not api_key:
-            raise ValueError("未配置 XAI_API_KEY")
+    def _extract_qwen_image_url(self, payload: Dict[str, Any]) -> str:
+        """
+        官方结构：
+        output.choices[0].message.content[0].image
+        """
+        output = payload.get("output")
+        if not isinstance(output, dict):
+            return ""
+        choices = output.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return ""
+        first = choices[0]
+        if not isinstance(first, dict):
+            return ""
+        message = first.get("message")
+        if not isinstance(message, dict):
+            return ""
+        content = message.get("content")
+        if not isinstance(content, list) or not content:
+            return ""
+        first_content = content[0]
+        if not isinstance(first_content, dict):
+            return ""
+        image = first_content.get("image")
+        if isinstance(image, str) and image.strip():
+            return image.strip()
+        return ""
 
-        logger.info("%s try grok", self._LOG_PREFIX)
-        url = f"{settings.XAI_API_URL.rstrip('/')}/images/generations"
+    async def _generate_via_qwen(self, prompt: str, refs: List[str]) -> List[str]:
+        api_key = (settings.DASHSCOPE_API_KEY or "").strip()
+        if not api_key:
+            logger.warning("%s DASHSCOPE_API_KEY 未配置，无法使用 Qwen", self._LOG_PREFIX)
+            return []
+
+        logger.info("%s try qwen model=%s", self._LOG_PREFIX, self._QWEN_MODEL)
         body_prompt = self._compose_prompt(prompt, refs)
         images: List[str] = []
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            for _ in range(self._MAX_IMAGES):
+            for attempt in range(1, self._MAX_IMAGES + 1):
+                text = body_prompt
+                if attempt > 1:
+                    text += (
+                        f"\n\n（变体 {attempt}/{self._MAX_IMAGES}，"
+                        "保持同一商品卖点，构图或背景可略有不同。）"
+                    )
+                payload = {
+                    "model": self._QWEN_MODEL,
+                    "input": {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "text": text
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    "parameters": {
+                        "size": "2048*2048",
+                        "watermark": False,
+                        "prompt_extend": True,
+                    },
+                }
                 resp = await client.post(
-                    url,
+                    self._QWEN_ENDPOINT,
                     headers={
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={"model": "grok-2-image", "prompt": body_prompt, "n": 1},
+                    json=payload,
                 )
                 if resp.status_code >= 400:
+                    logger.warning(
+                        "%s qwen model=%s HTTP %s: %s",
+                        self._LOG_PREFIX,
+                        self._QWEN_MODEL,
+                        resp.status_code,
+                        resp.text[:300],
+                    )
                     continue
-                payload = resp.json() if resp.content else {}
-                item = (payload.get("data") or [{}])[0] if isinstance(payload, dict) else {}
-                if isinstance(item, dict) and item.get("url"):
-                    images.append(str(item["url"]))
+                data = resp.json() if resp.content else {}
+                if not isinstance(data, dict):
                     continue
-                b64 = item.get("b64_json") if isinstance(item, dict) else None
-                if b64:
-                    images.append(f"data:image/png;base64,{b64}")
+                img = self._extract_qwen_image_url(data)
+                if img and img not in images:
+                    images.append(img)
+                if len(images) >= self._MAX_IMAGES:
+                    break
 
         images = self._dedupe(images)
         if len(images) < self._MAX_IMAGES:
-            raise ValueError(f"Grok 仅产出 {len(images)} 张，需要 {self._MAX_IMAGES} 张")
+            logger.warning(
+                "%s Qwen 仅产出 %s 张，少于 %s 张",
+                self._LOG_PREFIX,
+                len(images),
+                self._MAX_IMAGES,
+            )
+            return []
         return images[: self._MAX_IMAGES]
