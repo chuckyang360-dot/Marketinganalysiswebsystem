@@ -2,15 +2,32 @@ import type { FullAnalysisResponse, WorkspaceAnalysisResult } from '../types/ana
 
 const API_BASE_URL = 'http://localhost:8000';
 
-export async function runFullAnalysis(query: string): Promise<WorkspaceAnalysisResult> {
-  console.log("API_FULL_ANALYSIS_REQUEST", { query, limit: 20 });
+/** CEO 统一入口扩展字段（如电商主图优化） */
+export type FullAnalysisExtras = {
+  action?: string;
+  user_prompt?: string;
+  selected_reference_images?: string[];
+};
+
+export async function runFullAnalysis(
+  query: string,
+  extras?: FullAnalysisExtras
+): Promise<WorkspaceAnalysisResult> {
+  console.log("API_FULL_ANALYSIS_REQUEST", { query, limit: 20, extras });
+
+  const body: Record<string, unknown> = { query, limit: 20 };
+  if (extras?.action != null) body.action = extras.action;
+  if (extras?.user_prompt != null) body.user_prompt = extras.user_prompt;
+  if (extras?.selected_reference_images != null) {
+    body.selected_reference_images = extras.selected_reference_images;
+  }
 
   const response = await fetch(`${API_BASE_URL}/api/full-analysis`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ query, limit: 20 }),
+    body: JSON.stringify(body),
   });
 
   console.log("API_FULL_ANALYSIS_RESPONSE_STATUS", response.status, response.ok);

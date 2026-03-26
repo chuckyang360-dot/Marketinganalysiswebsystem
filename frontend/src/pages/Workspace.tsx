@@ -5,7 +5,8 @@ import { WorkspaceWelcome } from '../components/WorkspaceWelcome';
 import { WorkspaceResultView } from '../components/WorkspaceResultView';
 import EcomProductResultView from '../components/EcomProductResultView';
 import { runFullAnalysis } from '../services/api';
-import type { WorkspaceAnalysisResult } from '../types/analysis';
+import type { EcomProductAnalysisResult, WorkspaceAnalysisResult } from '../types/analysis';
+import { isEcomProductAnalysisResult } from '../types/analysis';
 import { useLanguage } from '../contexts/LanguageContext';
 
 export function Workspace() {
@@ -144,10 +145,17 @@ export function Workspace() {
                 </div>
               </div>
               <div className="p-6">
-                {currentResult?.type === 'ecom_product_analysis' ? (
-                  <EcomProductResultView data={currentResult} />
+                {currentResult && isEcomProductAnalysisResult(currentResult) ? (
+                  <EcomProductResultView
+                    key={currentQuery}
+                    data={currentResult}
+                    productUrl={currentQuery}
+                    onEcomResultUpdate={(next: EcomProductAnalysisResult) =>
+                      setCurrentResult(next)
+                    }
+                  />
                 ) : (
-                  currentResult && <WorkspaceResultView data={currentResult} />
+                  currentResult ? <WorkspaceResultView data={currentResult} /> : null
                 )}
               </div>
             </div>

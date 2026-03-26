@@ -7,7 +7,7 @@ into a single unified workflow.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 import logging
 
@@ -16,8 +16,21 @@ from ...services.ceo_agent import ceo_agent
 
 class FullAnalysisRequest(BaseModel):
     """Request model for full analysis."""
-    query: str = Field(..., min_length=1, max_length=500, description="Search query")
+    query: str = Field(..., min_length=1, max_length=2000, description="Search query 或电商商品 URL")
     limit: int = Field(20, ge=1, le=100, description="Maximum results per agent")
+    # CEO 统一编排：图片优化等扩展动作（非 URL 分析走 action）
+    action: Optional[str] = Field(
+        default=None,
+        description='例如 ecom_optimize_images：在 CEO 内走 Banana→Grok 主图优化',
+    )
+    user_prompt: Optional[str] = Field(
+        default=None,
+        description="图片优化时用户编辑的 Prompt",
+    )
+    selected_reference_images: Optional[List[str]] = Field(
+        default=None,
+        description="图片优化参考图 URL，最多 6 张",
+    )
 
 
 router = APIRouter()
@@ -46,10 +59,13 @@ async def full_analysis(request: FullAnalysisRequest):
                 detail="Please provide a search query"
             )
 
-        # Use CEO Agent for unified analysis
+        # Use CEO Agent for unified analysis（含图片优化等 action）
         result = await ceo_agent.run_full_analysis(
             query=request.query,
-            limit=request.limit
+            limit=request.limit,
+            action=request.action,
+            user_prompt=request.user_prompt,
+            selected_reference_images=request.selected_reference_images,
         )
 
         return {

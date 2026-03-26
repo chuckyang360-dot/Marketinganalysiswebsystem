@@ -86,7 +86,6 @@ app.include_router(analyze_router, prefix="/api/analyze", tags=["Evidence Analys
 # /ceo/analyze?query=...
 app.include_router(ceo_agent_router, prefix="/ceo", tags=["ceo"])
 
-
 @app.get("/analyze")
 @app.post("/analyze")
 async def analyze(

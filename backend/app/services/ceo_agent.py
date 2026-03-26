@@ -7,13 +7,15 @@ CEO Agent Service (Orchestrator)
 - Aggregate: 聚合各 agent 结果为统一格式
 """
 
-from typing import List, Dict, Any, Set, Optional
+from typing import List, Dict, Any, Set, Optional, Tuple
 import logging
+
 from .reddit_agent import reddit_agent
 from .seo_agent import seo_agent
 from .xai_search import xai_search_service
 from .ai_report_service import ai_report_service
 from .scrape_do_service import ScrapeDoService
+from .ceo_tools import ImageGenerationTool
 from .analysis_agent import call_grok_analysis
 from ..analysis.gap_analysis import analyze_keyword_gap
 from ..analysis.content_ideas import generate_content_ideas
@@ -106,6 +108,7 @@ class CEOAgent:
         self.seo_agent = seo_agent
         self.x_agent = xai_search_service
         self.ai_report_service = ai_report_service
+        self.image_generation_tool = ImageGenerationTool()
 
     # ========== 1. CLASSIFY LAYER ==========
 
@@ -241,6 +244,123 @@ class CEOAgent:
                 "ceo_analysis": f"解析失败: {str(e)}",
                 "status": "error"
             }
+
+    # ========== 图片优化（指挥：抓取 + 委托 ImageGenerationTool）==========
+
+    @staticmethod
+    def _ecom_parse_data_from_structured(
+        structured: Dict[str, Any],
+        product_url: str,
+        *,
+        optimized_images: Optional[List[str]] = None,
+        image_generation_provider: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        d: Dict[str, Any] = {
+            "title": structured.get("title", "N/A"),
+            "price": structured.get("price", "N/A"),
+            "original_price": structured.get("original_price", "N/A"),
+            "rating": structured.get("rating", 0.0),
+            "review_count": structured.get("review_count", 0),
+            "reviews": structured.get("reviews", []) or [],
+            "main_image": structured.get("main_image", ""),
+            "images": structured.get("images", []) or [],
+            "brand": structured.get("brand", "N/A"),
+            "bullet_points": structured.get("bullet_points", []) or [],
+            "description": structured.get("description", ""),
+            "url": product_url,
+            "platform": "amazon",
+        }
+        if optimized_images is not None:
+            d["optimized_images"] = optimized_images
+        if image_generation_provider:
+            d["image_generation_provider"] = image_generation_provider
+        return d
+
+    async def _generate_optimized_images(
+        self,
+        user_prompt: str,
+        reference_images: List[str],
+    ) -> Tuple[List[str], str]:
+        refs = [u for u in reference_images if isinstance(u, str) and u.strip()][:6]
+        if not refs:
+            raise ValueError("至少需要选择一张参考图")
+        if not user_prompt.strip():
+            raise ValueError("user_prompt 不能为空")
+        return await self.image_generation_tool.generate(user_prompt.strip(), refs)
+
+    async def _handle_ecom_optimize_images(
+        self,
+        product_url: str,
+        user_prompt: str,
+        reference_images: List[str],
+    ) -> Dict[str, Any]:
+        """抓取商品页 → 调用主图生成工具 → 写入 parse_data。"""
+        if not self._is_ecom_product_url(product_url):
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": {"url": product_url, "platform": "amazon"},
+                "ceo_analysis": "图片优化失败：query 必须是已支持的电商商品 URL。",
+                "status": "error",
+                "message": "无效的电商 URL",
+            }
+
+        refs = [u for u in (reference_images or []) if isinstance(u, str) and u.strip()][:6]
+        up = (user_prompt or "").strip()
+        if not refs or not up:
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": {"url": product_url, "platform": "amazon"},
+                "ceo_analysis": "图片优化失败：请提供 user_prompt 并至少选择一张参考图。",
+                "status": "error",
+                "message": "参数不完整",
+            }
+
+        try:
+            parse_result = await ScrapeDoService().scrape_and_parse(product_url)
+            structured = parse_result.get("structured_data", {}) or {}
+        except Exception as e:
+            logger.error("[CEO_IMAGE] 抓取失败：%s", e)
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": {"url": product_url, "platform": "amazon"},
+                "ceo_analysis": f"图片优化失败：无法抓取商品页 — {e}",
+                "status": "error",
+                "message": "抓取失败",
+            }
+
+        try:
+            optimized, provider = await self._generate_optimized_images(up, refs)
+        except Exception as e:
+            logger.error("[CEO_IMAGE] 生成失败：%s", e)
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": self._ecom_parse_data_from_structured(
+                    structured, product_url, optimized_images=[]
+                ),
+                "ceo_analysis": (
+                    f"图片优化失败：{e}。"
+                    "请检查 GEMINI_API_KEY（及 GEMINI_IMAGE_MODEL）或 XAI_API_KEY。"
+                ),
+                "status": "error",
+                "message": "主图优化失败",
+            }
+
+        parse_data = self._ecom_parse_data_from_structured(
+            structured,
+            product_url,
+            optimized_images=optimized,
+            image_generation_provider=provider,
+        )
+        return {
+            "type": "ecom_product_analysis",
+            "parse_data": parse_data,
+            "ceo_analysis": (
+                f"CEO 已编排完成主图优化（**{provider}**），共 **{len(optimized)}** 张。"
+                " 结果见 `parse_data.optimized_images`。"
+            ),
+            "status": "success",
+            "message": "图片优化完成",
+        }
 
     async def _call_x_agent(
         self,
@@ -511,7 +631,10 @@ class CEOAgent:
     async def run_full_analysis(
         self,
         query: str,
-        limit: int = 20
+        limit: int = 20,
+        action: Optional[str] = None,
+        user_prompt: Optional[str] = None,
+        selected_reference_images: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         运行完整分析流程（orchestrator 主入口）
@@ -520,8 +643,17 @@ class CEOAgent:
         1. Classify: 判断激活哪些 agents
         2. Dispatch: 分发任务给 agents
         3. Aggregate: 聚合结果
+
+        扩展：action=ecom_optimize_images 时在 CEO 内编排主图优化（Banana → Grok）。
         """
-        logger.info(f"[CEO_ORCHESTRATOR] Starting analysis for: '{query}'")
+        logger.info(f"[CEO_ORCHESTRATOR] Starting analysis for: '{query}' (action={action!r})")
+
+        if (action or "").strip() == "ecom_optimize_images":
+            return await self._handle_ecom_optimize_images(
+                product_url=query.strip(),
+                user_prompt=(user_prompt or "").strip(),
+                reference_images=list(selected_reference_images or []),
+            )
 
         # ==================== Vibe Marketing V1.0 - 电商URL优先处理 ====================
         if self._is_ecom_product_url(query):

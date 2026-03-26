@@ -203,6 +203,10 @@ export interface EcomStructuredData {
   description?: string;
   platform?: string;
   url?: string;
+  /** CEO 主图优化结果（至多 4 张 URL 或 data URL） */
+  optimized_images?: string[];
+  /** 如 Gemini / GrokImage 等 */
+  image_generation_provider?: string;
 }
 
 export interface EcomProductAnalysisResult {
@@ -211,6 +215,9 @@ export interface EcomProductAnalysisResult {
   parse_data: EcomStructuredData;
   ceo_analysis: string;
   message?: string;
+  /** 与 parse_data 对齐的可选镜像字段（若后端顶层也返回） */
+  optimized_images?: string[];
+  image_generation_provider?: string;
 }
 
 // 更新 FullAnalysisResponse，添加 report 字段
@@ -223,6 +230,16 @@ export interface FullAnalysisResponse {
   gap_analysis: GapAnalysis;
   content_ideas: ContentIdea[];
   report?: AIReport;  // ← 添加 report 字段（占位实现）
+  /** 预留：关键词分析路径一般不返回，与后端扩展字段对齐 */
+  optimized_images?: string[];
+  image_generation_provider?: string;
 }
 
 export type WorkspaceAnalysisResult = FullAnalysisResponse | EcomProductAnalysisResult;
+
+/** FullAnalysisResponse 无 type 字段；电商结果为判别联合的可识别分支 */
+export function isEcomProductAnalysisResult(
+  r: WorkspaceAnalysisResult
+): r is EcomProductAnalysisResult {
+  return (r as EcomProductAnalysisResult).type === 'ecom_product_analysis';
+}

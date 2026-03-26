@@ -41,6 +41,22 @@ class Settings(BaseSettings):
     # Scrape.do API Configuration
     SCRAPE_DO_API_TOKEN: Optional[str] = Field(default=None, env="SCRAPE_DO_API_TOKEN")
 
+    # Banana.dev（Flux 等 GPU 推理部署）
+    BANANA_API_KEY: Optional[str] = Field(default=None, env="BANANA_API_KEY")
+    BANANA_MODEL_KEY: Optional[str] = Field(default=None, env="BANANA_MODEL_KEY")
+    BANANA_API_URL: str = Field(default="https://api.banana.dev/", env="BANANA_API_URL")
+
+    # Google Gemini（图片优化首选；文生图需使用支持 IMAGE 输出的模型 ID）
+    GEMINI_API_KEY: Optional[str] = Field(default=None, env="GEMINI_API_KEY")
+    GEMINI_API_URL: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        env="GEMINI_API_URL",
+    )
+    GEMINI_IMAGE_MODEL: str = Field(
+        default="gemini-2.0-flash-preview-image-generation",
+        env="GEMINI_IMAGE_MODEL",
+    )
+
     # Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

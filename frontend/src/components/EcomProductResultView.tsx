@@ -1,11 +1,16 @@
 import type { EcomProductAnalysisResult } from '../types/analysis';
-import { useMemo, useState } from 'react';
+import { isEcomProductAnalysisResult } from '../types/analysis';
+import { useEffect, useMemo, useState } from 'react';
+import { runFullAnalysis } from '../services/api';
 
 interface Props {
   data: EcomProductAnalysisResult;
+  /** 当前 Workspace 分析所用的商品 URL（与 CEO action 共用同一入口） */
+  productUrl: string;
+  onEcomResultUpdate?: (next: EcomProductAnalysisResult) => void;
 }
 
-export default function EcomProductResultView({ data }: Props) {
+export default function EcomProductResultView({ data, productUrl, onEcomResultUpdate }: Props) {
   const pd = data.parse_data || {};
   const ceoText = String(data.ceo_analysis || '暂无分析');
   const [selectedImage, setSelectedImage] = useState<string>('');
@@ -13,8 +18,12 @@ export default function EcomProductResultView({ data }: Props) {
   const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [downloadingUrl, setDownloadingUrl] = useState<string | null>(null);
-  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
-  const [selectedGeneratedImage, setSelectedGeneratedImage] = useState<string>('');
+  const [selectedReferenceImages, setSelectedReferenceImages] = useState<string[]>([]);
+  const [selectedReferencePreview, setSelectedReferencePreview] = useState<string>('');
+  const [userPrompt, setUserPrompt] = useState<string>('');
+  const [generatedOptimizedImages, setGeneratedOptimizedImages] = useState<string[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [hasGenerated, setHasGenerated] = useState(false);
   // V1.0 用户评价洞察 - 严格按产品需求实现
   const [visibleReviews, setVisibleReviews] = useState<number>(5);
   const [expandedReviewKeys, setExpandedReviewKeys] = useState<Set<string>>(() => new Set());
@@ -112,21 +121,75 @@ export default function EcomProductResultView({ data }: Props) {
     setShowTitleSuggestions(true);
   };
 
-  const generateNewMainImage = () => {
-    // 紧急修复主图数量+原图 bug：
-    // 生成区不再依赖 activeImage / selectedImage，直接使用后端返回的 parse_data.images 前4张
-    const backendImages = Array.isArray((pd as any).images) ? ((pd as any).images as string[]) : [];
-    const fallback = pd.main_image ? [String(pd.main_image)] : [];
-    const src = (backendImages.length > 0 ? backendImages : fallback)
-      .map((x) => String(x || '').trim())
-      .filter(Boolean);
+  const referenceCandidates = useMemo(() => images.slice(0, 6), [images]);
 
-    const top4 = src.slice(0, 4);
-    setGeneratedImages(top4);
-    setSelectedGeneratedImage(top4[0] || '');
+  useEffect(() => {
+    if (referenceCandidates.length === 0) {
+      setSelectedReferenceImages([]);
+      setSelectedReferencePreview('');
+      return;
+    }
+    // 最终调整：默认全部不勾选，用户手动选择
+    setSelectedReferenceImages([]);
+    setSelectedReferencePreview(referenceCandidates[0] || '');
+  }, [referenceCandidates]);
+
+  useEffect(() => {
+    if (!userPrompt.trim()) {
+      setUserPrompt(sections.image || '请基于参考图优化主图的构图、文案层级与转化表现。');
+    }
+  }, [sections.image]);
+
+  useEffect(() => {
+    const opt = data.parse_data?.optimized_images;
+    if (Array.isArray(opt) && opt.length > 0) {
+      setGeneratedOptimizedImages(opt.slice(0, 4));
+      setHasGenerated(true);
+    }
+  }, [data.parse_data?.optimized_images]);
+
+  const toggleReferenceImage = (img: string) => {
+    setSelectedReferenceImages((prev) => {
+      if (prev.includes(img)) return prev.filter((x) => x !== img);
+      return [...prev, img];
+    });
   };
 
-  const activeGenerated = selectedGeneratedImage || generatedImages[0] || '';
+  const generateOptimizedImages = async () => {
+    if (selectedReferenceImages.length === 0 || !userPrompt.trim()) return;
+    const url = String(productUrl || pd.url || '').trim();
+    if (!url) {
+      alert('缺少商品 URL，无法请求 CEO 编排主图优化');
+      return;
+    }
+    setHasGenerated(true);
+    setIsGenerating(true);
+    try {
+      const res = await runFullAnalysis(url, {
+        action: 'ecom_optimize_images',
+        user_prompt: userPrompt.trim(),
+        selected_reference_images: selectedReferenceImages.slice(0, 6),
+      });
+      if (!isEcomProductAnalysisResult(res)) {
+        throw new Error('响应类型异常');
+      }
+      if (res.status === 'error') {
+        alert(String(res.ceo_analysis || res.message || '主图优化失败'));
+        setGeneratedOptimizedImages([]);
+        return;
+      }
+      const nextImages = Array.isArray(res.parse_data?.optimized_images)
+        ? res.parse_data.optimized_images.slice(0, 4)
+        : [];
+      setGeneratedOptimizedImages(nextImages);
+      onEcomResultUpdate?.(res);
+    } catch (e) {
+      setGeneratedOptimizedImages([]);
+      alert(e instanceof Error ? e.message : '主图优化请求失败');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   // 紧急修复 Amazon 价格解析失败（$,, 问题）：前端渲染兜底
   const safePrice = useMemo(() => {
@@ -495,61 +558,169 @@ export default function EcomProductResultView({ data }: Props) {
           ) : null}
         </div>
 
-        {/* 主图生成：当前主图展示 + “生成新主图”按钮（占位） */}
+        {/* 图片优化：前6张候选 + Prompt 编辑 + 生成后左右分栏 */}
         <div className="mt-6 rounded-2xl border border-gray-100 bg-gray-50 p-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-gray-900">主图生成</div>
-              <div className="text-sm text-gray-600 mt-1">
-                已生成主图：{generatedImages.length > 0 ? `${generatedImages.length} 张` : '暂无'}
+          {!hasGenerated ? (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">图片优化</div>
+                  <div className="text-sm text-gray-600 mt-1">从商品主图中选择参考图并编辑优化 Prompt</div>
+                </div>
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-gray-800 text-sm font-medium disabled:opacity-60"
+                  onClick={generateOptimizedImages}
+                  disabled={selectedReferenceImages.length === 0 || !userPrompt.trim()}
+                >
+                  立即生成
+                </button>
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 md:grid-cols-3 gap-4">
+                {referenceCandidates.map((img) => {
+                  const checked = selectedReferenceImages.includes(img);
+                  return (
+                    <label key={img} className="rounded-xl border bg-white p-2 cursor-pointer">
+                      <img src={img} alt="reference" className="w-full h-28 object-contain bg-gray-50 rounded-lg" />
+                      <div className="mt-2 flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleReferenceImage(img)}
+                        />
+                        <span className="text-gray-700">参考图</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+
+              <div className="mt-5">
+                <div className="text-sm font-semibold text-gray-900 mb-2">优化 Prompt</div>
+                <textarea
+                  value={userPrompt}
+                  onChange={(e) => setUserPrompt(e.target.value)}
+                  rows={8}
+                  className="w-full rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-blue-200"
+                />
+              </div>
+
+              <div className="mt-4">
+                <button
+                  type="button"
+                  className="px-5 py-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-semibold disabled:opacity-60"
+                  onClick={generateOptimizedImages}
+                  disabled={selectedReferenceImages.length === 0 || !userPrompt.trim()}
+                >
+                  立即生成
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* 左侧：原图参考区 */}
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="text-sm font-semibold text-gray-900 mb-3">图片优化 · 原图参考区</div>
+                {selectedReferencePreview ? (
+                  <div className="rounded-xl border bg-gray-50 overflow-hidden">
+                    <img
+                      src={selectedReferencePreview}
+                      alt="reference-preview"
+                      className="w-full h-72 object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="h-72 rounded-xl border bg-gray-50 flex items-center justify-center text-gray-400 text-sm">
+                    未选择参考图
+                  </div>
+                )}
+                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                  {selectedReferenceImages.map((img) => {
+                    const isActive = img === selectedReferencePreview;
+                    return (
+                      <button
+                        key={img}
+                        type="button"
+                        onClick={() => setSelectedReferencePreview(img)}
+                        className={`w-20 h-20 rounded-lg border overflow-hidden flex-shrink-0 ${
+                          isActive ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200'
+                        }`}
+                      >
+                        <img src={img} alt="reference-thumb" className="w-full h-full object-contain bg-gray-50" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 右侧：生成结果区 */}
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="text-sm font-semibold text-gray-900 mb-3">图片优化 · 生成结果区</div>
+                {isGenerating ? (
+                  <div className="h-[22rem] rounded-xl border bg-gray-50 flex flex-col items-center justify-center text-gray-600">
+                    <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-3" />
+                    <div className="text-sm">正在根据你的 Prompt 生成优化主图...</div>
+                  </div>
+                ) : generatedOptimizedImages.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {generatedOptimizedImages.map((img, idx) => (
+                      <div key={`${img}-${idx}`} className="rounded-xl border bg-gray-50 p-2">
+                        <div className="relative rounded-lg overflow-hidden border bg-white">
+                          <img src={img} alt={`optimized-${idx + 1}`} className="w-full h-36 object-contain" />
+                          <button
+                            type="button"
+                            onClick={() => downloadImage(img)}
+                            className="absolute right-2 bottom-2 px-2 py-1 rounded-md bg-black/70 text-white text-xs"
+                          >
+                            保存这张图
+                          </button>
+                        </div>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            className="flex-1 px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-800"
+                          >
+                            设为主展示图
+                          </button>
+                          <button
+                            type="button"
+                            className="flex-1 px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-800"
+                          >
+                            加入详情图
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="h-[22rem] rounded-xl border bg-gray-50 flex items-center justify-center text-gray-400 text-sm">
+                    暂无生成结果
+                  </div>
+                )}
+
+                <div className="mt-4">
+                  <div className="text-xs font-semibold text-gray-900 mb-2">继续优化 Prompt</div>
+                  <textarea
+                    value={userPrompt}
+                    onChange={(e) => setUserPrompt(e.target.value)}
+                    rows={5}
+                    className="w-full rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={generateOptimizedImages}
+                      disabled={selectedReferenceImages.length === 0 || !userPrompt.trim() || isGenerating}
+                      className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-semibold disabled:opacity-60"
+                    >
+                      立即生成
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-
-            <button
-              type="button"
-              className="px-4 py-2 rounded-xl bg-gray-900 text-white hover:bg-gray-800 text-sm font-medium disabled:opacity-60"
-              onClick={generateNewMainImage}
-              disabled={!activeImage}
-              title="模拟生成：把当前主图加入生成列表"
-            >
-              生成新主图
-            </button>
-          </div>
-
-          {generatedImages.length > 0 ? (
-            <div className="mt-4 rounded-xl border bg-white overflow-hidden">
-              {activeGenerated ? (
-                <img
-                  src={activeGenerated}
-                  alt="generated"
-                  className="w-full max-h-80 object-contain bg-gray-50"
-                />
-              ) : null}
-            </div>
-          ) : null}
-
-          {generatedImages.length > 1 ? (
-            <div className="mt-4 flex gap-3 overflow-x-auto pb-1">
-              {generatedImages.map((img, idx) => {
-                const isActive = img === activeGenerated;
-                return (
-                  <button
-                    key={`${img}-${idx}`}
-                    type="button"
-                    onClick={() => setSelectedGeneratedImage(img)}
-                    className={`w-20 h-20 rounded-xl border overflow-hidden bg-white flex-shrink-0 ${
-                      isActive
-                        ? 'border-blue-500 ring-2 ring-blue-100'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                    title="查看生成主图"
-                  >
-                    <img src={img} alt="gen-thumb" className="w-full h-full object-contain bg-gray-50" />
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+          )}
         </div>
       </section>
     </div>
