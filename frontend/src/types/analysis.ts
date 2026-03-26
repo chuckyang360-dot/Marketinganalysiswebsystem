@@ -237,9 +237,17 @@ export interface FullAnalysisResponse {
 
 export type WorkspaceAnalysisResult = FullAnalysisResponse | EcomProductAnalysisResult;
 
-/** FullAnalysisResponse 无 type 字段；电商结果为判别联合的可识别分支 */
-export function isEcomProductAnalysisResult(
-  r: WorkspaceAnalysisResult
-): r is EcomProductAnalysisResult {
-  return (r as EcomProductAnalysisResult).type === 'ecom_product_analysis';
+/** 电商分析结果（后端 type 与联合类型对齐） */
+export function isEcomProductAnalysisResult(r: any): r is EcomProductAnalysisResult {
+  return r?.type === 'ecom_product_analysis';
+}
+
+/** 关键词全量分析（非电商分支），供 Workspace 收窄 FullAnalysisResponse */
+export function isFullAnalysisResponse(r: any): r is FullAnalysisResponse {
+  return (
+    r != null &&
+    typeof r === 'object' &&
+    !isEcomProductAnalysisResult(r) &&
+    'query' in r
+  );
 }
