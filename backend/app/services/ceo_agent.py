@@ -14,11 +14,12 @@ from .reddit_agent import reddit_agent
 from .seo_agent import seo_agent
 from .xai_search import xai_search_service
 from .ai_report_service import ai_report_service
-from .scrape_do_service import ScrapeDoService
 from .ceo_tools import ImageGenerationTool
 from .analysis_agent import call_grok_analysis
 from ..analysis.gap_analysis import analyze_keyword_gap
 from ..analysis.content_ideas import generate_content_ideas
+from ..classifiers.platform_detector import detect_platform
+from ..parsers.parser_router import ParserRouter, UnsupportedPlatformError
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class CEOAgent:
         self.x_agent = xai_search_service
         self.ai_report_service = ai_report_service
         self.image_generation_tool = ImageGenerationTool()
+        self.parser_router = ParserRouter()
 
     # ========== 1. CLASSIFY LAYER ==========
 
@@ -151,29 +153,66 @@ class CEOAgent:
         logger.info(f"[CEO_DISPATCH] Calling SEO Agent")
         return await self.seo_agent.run_analysis(keywords=[query], site_url=None, limit=limit)
 
+    async def _parse_product_url(self, url: str) -> Dict[str, Any]:
+        """Platform detect + parser router entry, returns ParsedProduct."""
+        platform = detect_platform(url)
+        if platform == "unsupported":
+            raise UnsupportedPlatformError(f"Unsupported platform for URL: {url}")
+        return await self.parser_router.parse(platform=platform, url=url)
+
     async def _call_ecom_parser(self, url: str) -> Dict[str, Any]:
-        """封装电商商品URL解析：调用 scrape.do 并返回结构化结果"""
+        """封装商品分析：走 detector/router/parser，再进入 Grok 分析。"""
         logger.info(f"[CEO_DISPATCH] Calling Ecom Parser for URL: {url}")
 
         try:
-            scrape_service = ScrapeDoService()
-            parse_result = await scrape_service.scrape_and_parse(url)
+            parsed_product = await self._parse_product_url(url)
+            enhanced_query = self._build_ecom_analysis_prompt(parsed_product, url)
 
-            structured = parse_result.get("structured_data", {})
+            grok_analysis = await self._call_grok_analysis(enhanced_query)
 
-            enhanced_query = f"""
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": self._ecom_parse_data_from_parsed_product(parsed_product),
+                "ceo_analysis": grok_analysis,
+                "status": "success",
+                "message": "Vibe Marketing 商品解析完成"
+            }
+
+        except Exception as e:
+            logger.error(f"[CEO_DISPATCH] Ecom Parser failed for {url}: {str(e)}")
+            platform = detect_platform(url)
+            return {
+                "type": "ecom_product_analysis",
+                "parse_data": {
+                    "title": "解析失败",
+                    "price": "N/A",
+                    "rating": 0.0,
+                    "review_count": 0,
+                    "reviews": [],
+                    "main_image": "",
+                    "brand": "N/A",
+                    "url": url,
+                    "platform": platform if platform != "unsupported" else "unsupported"
+                },
+                "ceo_analysis": f"解析失败: {str(e)}",
+                "status": "error"
+            }
+
+    @staticmethod
+    def _build_ecom_analysis_prompt(parsed_product: Dict[str, Any], url: str) -> str:
+        return f"""
 你是 Vibe Marketing 的 CEO，请用**专业、锐利、带营销洞察的中文**，对这个 Amazon 商品进行完整营销诊断和优化建议。
 
 商品基础信息：
-- 标题：{structured.get('title', 'N/A')}
-- 价格：{structured.get('price', 'N/A')}
-- 原价：{structured.get('original_price', 'N/A')}
-- 评分：{structured.get('rating', 'N/A')} 分（{structured.get('review_count', 0)} 条评价）
-- 主图：{structured.get('main_image', 'N/A')}
-- 主图/图片列表（最多展示前 8 张）：{(structured.get('images') or [])[:8]}
-- 品牌：{structured.get('brand', 'N/A')}
-- Bullet Points（若有）：{(structured.get('bullet_points') or [])[:8]}
-- 简短描述（若有）：{structured.get('description', '')}
+- 标题：{parsed_product.get('title', 'N/A')}
+- 价格：{parsed_product.get('price', 'N/A')}
+- 原价：{parsed_product.get('original_price', 'N/A')}
+- 评分：{parsed_product.get('rating', 'N/A')} 分（{parsed_product.get('review_count', 0)} 条评价）
+- 主图：{parsed_product.get('main_image', 'N/A')}
+- 主图/图片列表（最多展示前 8 张）：{(parsed_product.get('clean_images') or [])[:8]}
+- 品牌：{parsed_product.get('brand', 'N/A')}
+- Bullet Points（若有）：{(parsed_product.get('bullet_points') or [])[:8]}
+- 简短描述（若有）：{parsed_product.get('description', '')}
 - URL：{url}
 
 请严格按照以下结构输出（使用 Markdown 格式）：
@@ -202,78 +241,39 @@ class CEOAgent:
 语气要专业、自信、带干货，像顶级营销顾问在给客户做方案。全部用中文输出。
 """
 
-            grok_analysis = await self._call_grok_analysis(enhanced_query)
-
-            return {
-                "type": "ecom_product_analysis",
-                "parse_data": {
-                    "title": structured.get("title", "N/A"),
-                    "price": structured.get("price", "N/A"),
-                    "original_price": structured.get("original_price", "N/A"),
-                    "rating": structured.get("rating", 0.0),
-                    "review_count": structured.get("review_count", 0),
-                    "reviews": structured.get("reviews", []) or [],
-                    "main_image": structured.get("main_image", ""),
-                    "images": structured.get("images", []) or [],
-                    "brand": structured.get("brand", "N/A"),
-                    "bullet_points": structured.get("bullet_points", []) or [],
-                    "description": structured.get("description", ""),
-                    "url": url,
-                    "platform": "amazon"
-                },
-                "ceo_analysis": grok_analysis,
-                "status": "success",
-                "message": "Vibe Marketing 商品解析完成"
-            }
-
-        except Exception as e:
-            logger.error(f"[CEO_DISPATCH] Ecom Parser failed for {url}: {str(e)}")
-            return {
-                "type": "ecom_product_analysis",
-                "parse_data": {
-                    "title": "解析失败",
-                    "price": "N/A",
-                    "rating": 0.0,
-                    "review_count": 0,
-                    "reviews": [],
-                    "main_image": "",
-                    "brand": "N/A",
-                    "url": url,
-                    "platform": "amazon"
-                },
-                "ceo_analysis": f"解析失败: {str(e)}",
-                "status": "error"
-            }
-
     # ========== 图片优化（指挥：抓取 + 委托 ImageGenerationTool）==========
 
     @staticmethod
-    def _ecom_parse_data_from_structured(
-        structured: Dict[str, Any],
-        product_url: str,
+    def _ecom_parse_data_from_parsed_product(
+        parsed_product: Dict[str, Any],
         *,
         optimized_images: Optional[List[str]] = None,
         image_generation_provider: Optional[str] = None,
     ) -> Dict[str, Any]:
         d: Dict[str, Any] = {
-            "title": structured.get("title", "N/A"),
-            "price": structured.get("price", "N/A"),
-            "original_price": structured.get("original_price", "N/A"),
-            "rating": structured.get("rating", 0.0),
-            "review_count": structured.get("review_count", 0),
-            "reviews": structured.get("reviews", []) or [],
-            "main_image": structured.get("main_image", ""),
-            "images": structured.get("images", []) or [],
-            "brand": structured.get("brand", "N/A"),
-            "bullet_points": structured.get("bullet_points", []) or [],
-            "description": structured.get("description", ""),
-            "url": product_url,
-            "platform": "amazon",
+            "title": parsed_product.get("title", "N/A"),
+            "price": parsed_product.get("price", "N/A"),
+            "original_price": parsed_product.get("original_price", "N/A"),
+            "rating": parsed_product.get("rating", 0.0),
+            "review_count": parsed_product.get("review_count", 0),
+            "reviews": parsed_product.get("clean_reviews", []) or [],
+            "main_image": parsed_product.get("main_image", ""),
+            "images": parsed_product.get("clean_images", []) or [],
+            "brand": parsed_product.get("brand", "N/A"),
+            "bullet_points": parsed_product.get("bullet_points", []) or [],
+            "description": parsed_product.get("description", ""),
+            "url": parsed_product.get("url", ""),
+            "platform": parsed_product.get("platform", "amazon"),
         }
         if optimized_images is not None:
             d["optimized_images"] = optimized_images
         if image_generation_provider:
             d["image_generation_provider"] = image_generation_provider
+        logger.info(
+            "[EcomStruct][CEOCompatMapping] parse_data_images_count=%d parse_data_reviews_count=%d",
+            len(d.get("images", []) or []),
+            len(d.get("reviews", []) or []),
+        )
         return d
 
     async def _generate_optimized_images(
@@ -295,10 +295,11 @@ class CEOAgent:
         reference_images: List[str],
     ) -> Dict[str, Any]:
         """抓取商品页 → 调用主图生成工具 → 写入 parse_data。"""
-        if not self._is_ecom_product_url(product_url):
+        platform = detect_platform(product_url)
+        if platform == "unsupported":
             return {
                 "type": "ecom_product_analysis",
-                "parse_data": {"url": product_url, "platform": "amazon"},
+                "parse_data": {"url": product_url, "platform": "unsupported"},
                 "ceo_analysis": "图片优化失败：query 必须是已支持的电商商品 URL。",
                 "status": "error",
                 "message": "无效的电商 URL",
@@ -309,24 +310,32 @@ class CEOAgent:
         if not refs or not up:
             return {
                 "type": "ecom_product_analysis",
-                "parse_data": {"url": product_url, "platform": "amazon"},
+                "parse_data": {"url": product_url, "platform": platform},
                 "ceo_analysis": "图片优化失败：请提供 user_prompt 并至少选择一张参考图。",
                 "status": "error",
                 "message": "参数不完整",
             }
 
         try:
-            parse_result = await ScrapeDoService().scrape_and_parse(product_url)
-            structured = parse_result.get("structured_data", {}) or {}
+            parsed_product = await self._parse_product_url(product_url)
         except Exception as e:
             logger.error("[CEO_IMAGE] 抓取失败：%s", e)
             return {
                 "type": "ecom_product_analysis",
-                "parse_data": {"url": product_url, "platform": "amazon"},
+                "parse_data": {"url": product_url, "platform": platform},
                 "ceo_analysis": f"图片优化失败：无法抓取商品页 — {e}",
                 "status": "error",
                 "message": "抓取失败",
             }
+
+        # 保留完整分析层，避免优化动作覆盖 ceo_analysis。
+        original_analysis = ""
+        try:
+            original_analysis = await self._call_grok_analysis(
+                self._build_ecom_analysis_prompt(parsed_product, product_url)
+            )
+        except Exception as e:
+            logger.warning("[CEO_IMAGE] 原始分析重建失败，降级为空分析：%s", e)
 
         try:
             optimized, provider = await self._generate_optimized_images(up, refs)
@@ -334,10 +343,11 @@ class CEOAgent:
             logger.error("[CEO_IMAGE] 生成失败：%s", e)
             return {
                 "type": "ecom_product_analysis",
-                "parse_data": self._ecom_parse_data_from_structured(
-                    structured, product_url, optimized_images=[]
+                "parse_data": self._ecom_parse_data_from_parsed_product(
+                    parsed_product, optimized_images=[]
                 ),
-                "ceo_analysis": (
+                "ceo_analysis": original_analysis or "暂无分析",
+                "image_optimization_message": (
                     f"图片优化失败：{e}。"
                     "请检查 GEMINI_API_KEY（及 GEMINI_IMAGE_MODEL）或 XAI_API_KEY。"
                 ),
@@ -345,16 +355,16 @@ class CEOAgent:
                 "message": "主图优化失败",
             }
 
-        parse_data = self._ecom_parse_data_from_structured(
-            structured,
-            product_url,
+        parse_data = self._ecom_parse_data_from_parsed_product(
+            parsed_product,
             optimized_images=optimized,
             image_generation_provider=provider,
         )
         return {
             "type": "ecom_product_analysis",
             "parse_data": parse_data,
-            "ceo_analysis": (
+            "ceo_analysis": original_analysis or "暂无分析",
+            "image_optimization_message": (
                 f"CEO 已编排完成主图优化（**{provider}**），共 **{len(optimized)}** 张。"
                 " 结果见 `parse_data.optimized_images`。"
             ),
@@ -656,7 +666,7 @@ class CEOAgent:
             )
 
         # ==================== Vibe Marketing V1.0 - 电商URL优先处理 ====================
-        if self._is_ecom_product_url(query):
+        if self._looks_like_url(query):
             logger.info(f"[CEO] Detected ecom product URL → routing to ecom parser")
             parse_result = await self._call_ecom_parser(query)
             return parse_result   # 直接返回 _call_ecom_parser 构造好的结果（包含 parse_data 和 ceo_analysis）
@@ -690,24 +700,12 @@ class CEOAgent:
         """
         return await call_grok_analysis(prompt)
 
-    def _is_ecom_product_url(self, input_str: str) -> bool:
-        """判断输入是否为电商商品URL"""
-        if not input_str or not input_str.startswith(("http://", "https://")):
+    def _looks_like_url(self, input_str: str) -> bool:
+        """判断输入是否为 URL；平台识别统一交给 platform detector。"""
+        if not isinstance(input_str, str):
             return False
-
-        ecom_domains = [
-            "amazon.",
-            "shopify.",
-            "taobao.",
-            "tmall.",
-            "jd.com",
-            "ebay.",
-            "walmart.",
-            "lazada.",
-            "shopee.",
-        ]
-        input_lower = input_str.lower()
-        return any(domain in input_lower for domain in ecom_domains)
+        value = input_str.strip().lower()
+        return value.startswith(("http://", "https://"))
 
 
 # Singleton instance

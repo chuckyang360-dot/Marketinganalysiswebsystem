@@ -84,6 +84,410 @@ class ScrapeDoService:
             ul = u.lower()
             return u.startswith("http") and any(ul.endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp"])
 
+        def _image_quality_score(image_url: str) -> int:
+            ul = (image_url or "").lower()
+            score = 0
+            if "_sl1500_" in ul or "_ac_sl1500_" in ul:
+                score += 1000
+            elif "_sl1200_" in ul or "_ac_sl1200_" in ul:
+                score += 900
+            elif "_sl1000_" in ul or "_ac_sl1000_" in ul:
+                score += 850
+            elif "_ac_sl" in ul:
+                score += 800
+            elif "_ul" in ul or "_us" in ul or "_sx" in ul or "_sy" in ul:
+                score += 100
+            else:
+                score += 500
+            nums = [int(n) for n in re.findall(r"\d+", ul)]
+            if nums:
+                score += max(nums)
+            return score
+
+        def _extract_gallery_images_in_order() -> tuple[list[str], int, int]:
+            """
+            仅从商品主图 gallery 节点提取图片，避免混入推荐/关联商品图。
+            返回：gallery_images（有序）、candidate_gallery_images_count、filtered_non_gallery_images_count
+            """
+            def _parse_dynamic_image_urls(raw: str) -> list[str]:
+                if not raw:
+                    return []
+                candidates: list[str] = []
+                text = raw.strip()
+                for payload in (text, text.replace("&quot;", '"').replace("&#34;", '"')):
+                    try:
+                        obj = json.loads(payload)
+                        if isinstance(obj, dict):
+                            candidates.extend([_normalize_image_url(_clean_text(u)) for u in obj.keys()])
+                    except Exception:
+                        continue
+                return [u for u in candidates if _is_image_url(u)]
+
+            def _parse_thumb_action_urls(raw: str) -> list[str]:
+                if not raw:
+                    return []
+                vals: list[str] = []
+                text = raw.strip()
+                for payload in (text, text.replace("&quot;", '"').replace("&#34;", '"')):
+                    try:
+                        obj = json.loads(payload)
+                    except Exception:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    for key in (
+                        "hiRes",
+                        "mainUrl",
+                        "largeImage",
+                        "large",
+                        "imageUrl",
+                        "url",
+                        "displayUrl",
+                        "thumb",
+                    ):
+                        v = obj.get(key)
+                        if isinstance(v, str) and v.strip():
+                            vals.append(_normalize_image_url(_clean_text(v)))
+                    # 部分结构会把动态图放在 data / params 子对象里
+                    for sub_key in ("data", "params"):
+                        sub = obj.get(sub_key)
+                        if isinstance(sub, dict):
+                            dyn = sub.get("dynamicImage") or sub.get("data-a-dynamic-image")
+                            if isinstance(dyn, str):
+                                vals.extend(_parse_dynamic_image_urls(dyn))
+                return [u for u in vals if _is_image_url(u)]
+
+            def _collect_candidates(node) -> list[tuple[str, str]]:
+                out: list[tuple[str, str]] = []
+
+                def _push(source: str, value: str):
+                    if not value:
+                        return
+                    v = _normalize_image_url(_clean_text(value))
+                    if _is_image_url(v):
+                        out.append((source, v))
+
+                # 1) 当前缩略图节点优先字段
+                _push("data-old-hires", node.get("data-old-hires", ""))
+                _push("data-zoom-image", node.get("data-zoom-image", ""))
+                _push("data-image-url", node.get("data-image-url", ""))
+                _push("data-src", node.get("data-src", ""))
+                _push("src", node.get("src", ""))
+                for u in _parse_dynamic_image_urls(node.get("data-a-dynamic-image", "")):
+                    _push("data-a-dynamic-image", u)
+
+                # 2) 缩略图所属 li 节点上的字段（Amazon 常把高清信息挂在这里）
+                li = node.find_parent("li")
+                if li is not None:
+                    _push("li-data-old-hires", li.get("data-old-hires", ""))
+                    _push("li-data-zoom-image", li.get("data-zoom-image", ""))
+                    _push("li-data-image-url", li.get("data-image-url", ""))
+                    for u in _parse_dynamic_image_urls(li.get("data-a-dynamic-image", "")):
+                        _push("li-data-a-dynamic-image", u)
+                    for u in _parse_thumb_action_urls(li.get("data-thumb-action", "")):
+                        _push("li-data-thumb-action", u)
+
+                return out
+
+            def _truncate_text(value: str, limit: int = 900) -> str:
+                if value is None:
+                    return ""
+                text = str(value)
+                return text[:limit] + ("...(truncated)" if len(text) > limit else "")
+
+            def _safe_json_attrs(tag) -> str:
+                try:
+                    attrs = dict(getattr(tag, "attrs", {}) or {})
+                    # 防止日志过长
+                    compact = {k: _truncate_text(v, 300) for k, v in attrs.items()}
+                    return json.dumps(compact, ensure_ascii=False)
+                except Exception:
+                    return "{}"
+
+            def _log_page_image_json_snippets():
+                keywords = [
+                    "colorImages",
+                    "mainUrl",
+                    "hiRes",
+                    "large",
+                    "imageBlock",
+                    "landingAsinColor",
+                ]
+                lower_html = html.lower()
+                for kw in keywords:
+                    start = 0
+                    hits = 0
+                    kw_lower = kw.lower()
+                    while hits < 3:
+                        idx = lower_html.find(kw_lower, start)
+                        if idx == -1:
+                            break
+                        left = max(0, idx - 220)
+                        right = min(len(html), idx + 420)
+                        snippet = html[left:right].replace("\n", " ").replace("\r", " ")
+                        logger.info(
+                            "[EcomStruct][ScrapeDoPageImageJson] keyword=%s hit_index=%d snippet=%s",
+                            kw,
+                            hits,
+                            _truncate_text(snippet, 900),
+                        )
+                        hits += 1
+                        start = idx + len(kw_lower)
+
+            _log_page_image_json_snippets()
+
+            gallery_nodes = soup.select(
+                "#altImages li img, #altImages img, #imageBlockThumbs img, #imageBlock_feature_div #imgTagWrapperId img#landingImage"
+            )
+
+            # 全局候选用于日志统计：有多少图片因“非 gallery 来源”被过滤
+            global_nodes = soup.select("img[data-a-dynamic-image], img.a-dynamic-image")
+            global_candidates = []
+            for node in global_nodes:
+                dyn = node.get("data-a-dynamic-image")
+                if dyn:
+                    try:
+                        dyn_obj = json.loads(dyn)
+                        if isinstance(dyn_obj, dict):
+                            global_candidates.extend([_normalize_image_url(_clean_text(u)) for u in dyn_obj.keys()])
+                    except Exception:
+                        pass
+                for key in ("data-old-hires", "data-src", "src"):
+                    v = node.get(key)
+                    if v:
+                        global_candidates.append(_normalize_image_url(_clean_text(v)))
+            global_candidates = _uniq_keep_order([u for u in global_candidates if _is_image_url(u)])
+
+            ordered_gallery = []
+            for idx, node in enumerate(gallery_nodes):
+                node_html = _truncate_text(str(node), 1000)
+                node_attrs = _safe_json_attrs(node)
+                li = node.find_parent("li")
+                li_attrs = _safe_json_attrs(li) if li is not None else "{}"
+
+                # 节点及父节点字段优先诊断
+                node_thumb_action = node.get("data-thumb-action", "")
+                li_thumb_action = li.get("data-thumb-action", "") if li is not None else ""
+                node_dynamic = node.get("data-a-dynamic-image", "")
+                li_dynamic = li.get("data-a-dynamic-image", "") if li is not None else ""
+                node_old_hires = node.get("data-old-hires", "")
+                li_old_hires = li.get("data-old-hires", "") if li is not None else ""
+                node_image_url = node.get("data-image-url", "")
+                li_image_url = li.get("data-image-url", "") if li is not None else ""
+                node_src = node.get("src", "")
+                node_data_src = node.get("data-src", "")
+
+                logger.info(
+                    "[EcomStruct][ScrapeDoGalleryNode] gallery_index=%d node_html=%s node_attrs=%s li_attrs=%s "
+                    "has_data_thumb_action=%s data_thumb_action=%s has_data_a_dynamic_image=%s data_a_dynamic_image=%s "
+                    "has_data_old_hires=%s data_old_hires=%s has_data_image_url=%s data_image_url=%s img_src=%s img_data_src=%s",
+                    idx,
+                    node_html,
+                    node_attrs,
+                    li_attrs,
+                    bool(node_thumb_action or li_thumb_action),
+                    _truncate_text(node_thumb_action or li_thumb_action, 900),
+                    bool(node_dynamic or li_dynamic),
+                    _truncate_text(node_dynamic or li_dynamic, 900),
+                    bool(node_old_hires or li_old_hires),
+                    _truncate_text(node_old_hires or li_old_hires, 900),
+                    bool(node_image_url or li_image_url),
+                    _truncate_text(node_image_url or li_image_url, 900),
+                    _truncate_text(node_src, 500),
+                    _truncate_text(node_data_src, 500),
+                )
+
+                per_node_pairs = _collect_candidates(node)
+                if not per_node_pairs:
+                    continue
+                best_source, best = sorted(per_node_pairs, key=lambda x: _image_quality_score(x[1]), reverse=True)[0]
+                ordered_gallery.append(best)
+                logger.info(
+                    "[EcomStruct][ScrapeDoGalleryRaw] gallery_index=%d source_type=%s extracted_url=%s",
+                    idx,
+                    best_source,
+                    best,
+                )
+
+            # landingImage 单独兜底，且保持在首位
+            landing = soup.find("img", id="landingImage")
+            if landing:
+                landing_candidates = []
+                dyn = landing.get("data-a-dynamic-image")
+                if dyn:
+                    try:
+                        dyn_obj = json.loads(dyn)
+                        if isinstance(dyn_obj, dict):
+                            landing_candidates.extend([_normalize_image_url(_clean_text(u)) for u in dyn_obj.keys()])
+                    except Exception:
+                        pass
+                for key in ("data-old-hires", "src"):
+                    v = landing.get(key)
+                    if v:
+                        landing_candidates.append(_normalize_image_url(_clean_text(v)))
+                landing_candidates = [u for u in landing_candidates if _is_image_url(u)]
+                if landing_candidates:
+                    landing_best = sorted(landing_candidates, key=_image_quality_score, reverse=True)[0]
+                    ordered_gallery = [landing_best] + [u for u in ordered_gallery if u != landing_best]
+
+            ordered_gallery = _uniq_keep_order(ordered_gallery)
+            candidate_gallery_images_count = len(ordered_gallery)
+            filtered_non_gallery_images_count = max(0, len(global_candidates) - candidate_gallery_images_count)
+            return ordered_gallery, candidate_gallery_images_count, filtered_non_gallery_images_count
+
+        def _extract_color_images_initial_in_order() -> list[str]:
+            """
+            优先从页面源码中的 colorImages.initial 提取主图集合。
+            顺序与 colorImages.initial 保持一致。
+            """
+            def _find_balanced_block(text: str, start_idx: int, open_ch: str, close_ch: str) -> str:
+                if start_idx < 0 or start_idx >= len(text) or text[start_idx] != open_ch:
+                    return ""
+                depth = 0
+                in_string = False
+                quote_ch = ""
+                escaped = False
+                for i in range(start_idx, len(text)):
+                    ch = text[i]
+                    if in_string:
+                        if escaped:
+                            escaped = False
+                        elif ch == "\\":
+                            escaped = True
+                        elif ch == quote_ch:
+                            in_string = False
+                        continue
+                    if ch in ("'", '"'):
+                        in_string = True
+                        quote_ch = ch
+                        continue
+                    if ch == open_ch:
+                        depth += 1
+                    elif ch == close_ch:
+                        depth -= 1
+                        if depth == 0:
+                            return text[start_idx : i + 1]
+                return ""
+
+            def _extract_initial_array_block(text: str) -> str:
+                # 先定位 colorImages，再定位其对象中的 initial 数组
+                m = re.search(r"[\"']colorImages[\"']\s*:", text)
+                if not m:
+                    return ""
+                after = m.end()
+                obj_start = text.find("{", after)
+                if obj_start == -1:
+                    return ""
+                color_obj = _find_balanced_block(text, obj_start, "{", "}")
+                if not color_obj:
+                    return ""
+                m2 = re.search(r"[\"']initial[\"']\s*:", color_obj)
+                if not m2:
+                    return ""
+                arr_start = color_obj.find("[", m2.end())
+                if arr_start == -1:
+                    return ""
+                return _find_balanced_block(color_obj, arr_start, "[", "]")
+
+            def _split_top_level_objects(arr_text: str) -> list[str]:
+                out: list[str] = []
+                if not arr_text or len(arr_text) < 2:
+                    return out
+                i = 0
+                while i < len(arr_text):
+                    if arr_text[i] == "{":
+                        block = _find_balanced_block(arr_text, i, "{", "}")
+                        if not block:
+                            break
+                        out.append(block)
+                        i += len(block)
+                    else:
+                        i += 1
+                return out
+
+            def _extract_string_field(obj_text: str, field_name: str) -> str:
+                pattern = rf"[\"']{re.escape(field_name)}[\"']\s*:\s*([\"'])(.*?)\1"
+                m = re.search(pattern, obj_text, flags=re.S)
+                if not m:
+                    return ""
+                return m.group(2)
+
+            def _extract_main_best(obj_text: str) -> str:
+                m = re.search(r"[\"']main[\"']\s*:\s*", obj_text)
+                if not m:
+                    return ""
+                brace_start = obj_text.find("{", m.end())
+                if brace_start == -1:
+                    return ""
+                main_block = _find_balanced_block(obj_text, brace_start, "{", "}")
+                if not main_block:
+                    return ""
+
+                url_matches = re.findall(r"https?:\\\\?/\\\\?/[^\"'\\s,}]+", main_block)
+                # 兼容非转义斜杠格式
+                url_matches += re.findall(r"https?://[^\"'\\s,}]+", main_block)
+                if not url_matches:
+                    return ""
+
+                candidates = []
+                for u in url_matches:
+                    unescaped = u.replace("\\/", "/")
+                    normalized = _normalize_image_url(_clean_text(unescaped))
+                    if _is_image_url(normalized):
+                        candidates.append(normalized)
+                if not candidates:
+                    return ""
+                return sorted(candidates, key=_image_quality_score, reverse=True)[0]
+
+            raw_arr = _extract_initial_array_block(html)
+            if not raw_arr:
+                logger.info("[EcomStruct][ScrapeDoColorImages] color_images_count=0")
+                return []
+
+            object_blocks = _split_top_level_objects(raw_arr)
+            logger.info("[EcomStruct][ScrapeDoColorImages] color_images_count=%d", len(object_blocks))
+
+            selected_urls: list[str] = []
+            for idx, obj_text in enumerate(object_blocks):
+                selected_source = "none"
+                selected_url = ""
+
+                hi_res = _extract_string_field(obj_text, "hiRes")
+                large = _extract_string_field(obj_text, "large")
+                thumb = _extract_string_field(obj_text, "thumb")
+                main_best = _extract_main_best(obj_text)
+
+                for source, raw in (
+                    ("hiRes", hi_res),
+                    ("large", large),
+                    ("main", main_best),
+                    ("thumb", thumb),
+                ):
+                    candidate = _normalize_image_url(_clean_text(raw.replace("\\/", "/") if raw else ""))
+                    if candidate and _is_image_url(candidate):
+                        selected_source = source
+                        selected_url = candidate
+                        break
+
+                if selected_url:
+                    selected_urls.append(selected_url)
+
+                logger.info(
+                    "[EcomStruct][ScrapeDoColorImages] index=%d selected_source_type=%s selected_url=%s",
+                    idx,
+                    selected_source,
+                    selected_url,
+                )
+                if selected_url:
+                    logger.info(
+                        "[EcomStruct][ScrapeDoGalleryRaw] gallery_index=%d source_type=%s extracted_url=%s",
+                        idx,
+                        f"colorImages.{selected_source}",
+                        selected_url,
+                    )
+
+            return _uniq_keep_order(selected_urls)
+
         def _clean_price(raw: str) -> str:
             # 紧急修复 Amazon 价格解析失败（$,, 问题）
             s = _clean_text(raw or "")
@@ -274,69 +678,20 @@ class ScrapeDoService:
         if original_price:
             data["original_price"] = _clean_price(original_price)
 
-        # 4) 主图 + 多图（优先 landingImage 的 data-a-dynamic-image keys，通常是高清）
-        image_candidates = []
+        # 4) 主图 + 多图：优先 colorImages.initial，失败时回退到 gallery DOM 抽取
+        normalized = _extract_color_images_initial_in_order()
+        if normalized:
+            candidate_gallery_images_count = len(normalized)
+            filtered_non_gallery_images_count = 0
+        else:
+            normalized, candidate_gallery_images_count, filtered_non_gallery_images_count = _extract_gallery_images_in_order()
+        logger.info(
+            "[EcomStruct][ScrapeDoGallery] candidate_gallery_images_count=%d filtered_non_gallery_images_count=%d",
+            candidate_gallery_images_count,
+            filtered_non_gallery_images_count,
+        )
 
-        og_image = soup.find("meta", property="og:image")
-        if og_image and og_image.get("content"):
-            image_candidates.append(_clean_text(og_image["content"]))
-
-        # 4.1) 优先解析所有 data-a-dynamic-image JSON（最容易拿到高清变体）
-        for img_tag in soup.select("[data-a-dynamic-image]"):
-            dyn = img_tag.get("data-a-dynamic-image")
-            if not dyn:
-                continue
-            try:
-                dyn_obj = json.loads(dyn)
-                if isinstance(dyn_obj, dict):
-                    # keys 通常就是各尺寸 URL
-                    image_candidates.extend([_clean_text(u) for u in dyn_obj.keys()])
-            except Exception:
-                continue
-
-        landing = soup.find("img", id="landingImage")
-        if landing:
-            # data-old-hires / src
-            for k in ("data-old-hires", "src"):
-                v = landing.get(k)
-                if v:
-                    image_candidates.append(_clean_text(v))
-
-            # landingImage 的 data-a-dynamic-image 已在上面统一解析
-
-        # 额外抓取：页面上常见 a-dynamic-image
-        for img in soup.select("img.a-dynamic-image"):
-            for k in ("data-old-hires", "src"):
-                v = img.get(k)
-                if v:
-                    image_candidates.append(_clean_text(v))
-
-        # 4.2) 补充抓取：imgTagWrapper、carousel/altImages 等区域
-        for img in soup.select("#imgTagWrapperId img, #altImages img, #imageBlock_feature_div img, #main-image-container img"):
-            for k in ("data-old-hires", "data-src", "src"):
-                v = img.get(k)
-                if v:
-                    image_candidates.append(_clean_text(v))
-
-        # 4.3) 规范化、过滤、去重（保留出现顺序）
-        normalized = []
-        for u in image_candidates:
-            nu = _normalize_image_url(u)
-            if _is_image_url(nu):
-                normalized.append(nu)
-        normalized = _uniq_keep_order(normalized)
-
-        # 4.4) 确保至少 4 张（如果不足：用同一张图的“变体 URL”补足，保证前端显示稳定）
-        # 注意：结构保持不变，只做 URL 列表补足；前端生成区不再与选图联动，避免“底部跟着原图走”
-        if len(normalized) < 4 and len(normalized) > 0:
-            base = normalized[0]
-            i = 1
-            while len(normalized) < 4:
-                # 加一个无副作用的 query 标记为“变体”（仍是可用高清图）
-                normalized.append(f"{base}?vibe_variant={i}")
-                i += 1
-
-        # 4.5) main_image 永远取 images[0]
+        # 4.1) main_image 与 gallery 首图保持一致（后续 cleaner 再做 canonical 提升）
         if normalized:
             data["images"] = normalized
             data["main_image"] = normalized[0]

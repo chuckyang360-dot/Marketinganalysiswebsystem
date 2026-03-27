@@ -14,7 +14,7 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
   const pd = data.parse_data || {};
   const ceoText = String(data.ceo_analysis || '暂无分析');
   const [selectedImage, setSelectedImage] = useState<string>('');
-  const [displayTitle, setDisplayTitle] = useState<string>(String(pd.title || '未提取到标题'));
+  const displayTitle = String(pd.title || '未提取到标题');
   const [titleSuggestions, setTitleSuggestions] = useState<string[]>([]);
   const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
   const [downloadingUrl, setDownloadingUrl] = useState<string | null>(null);
@@ -28,23 +28,28 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
   const [visibleReviews, setVisibleReviews] = useState<number>(5);
   const [expandedReviewKeys, setExpandedReviewKeys] = useState<Set<string>>(() => new Set());
 
-  const extractSection = (label: string) => {
-    // 简单 fallback：尝试用标题关键字截取；取不到则返回空字符串（由 UI 兜底展示）
-    const text = ceoText;
-    const idx = text.toLowerCase().indexOf(label.toLowerCase());
+  const extractSection = (labels: string[]) => {
+    const text = ceoText || '';
+    if (!text) return '';
+    const lower = text.toLowerCase();
+    let idx = -1;
+    for (const label of labels) {
+      const pos = lower.indexOf(label.toLowerCase());
+      if (pos !== -1 && (idx === -1 || pos < idx)) idx = pos;
+    }
     if (idx === -1) return '';
     const rest = text.slice(idx);
-    const nextHeading = rest.slice(1).search(/\n#{1,6}\s|(\n\d+\.)/);
+    const nextHeading = rest.slice(1).search(/\n#{1,6}\s|(\n\d+\.\s)|(\n##\s)/);
     return nextHeading === -1 ? rest.trim() : rest.slice(0, nextHeading + 1).trim();
   };
 
   const sections = {
-    vibe: extractSection('vibe') || ceoText,
-    title: extractSection('标题') || extractSection('title'),
-    image: extractSection('主图') || extractSection('image'),
-    pricing: extractSection('价格') || extractSection('pricing'),
-    bullets: extractSection('卖点') || extractSection('bullet'),
-    reviews: extractSection('评价') || extractSection('review'),
+    vibe: extractSection(['当前 vibe 诊断', 'vibe', '诊断']) || ceoText,
+    title: extractSection(['标题优化建议', '标题优化', 'title']) || ceoText,
+    image: extractSection(['主图与视觉优化建议', '主图', '视觉', 'image']) || ceoText,
+    pricing: extractSection(['定价与促销策略', '定价策略', '定价', 'pricing']) || ceoText,
+    bullets: extractSection(['卖点提炼', 'bullet points', '卖点', 'bullet']) || ceoText,
+    reviews: extractSection(['评论分析', '评价', 'review']) || '',
   };
 
   const images = useMemo(() => {
@@ -121,6 +126,27 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
     setShowTitleSuggestions(true);
   };
 
+  const copyTitleSuggestion = async (text: string) => {
+    const value = String(text || '').trim();
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      alert('已复制到剪贴板');
+    } catch {
+      // fallback for insecure context
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      alert('已复制到剪贴板');
+    }
+  };
+
   const referenceCandidates = useMemo(() => images.slice(0, 6), [images]);
 
   useEffect(() => {
@@ -182,7 +208,17 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
         ? res.parse_data.optimized_images.slice(0, 4)
         : [];
       setGeneratedOptimizedImages(nextImages);
-      onEcomResultUpdate?.(res);
+      const merged: EcomProductAnalysisResult = {
+        ...data,
+        ...res,
+        // 保持分析层稳定：动作响应只增量更新内容输出层字段
+        ceo_analysis: String(data.ceo_analysis || res.ceo_analysis || ''),
+        parse_data: {
+          ...(data.parse_data || {}),
+          ...(res.parse_data || {}),
+        },
+      };
+      onEcomResultUpdate?.(merged);
     } catch (e) {
       setGeneratedOptimizedImages([]);
       alert(e instanceof Error ? e.message : '主图优化请求失败');
@@ -504,14 +540,11 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
       <section className="bg-white rounded-3xl shadow-sm border border-gray-100 p-8">
         <h2 className="text-2xl font-bold text-gray-900 mb-6">内容输出（V1.0）</h2>
 
-        {/* 标题生成：显示原标题 + “生成新标题”按钮 → 点击后展示建议 → 一键替换 */}
+        {/* 标题优化：显示当前标题 + “标题优化”按钮 → 点击后展示建议 → 复制 */}
         <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-gray-900">标题生成</div>
-              <div className="text-sm text-gray-600 mt-1">
-                原标题：<span className="font-medium text-gray-900">{pd.title || '未提取到标题'}</span>
-              </div>
+              <div className="text-sm font-semibold text-gray-900">标题优化</div>
               <div className="text-sm text-gray-600 mt-1">
                 当前标题：<span className="font-medium text-gray-900">{displayTitle || '未提取到标题'}</span>
               </div>
@@ -521,9 +554,9 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
               <button
                 type="button"
                 onClick={generateTitleSuggestions}
-                className="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium"
+                className="px-5 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium whitespace-nowrap min-w-[88px]"
               >
-                生成新标题
+                标题优化
               </button>
               {showTitleSuggestions ? (
                 <button
@@ -547,10 +580,10 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
                   <div className="flex-1 text-sm text-gray-800">{s}</div>
                   <button
                     type="button"
-                    onClick={() => setDisplayTitle(s)}
+                    onClick={() => copyTitleSuggestion(s)}
                     className="px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 text-xs font-medium"
                   >
-                    一键替换
+                    复制
                   </button>
                 </div>
               ))}
