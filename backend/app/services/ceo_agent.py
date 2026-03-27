@@ -181,27 +181,32 @@ class CEOAgent:
         except Exception as e:
             logger.error(f"[CEO_DISPATCH] Ecom Parser failed for {url}: {str(e)}")
             platform = detect_platform(url)
+            err_platform = platform if platform != "unsupported" else "unsupported"
+            err_parse: Dict[str, Any] = {
+                "title": "解析失败",
+                "price": "N/A",
+                "rating": 0.0,
+                "review_count": 0,
+                "reviews": [],
+                "main_image": "",
+                "brand": "N/A",
+                "url": url,
+                "platform": err_platform,
+            }
+            if err_platform.lower() == "shopee":
+                err_parse["currency"] = "SGD"
             return {
                 "type": "ecom_product_analysis",
-                "parse_data": {
-                    "title": "解析失败",
-                    "price": "N/A",
-                    "rating": 0.0,
-                    "review_count": 0,
-                    "reviews": [],
-                    "main_image": "",
-                    "brand": "N/A",
-                    "url": url,
-                    "platform": platform if platform != "unsupported" else "unsupported"
-                },
+                "parse_data": err_parse,
                 "ceo_analysis": f"解析失败: {str(e)}",
                 "status": "error"
             }
 
     @staticmethod
     def _build_ecom_analysis_prompt(parsed_product: Dict[str, Any], url: str) -> str:
+        platform = parsed_product.get("platform", "ecommerce")
         return f"""
-你是 Vibe Marketing 的 CEO，请用**专业、锐利、带营销洞察的中文**，对这个 Amazon 商品进行完整营销诊断和优化建议。
+你是 Vibe Marketing 的 CEO，请用**专业、锐利、带营销洞察的中文**，对这个 {platform} 商品进行完整营销诊断和优化建议。
 
 商品基础信息：
 - 标题：{parsed_product.get('title', 'N/A')}
@@ -250,9 +255,13 @@ class CEOAgent:
         optimized_images: Optional[List[str]] = None,
         image_generation_provider: Optional[str] = None,
     ) -> Dict[str, Any]:
+        currency = (parsed_product.get("currency") or "").strip()
+        if (parsed_product.get("platform") or "").lower() == "shopee":
+            currency = currency or "SGD"
         d: Dict[str, Any] = {
             "title": parsed_product.get("title", "N/A"),
             "price": parsed_product.get("price", "N/A"),
+            "currency": currency,
             "original_price": parsed_product.get("original_price", "N/A"),
             "rating": parsed_product.get("rating", 0.0),
             "review_count": parsed_product.get("review_count", 0),

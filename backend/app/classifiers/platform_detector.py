@@ -2,7 +2,7 @@ from typing import Literal
 import logging
 
 
-PlatformType = Literal["amazon", "unsupported"]
+PlatformType = Literal["amazon", "shopee", "unsupported"]
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +20,10 @@ def detect_platform(url: str) -> PlatformType:
     if "amazon." in value:
         logger.info("[EcomStruct][PlatformDetector] platform=amazon")
         return "amazon"
+
+    if "shopee.sg" in value:
+        logger.info("[EcomStruct][PlatformDetector] platform=shopee")
+        return "shopee"
 
     logger.info("[EcomStruct][PlatformDetector] platform=unsupported")
     return "unsupported"

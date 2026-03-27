@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     # Scrape.do API Configuration
     SCRAPE_DO_API_TOKEN: Optional[str] = Field(default=None, env="SCRAPE_DO_API_TOKEN")
 
+    # Bright Data Configuration (Shopee 1.0)
+    BRIGHTDATA_API_KEY: Optional[str] = Field(default=None, env="BRIGHTDATA_API_KEY")
+    BRIGHTDATA_CUSTOMER_ID: Optional[str] = Field(default=None, env="BRIGHTDATA_CUSTOMER_ID")
+    BRIGHTDATA_SHOPEE_ZONE: Optional[str] = Field(default=None, env="BRIGHTDATA_SHOPEE_ZONE")
+    BRIGHTDATA_TIMEOUT_SECONDS: int = Field(default=120, env="BRIGHTDATA_TIMEOUT_SECONDS")
+    BRIGHTDATA_MAX_RETRIES: int = Field(default=2, env="BRIGHTDATA_MAX_RETRIES")
+    BRIGHTDATA_MAX_POLLS: int = Field(default=25, env="BRIGHTDATA_MAX_POLLS")
+    BRIGHTDATA_POLL_INTERVAL_SECONDS: float = Field(default=3.0, env="BRIGHTDATA_POLL_INTERVAL_SECONDS")
+
+    # Backward compatibility for existing BrightData service usage
+    BRIGHTDATA_ZONE: Optional[str] = Field(default=None, env="BRIGHTDATA_ZONE")
+
     # Banana.dev（Flux 等 GPU 推理部署）
     BANANA_API_KEY: Optional[str] = Field(default=None, env="BANANA_API_KEY")
     BANANA_MODEL_KEY: Optional[str] = Field(default=None, env="BANANA_MODEL_KEY")

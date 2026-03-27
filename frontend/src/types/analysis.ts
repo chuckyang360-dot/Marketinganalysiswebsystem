@@ -193,6 +193,8 @@ export interface AIReport {
 export interface EcomStructuredData {
   title?: string;
   price?: string;
+  /** ISO 货币代码，如 SGD、USD */
+  currency?: string;
   original_price?: string;
   rating?: number;
   review_count?: number;

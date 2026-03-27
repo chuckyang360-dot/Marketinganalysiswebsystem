@@ -10,6 +10,9 @@ interface Props {
   onEcomResultUpdate?: (next: EcomProductAnalysisResult) => void;
 }
 
+const REVIEW_PAGE_SIZE = 5;
+const MAX_REVIEWS_DISPLAY = 10;
+
 export default function EcomProductResultView({ data, productUrl, onEcomResultUpdate }: Props) {
   const pd = data.parse_data || {};
   const ceoText = String(data.ceo_analysis || '暂无分析');
@@ -24,8 +27,8 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
   const [generatedOptimizedImages, setGeneratedOptimizedImages] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
-  // V1.0 用户评价洞察 - 严格按产品需求实现
-  const [visibleReviews, setVisibleReviews] = useState<number>(5);
+  // V1.0 用户评价洞察 - 严格按产品需求实现（最多 10 条，每页 5 条）
+  const [reviewPage, setReviewPage] = useState(0);
   const [expandedReviewKeys, setExpandedReviewKeys] = useState<Set<string>>(() => new Set());
 
   const extractSection = (labels: string[]) => {
@@ -243,25 +246,65 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
     return '';
   }, [pd]);
 
-  // V1.0 用户评价洞察 - 真实渲染
+  /**
+   * 商品概览区：带货币单位的价格文案。
+   * 优先 parse_data.currency（后端正式透传）；currency 为空时 Shopee URL/平台仍显示 S$（展示兜底，双保险）。
+   */
+  const overviewPriceLabel = useMemo(() => {
+    const pricePart = safePrice;
+    if (!pricePart) return '';
+
+    const c = String(pd.currency ?? '').trim();
+    const platformLc = String(pd.platform ?? '').toLowerCase();
+    const urlLc = String(pd.url ?? '').toLowerCase();
+    const productUrlLc = String(productUrl ?? '').toLowerCase();
+    const isShopeeLike =
+      platformLc === 'shopee' || urlLc.includes('shopee.') || productUrlLc.includes('shopee.');
+
+    if (c) {
+      if (c.toUpperCase() === 'SGD') return `S$${pricePart}`;
+      return `${c} ${pricePart}`;
+    }
+    if (isShopeeLike) return `S$${pricePart}`;
+    return pricePart;
+  }, [safePrice, pd.currency, pd.platform, pd.url, productUrl]);
+
+  /** 商品概览区：评分 1 位小数；无效或 <=0 返回 null 走空态 */
+  const overviewRatingOneDecimal = useMemo(() => {
+    const r = Number(pd.rating);
+    if (!Number.isFinite(r) || r <= 0) return null;
+    return Number(r).toFixed(1);
+  }, [pd.rating]);
+
+  // V1.0 用户评价洞察 - 真实渲染（后端 parse_data.reviews，上限 10）
   const reviews = useMemo(() => {
     const direct = Array.isArray((pd as any).reviews) ? ((pd as any).reviews as any[]) : [];
     const nested = Array.isArray((pd as any)?.structured_data?.reviews)
       ? (((pd as any).structured_data.reviews as any[]) || [])
       : [];
-    const arr = direct.length > 0 ? direct : nested;
+    const arr = (direct.length > 0 ? direct : nested).slice(0, MAX_REVIEWS_DISPLAY);
     return arr
       .map((r) => ({
         rating: Number(r?.rating || 0),
         title: String(r?.title || '').trim(),
         content: String(r?.content || '').trim(),
         author: String(r?.author || '').trim(),
-        date: String(r?.date || '').trim(),
+        date: String((r as any)?.date || (r as any)?.created_at || '').trim(),
         verified_purchase: Boolean(r?.verified_purchase),
         helpful_votes: Number(r?.helpful_votes || 0),
       }))
-      .filter((r) => r.content); // 只展示有正文的纯文字评论
+      .filter((r) => r.content);
   }, [pd]);
+
+  const reviewPageCount = reviews.length === 0 ? 0 : Math.ceil(reviews.length / REVIEW_PAGE_SIZE);
+  const pagedReviews = useMemo(() => {
+    const start = reviewPage * REVIEW_PAGE_SIZE;
+    return reviews.slice(start, start + REVIEW_PAGE_SIZE);
+  }, [reviews, reviewPage]);
+
+  useEffect(() => {
+    setReviewPage(0);
+  }, [reviews.length]);
 
   const toggleReviewExpand = (key: string) => {
     setExpandedReviewKeys((prev) => {
@@ -346,12 +389,12 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
 
             <div className="flex flex-wrap items-end gap-6 mb-6">
               <div className="text-6xl font-bold text-emerald-600 flex-shrink-0 min-w-[12rem]">
-                {safePrice || '价格解析异常'}
+                {overviewPriceLabel || '价格解析异常'}
               </div>
 
-              {Number(pd.rating) > 0 ? (
+              {overviewRatingOneDecimal != null ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-amber-500 text-3xl font-semibold">⭐ {pd.rating}</span>
+                  <span className="text-amber-500 text-3xl font-semibold">⭐ {overviewRatingOneDecimal}</span>
                   <span className="text-gray-500 text-lg">
                     (
                     {pd.review_count?.toLocaleString?.()
@@ -467,8 +510,12 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
           <div className="text-sm text-gray-500">暂无用户评价数据</div>
         ) : (
           <div className="space-y-4">
-            {reviews.slice(0, visibleReviews).map((r, idx) => {
-              const key = `${r.author || 'anon'}-${r.date || 'date'}-${idx}`;
+            <div className="text-sm text-gray-600">
+              共 {reviews.length} 条（至多 {MAX_REVIEWS_DISPLAY} 条）
+            </div>
+            {pagedReviews.map((r, idx) => {
+              const globalIdx = reviewPage * REVIEW_PAGE_SIZE + idx;
+              const key = `${r.author || 'anon'}-${r.date || 'd'}-${globalIdx}`;
               const expanded = expandedReviewKeys.has(key);
               const showHelpful = (r.helpful_votes || 0) > 0;
               return (
@@ -520,14 +567,26 @@ export default function EcomProductResultView({ data, productUrl, onEcomResultUp
               );
             })}
 
-            {reviews.length > visibleReviews ? (
-              <div className="pt-2">
+            {reviewPageCount > 1 ? (
+              <div className="pt-4 flex items-center justify-center gap-3">
                 <button
                   type="button"
-                  onClick={() => setVisibleReviews((v) => Math.min(reviews.length, v + 5))}
-                  className="px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-sm font-medium text-gray-800"
+                  disabled={reviewPage <= 0}
+                  onClick={() => setReviewPage((p) => Math.max(0, p - 1))}
+                  className="px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-sm font-medium text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  加载更多
+                  上一页
+                </button>
+                <span className="text-sm text-gray-600">
+                  第 {reviewPage + 1} / {reviewPageCount} 页
+                </span>
+                <button
+                  type="button"
+                  disabled={reviewPage >= reviewPageCount - 1}
+                  onClick={() => setReviewPage((p) => Math.min(reviewPageCount - 1, p + 1))}
+                  className="px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-sm font-medium text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  下一页
                 </button>
               </div>
             ) : null}
