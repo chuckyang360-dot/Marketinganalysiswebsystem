@@ -33,6 +33,8 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Create FastAPI app
 app = FastAPI(

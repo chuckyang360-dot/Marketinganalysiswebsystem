@@ -1,8 +1,9 @@
 from typing import Literal
 import logging
+from urllib.parse import urlparse
 
 
-PlatformType = Literal["amazon", "shopee", "unsupported"]
+PlatformType = Literal["amazon", "shopee", "tiktok", "lazada", "unsupported"]
 logger = logging.getLogger(__name__)
 
 
@@ -24,6 +25,20 @@ def detect_platform(url: str) -> PlatformType:
     if "shopee.sg" in value:
         logger.info("[EcomStruct][PlatformDetector] platform=shopee")
         return "shopee"
+
+    try:
+        parsed = urlparse(value)
+        host = (parsed.netloc or "").lower()
+        path = (parsed.path or "").lower()
+    except Exception:
+        host, path = "", ""
+    if "lazada." in host and "/products/" in path:
+        logger.info("[EcomStruct][PlatformDetector] platform=lazada")
+        return "lazada"
+
+    if "tiktok.com/shop" in value:
+        logger.info("[EcomStruct][PlatformDetector] platform=tiktok")
+        return "tiktok"
 
     logger.info("[EcomStruct][PlatformDetector] platform=unsupported")
     return "unsupported"

@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     BRIGHTDATA_API_KEY: Optional[str] = Field(default=None, env="BRIGHTDATA_API_KEY")
     BRIGHTDATA_CUSTOMER_ID: Optional[str] = Field(default=None, env="BRIGHTDATA_CUSTOMER_ID")
     BRIGHTDATA_SHOPEE_ZONE: Optional[str] = Field(default=None, env="BRIGHTDATA_SHOPEE_ZONE")
+    BRIGHTDATA_TIKTOK_ZONE: Optional[str] = Field(default=None, env="BRIGHTDATA_TIKTOK_ZONE")
+    BRIGHTDATA_LAZADA_ZONE: Optional[str] = Field(default=None, env="BRIGHTDATA_LAZADA_ZONE")
     BRIGHTDATA_TIMEOUT_SECONDS: int = Field(default=120, env="BRIGHTDATA_TIMEOUT_SECONDS")
     BRIGHTDATA_MAX_RETRIES: int = Field(default=2, env="BRIGHTDATA_MAX_RETRIES")
     BRIGHTDATA_MAX_POLLS: int = Field(default=25, env="BRIGHTDATA_MAX_POLLS")
@@ -52,6 +54,9 @@ class Settings(BaseSettings):
 
     # Backward compatibility for existing BrightData service usage
     BRIGHTDATA_ZONE: Optional[str] = Field(default=None, env="BRIGHTDATA_ZONE")
+
+    # TikTok Shop page_data API（可选；占位符 {product_id}）
+    TIKTOK_PAGE_DATA_API_TEMPLATE: Optional[str] = Field(default=None, env="TIKTOK_PAGE_DATA_API_TEMPLATE")
 
     # Banana.dev（Flux 等 GPU 推理部署）
     BANANA_API_KEY: Optional[str] = Field(default=None, env="BANANA_API_KEY")
