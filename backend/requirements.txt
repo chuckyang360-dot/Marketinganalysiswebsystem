@@ -21,3 +21,4 @@ celery
 schedule
 authlib
 bcrypt
+psycopg2-binary
