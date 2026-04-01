@@ -9,6 +9,7 @@ import { GapTable } from '../components/GapTable';
 import { ContentIdeas } from '../components/ContentIdeas';
 import { ArrowLeft, Download } from 'lucide-react';
 import type { FullAnalysisResponse } from '../types/analysis';
+import { runFullAnalysis } from '../services/api';
 
 export function AnalysisResult() {
   const navigate = useNavigate();
@@ -24,13 +25,12 @@ export function AnalysisResult() {
 
   const runAnalysis = async (query: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/api/full-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, limit: 20 }),
-      });
-      const result = await response.json();
-      setData(result);
+      const result = await runFullAnalysis(query);
+      if ('query' in result && 'reddit_analysis' in result && 'seo_analysis' in result) {
+        setData(result as FullAnalysisResponse);
+      } else {
+        throw new Error('Invalid analysis response type');
+      }
     } catch (error) {
       console.error('Analysis failed:', error);
     } finally {

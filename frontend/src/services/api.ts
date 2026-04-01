@@ -1,6 +1,5 @@
 import type { FullAnalysisResponse, WorkspaceAnalysisResult } from '../types/analysis';
-
-const API_BASE_URL = 'http://localhost:8000';
+import { API_BASE_URL } from '../config/api';
 
 /** CEO 统一入口扩展字段（如电商主图优化） */
 export type FullAnalysisExtras = {

@@ -5,6 +5,7 @@ import { Footer } from '../components/Footer';
 import { ExampleCards } from '../components/ExampleCards';
 import { useLanguage } from '../contexts/LanguageContext';
 import { BarChart3, TrendingUp, Lightbulb, ArrowRight } from 'lucide-react';
+import { runFullAnalysis } from '../services/api';
 
 export function Home() {
   const navigate = useNavigate();
@@ -14,12 +15,7 @@ export function Home() {
   const handleSelect = async (query: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/api/full-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, limit: 20 }),
-      });
-      const data = await response.json();
+      const data = await runFullAnalysis(query);
       navigate('/result', { state: { data } });
     } catch (error) {
       console.error('Analysis failed:', error);
