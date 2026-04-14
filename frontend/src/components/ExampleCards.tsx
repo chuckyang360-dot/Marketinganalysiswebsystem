@@ -2,7 +2,7 @@ import { Code, ShoppingCart, AlertTriangle, Zap } from 'lucide-react';
 
 export function ExampleCards({ onSelect }: { onSelect: (query: string) => void }) {
   return (
-    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mt-8">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
       <ExampleCard
         icon={<Code className="w-6 h-6" />}
         title="AI Coding Tools"

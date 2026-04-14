@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface Props {
   lang?: 'zh' | 'en';
@@ -15,6 +17,7 @@ function callOnAnalyze(onAnalyze: ((query: string) => void) | undefined, query: 
 export function WorkspaceWelcome({ lang = 'zh', onAnalyze }: Props) {
   const [query, setQuery] = useState('');
   const [loading] = useState(false);
+  const { t } = useLanguage();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +66,13 @@ export function WorkspaceWelcome({ lang = 'zh', onAnalyze }: Props) {
           </h1>
           <p className="text-sm text-gray-500">
             {lang === 'zh' ? '输入关键词开始智能市场分析，或选择下方案例' : 'Enter keywords to start intelligent market analysis, or select an example below'}
+          </p>
+          <p className="mt-3 text-center">
+            <Link to="/pricing" className="text-xs text-blue-600 hover:text-blue-700 hover:underline">
+              {t('workspace.upgrade')}
+            </Link>
+            <span className="mx-1 text-gray-300">·</span>
+            <span className="text-xs text-gray-500">{t('workspace.upgradeHint')}</span>
           </p>
         </div>
 

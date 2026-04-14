@@ -2,7 +2,11 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
 
-export function Navbar() {
+type NavbarProps = {
+  homeMode?: boolean;
+};
+
+export function Navbar({ homeMode = false }: NavbarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
@@ -13,6 +17,7 @@ export function Navbar() {
   const navItems = [
     { label: t('nav.home'), to: '/' },
     { label: t('nav.product'), to: '/product' },
+    { label: t('nav.pricing'), to: '/pricing' },
     { label: t('nav.cases'), to: '/cases' },
     { label: t('nav.workspace'), to: '/workspace' },
     { label: t('nav.about'), to: '/about' },
@@ -24,15 +29,27 @@ export function Navbar() {
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 h-20 border-b border-gray-200 bg-white">
-      <div className="mx-auto h-full max-w-[1400px] flex items-center justify-between px-6">
+    <header
+      className={`fixed top-0 left-0 right-0 z-50 border-b bg-white transition-shadow duration-300 ${
+        homeMode ? 'h-16 lg:h-[68px] border-[#EAEAEA] shadow-[0_1px_8px_rgba(0,0,0,0.06)]' : 'h-20 border-gray-200'
+      }`}
+    >
+      <div className={`mx-auto h-full flex items-center justify-between px-6 ${homeMode ? 'max-w-[1280px] lg:px-10' : 'max-w-[1400px]'}`}>
         {/* 左侧 Logo */}
         <div className="flex items-center gap-3 shrink-0">
           <Link to="/" className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold">
               GP
             </div>
-            <span className="text-2xl font-bold text-gray-900">GlobalPulse AI</span>
+            <span
+              className="text-2xl font-bold text-gray-900"
+              style={{
+                fontFamily:
+                  "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif",
+              }}
+            >
+              GlobalPulse AI
+            </span>
           </Link>
         </div>
 
