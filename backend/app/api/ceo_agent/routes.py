@@ -31,6 +31,18 @@ class FullAnalysisRequest(BaseModel):
         default=None,
         description="图片优化参考图 URL，最多 6 张",
     )
+    analysis_id: Optional[str] = Field(
+        default=None,
+        description="前端分析会话 id（用于链路追踪）",
+    )
+    optimize_direction: Optional[str] = Field(
+        default=None,
+        description="主图优化方向（如 场景化卖点图）",
+    )
+    product_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="当前商品上下文（标题/平台/品牌等）",
+    )
 
 
 router = APIRouter()
@@ -66,6 +78,9 @@ async def full_analysis(request: FullAnalysisRequest):
             action=request.action,
             user_prompt=request.user_prompt,
             selected_reference_images=request.selected_reference_images,
+            analysis_id=request.analysis_id,
+            optimize_direction=request.optimize_direction,
+            product_context=request.product_context,
         )
 
         return {

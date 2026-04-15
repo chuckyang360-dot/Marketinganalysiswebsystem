@@ -20,7 +20,7 @@ class ImageGenerationTool:
     PROVIDER_GEMINI = "Gemini"
     PROVIDER_QWEN = "QwenImage"
     _LOG_PREFIX = "[ImageGenTool]"
-    _MAX_IMAGES = 4
+    _MAX_IMAGES = 1
     _MAX_REFS = 6
     _GEMINI_MODEL = "gemini-2.5-flash-image"
     _QWEN_MODEL = "qwen-image-2.0-pro"
@@ -108,39 +108,28 @@ class ImageGenerationTool:
         logger.info("%s try gemini model=%s", self._LOG_PREFIX, model)
         collected: List[str] = []
         async with httpx.AsyncClient(timeout=120.0) as client:
-            for attempt in range(1, self._MAX_IMAGES + 1):
-                text = body_prompt
-                if attempt > 1:
-                    text += (
-                        f"\n\n（变体 {attempt}/{self._MAX_IMAGES}，"
-                        "保持同一商品卖点，构图或背景可略有不同。）"
-                    )
-                payload = {
-                    "contents": [{"parts": [{"text": text}]}],
-                    "generationConfig": generation_config,
-                }
-                resp = await client.post(endpoint, params={"key": api_key}, json=payload)
-                if resp.status_code == 404:
-                    logger.warning("%s model=%s HTTP 404，不可用，回退 Qwen", self._LOG_PREFIX, model)
-                    return []
-                if resp.status_code != 200:
-                    logger.warning(
-                        "%s model=%s HTTP %s: %s，回退 Qwen",
-                        self._LOG_PREFIX,
-                        model,
-                        resp.status_code,
-                        resp.text[:300],
-                    )
-                    return []
-                data = resp.json()
-                batch = self._extract_inline_images(data)
-                for img in batch:
-                    if img not in collected:
-                        collected.append(img)
-                    if len(collected) >= self._MAX_IMAGES:
-                        break
-                if len(collected) >= self._MAX_IMAGES:
-                    break
+            payload = {
+                "contents": [{"parts": [{"text": body_prompt}]}],
+                "generationConfig": generation_config,
+            }
+            resp = await client.post(endpoint, params={"key": api_key}, json=payload)
+            if resp.status_code == 404:
+                logger.warning("%s model=%s HTTP 404，不可用，回退 Qwen", self._LOG_PREFIX, model)
+                return []
+            if resp.status_code != 200:
+                logger.warning(
+                    "%s model=%s HTTP %s: %s，回退 Qwen",
+                    self._LOG_PREFIX,
+                    model,
+                    resp.status_code,
+                    resp.text[:300],
+                )
+                return []
+            data = resp.json()
+            batch = self._extract_inline_images(data)
+            logger.info("%s gemini extracted=%s", self._LOG_PREFIX, len(batch))
+            if batch:
+                collected.append(batch[0])
 
         if len(collected) < self._MAX_IMAGES:
             logger.warning(
@@ -192,58 +181,50 @@ class ImageGenerationTool:
         images: List[str] = []
 
         async with httpx.AsyncClient(timeout=120.0) as client:
-            for attempt in range(1, self._MAX_IMAGES + 1):
-                text = body_prompt
-                if attempt > 1:
-                    text += (
-                        f"\n\n（变体 {attempt}/{self._MAX_IMAGES}，"
-                        "保持同一商品卖点，构图或背景可略有不同。）"
-                    )
-                payload = {
-                    "model": self._QWEN_MODEL,
-                    "input": {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "text": text
-                                    }
-                                ],
-                            }
-                        ]
-                    },
-                    "parameters": {
-                        "size": "2048*2048",
-                        "watermark": False,
-                        "prompt_extend": True,
-                    },
-                }
-                resp = await client.post(
-                    self._QWEN_ENDPOINT,
-                    headers={
-                        "Authorization": f"Bearer {api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
+            payload = {
+                "model": self._QWEN_MODEL,
+                "input": {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "text": body_prompt
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "parameters": {
+                    "size": "2048*2048",
+                    "watermark": False,
+                    "prompt_extend": True,
+                },
+            }
+            resp = await client.post(
+                self._QWEN_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            if resp.status_code >= 400:
+                logger.warning(
+                    "%s qwen model=%s HTTP %s: %s",
+                    self._LOG_PREFIX,
+                    self._QWEN_MODEL,
+                    resp.status_code,
+                    resp.text[:300],
                 )
-                if resp.status_code >= 400:
-                    logger.warning(
-                        "%s qwen model=%s HTTP %s: %s",
-                        self._LOG_PREFIX,
-                        self._QWEN_MODEL,
-                        resp.status_code,
-                        resp.text[:300],
-                    )
-                    continue
-                data = resp.json() if resp.content else {}
-                if not isinstance(data, dict):
-                    continue
-                img = self._extract_qwen_image_url(data)
-                if img and img not in images:
-                    images.append(img)
-                if len(images) >= self._MAX_IMAGES:
-                    break
+                return []
+            data = resp.json() if resp.content else {}
+            if not isinstance(data, dict):
+                return []
+            img = self._extract_qwen_image_url(data)
+            if img and img not in images:
+                images.append(img)
+            logger.info("%s qwen extracted_total=%s", self._LOG_PREFIX, len(images))
 
         images = self._dedupe(images)
         if len(images) < self._MAX_IMAGES:

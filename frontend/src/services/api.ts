@@ -6,6 +6,9 @@ export type FullAnalysisExtras = {
   action?: string;
   user_prompt?: string;
   selected_reference_images?: string[];
+  analysis_id?: string;
+  optimize_direction?: string;
+  product_context?: Record<string, unknown>;
 };
 
 export async function runFullAnalysis(
@@ -20,6 +23,9 @@ export async function runFullAnalysis(
   if (extras?.selected_reference_images != null) {
     body.selected_reference_images = extras.selected_reference_images;
   }
+  if (extras?.analysis_id != null) body.analysis_id = extras.analysis_id;
+  if (extras?.optimize_direction != null) body.optimize_direction = extras.optimize_direction;
+  if (extras?.product_context != null) body.product_context = extras.product_context;
 
   const response = await fetch(`${API_BASE_URL}/api/full-analysis`, {
     method: 'POST',

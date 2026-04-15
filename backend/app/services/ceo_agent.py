@@ -173,6 +173,7 @@ class CEOAgent:
             return {
                 "type": "ecom_product_analysis",
                 "parse_data": self._ecom_parse_data_from_parsed_product(parsed_product),
+                "hero_image_directions": self._build_hero_image_directions(parsed_product),
                 "ceo_analysis": grok_analysis,
                 "status": "success",
                 "message": "Vibe Marketing 商品解析完成"
@@ -249,6 +250,45 @@ class CEOAgent:
     # ========== 图片优化（指挥：抓取 + 委托 ImageGenerationTool）==========
 
     @staticmethod
+    def _build_hero_image_directions(parsed_product: Dict[str, Any]) -> List[Dict[str, Any]]:
+        title = str(parsed_product.get("title", "")).lower()
+        category = str(parsed_product.get("category", "")).lower()
+        text = f"{title} {category}"
+
+        def pack(key: str, title_text: str, desc: str, rationale: str) -> Dict[str, Any]:
+            return {
+                "key": key,
+                "title": title_text,
+                "description": desc,
+                "prompt": f"{title_text}：保持当前商品主体不变，仅优化场景、构图、信息层级与转化表达。",
+                "rationale": rationale,
+            }
+
+        if any(k in text for k in ["vacuum", "cleaner", "mop", "扫地", "清洁"]):
+            return [
+                pack("home_use_scene", "家庭清洁场景图", "展示真实家居环境中的使用状态", "家清类商品更依赖场景代入与家务痛点共鸣"),
+                pack("function_closeup", "功能特写图", "突出吸力、避障、拖地等核心能力", "决策依赖功能感知与参数理解"),
+                pack("effect_comparison", "清洁效果对比图", "展示前后差异和结果证明", "结果导向表达可直接提升购买信心"),
+            ]
+        if any(k in text for k in ["headphone", "earbud", "耳机"]):
+            return [
+                pack("commute_scene", "通勤场景主图", "展示通勤/地铁/办公等高频使用情境", "耳机类强调日常代入和便携使用"),
+                pack("product_closeup", "产品特写主图", "突出佩戴细节、工艺和质感", "外观质感与做工细节影响下单"),
+                pack("noise_compare", "降噪对比效果图", "对比降噪前后听感场景", "对比表达有助于用户理解价值差异"),
+            ]
+        if any(k in text for k in ["dress", "shirt", "fashion", "服", "女装", "上衣", "裤"]):
+            return [
+                pack("wear_scene", "上身场景图", "展示真人穿搭与出行场景", "服饰转化依赖上身效果与场景想象"),
+                pack("fit_highlight", "版型卖点图", "突出剪裁、版型与显瘦细节", "版型感知是服饰决策核心"),
+                pack("fabric_closeup", "面料细节图", "展示材质纹理和触感信息", "面料信任能降低退货顾虑"),
+            ]
+        return [
+            pack("usage_scene", "使用场景主图", "展示商品在真实生活中的使用情境", "场景图有助于建立代入感"),
+            pack("feature_closeup", "功能特写主图", "突出关键功能和核心卖点", "特写图提升功能理解效率"),
+            pack("benefit_compare", "效果对比图", "可视化展示使用前后差异", "结果对比提升转化说服力"),
+        ]
+
+    @staticmethod
     def _ecom_parse_data_from_parsed_product(
         parsed_product: Dict[str, Any],
         *,
@@ -302,8 +342,17 @@ class CEOAgent:
         product_url: str,
         user_prompt: str,
         reference_images: List[str],
+        analysis_id: Optional[str] = None,
+        optimize_direction: Optional[str] = None,
+        product_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """抓取商品页 → 调用主图生成工具 → 写入 parse_data。"""
+        logger.info(
+            "[CEO_IMAGE] action=ecom_optimize_images analysis_id=%s direction=%s refs=%s",
+            analysis_id,
+            optimize_direction,
+            len(reference_images or []),
+        )
         platform = detect_platform(product_url)
         if platform == "unsupported":
             return {
@@ -312,17 +361,27 @@ class CEOAgent:
                 "ceo_analysis": "图片优化失败：query 必须是已支持的电商商品 URL。",
                 "status": "error",
                 "message": "无效的电商 URL",
+                "success": False,
+                "generated_images": [],
             }
 
         refs = [u for u in (reference_images or []) if isinstance(u, str) and u.strip()][:6]
         up = (user_prompt or "").strip()
         if not refs or not up:
+            logger.warning(
+                "[CEO_IMAGE] invalid params analysis_id=%s has_prompt=%s refs=%s",
+                analysis_id,
+                bool(up),
+                len(refs),
+            )
             return {
                 "type": "ecom_product_analysis",
                 "parse_data": {"url": product_url, "platform": platform},
                 "ceo_analysis": "图片优化失败：请提供 user_prompt 并至少选择一张参考图。",
                 "status": "error",
                 "message": "参数不完整",
+                "success": False,
+                "generated_images": [],
             }
 
         try:
@@ -335,6 +394,8 @@ class CEOAgent:
                 "ceo_analysis": f"图片优化失败：无法抓取商品页 — {e}",
                 "status": "error",
                 "message": "抓取失败",
+                "success": False,
+                "generated_images": [],
             }
 
         # 保留完整分析层，避免优化动作覆盖 ceo_analysis。
@@ -347,7 +408,32 @@ class CEOAgent:
             logger.warning("[CEO_IMAGE] 原始分析重建失败，降级为空分析：%s", e)
 
         try:
-            optimized, provider = await self._generate_optimized_images(up, refs)
+            logger.info(
+                "[CEO_IMAGE] generate start analysis_id=%s direction=%s reference_image=%s",
+                analysis_id,
+                optimize_direction or "",
+                refs[0] if refs else "",
+            )
+            locked_prompt = (
+                "硬性约束：保持当前商品主体不变，不允许替换商品品类/品牌/主体结构；"
+                "参考图仅用于场景风格、人物状态、氛围和信息层级约束。\n"
+                f"当前商品标题：{(product_context or {}).get('title', parsed_product.get('title', ''))}\n"
+                f"当前商品品牌：{(product_context or {}).get('brand', parsed_product.get('brand', ''))}\n"
+                f"当前商品平台：{(product_context or {}).get('platform', parsed_product.get('platform', ''))}\n"
+                f"当前商品价格：{(product_context or {}).get('price', parsed_product.get('price', ''))}\n"
+                f"当前优化方向：{optimize_direction or ''}\n"
+                f"用户需求：{up}"
+            )
+            optimized, provider = await self._generate_optimized_images(
+                locked_prompt,
+                refs,
+            )
+            logger.info(
+                "[CEO_IMAGE] provider done provider=%s count=%s analysis_id=%s",
+                provider,
+                len(optimized),
+                analysis_id,
+            )
         except Exception as e:
             logger.error("[CEO_IMAGE] 生成失败：%s", e)
             return {
@@ -362,7 +448,26 @@ class CEOAgent:
                 ),
                 "status": "error",
                 "message": "主图优化失败",
+                "success": False,
+                "generated_images": [],
+                "hero_image_directions": self._build_hero_image_directions(parsed_product),
             }
+
+        generated_images = [
+            {
+                "url": u,
+                "prompt": up,
+                "direction": optimize_direction or "",
+            }
+            for u in (optimized or [])
+            if isinstance(u, str) and u.strip()
+        ]
+        logger.info(
+            "[CEO_IMAGE] normalized result success=%s generated_images=%s analysis_id=%s",
+            bool(generated_images),
+            len(generated_images),
+            analysis_id,
+        )
 
         parse_data = self._ecom_parse_data_from_parsed_product(
             parsed_product,
@@ -372,6 +477,7 @@ class CEOAgent:
         return {
             "type": "ecom_product_analysis",
             "parse_data": parse_data,
+            "hero_image_directions": self._build_hero_image_directions(parsed_product),
             "ceo_analysis": original_analysis or "暂无分析",
             "image_optimization_message": (
                 f"CEO 已编排完成主图优化（**{provider}**），共 **{len(optimized)}** 张。"
@@ -379,6 +485,8 @@ class CEOAgent:
             ),
             "status": "success",
             "message": "图片优化完成",
+            "success": True,
+            "generated_images": generated_images,
         }
 
     async def _call_x_agent(
@@ -654,6 +762,9 @@ class CEOAgent:
         action: Optional[str] = None,
         user_prompt: Optional[str] = None,
         selected_reference_images: Optional[List[str]] = None,
+        analysis_id: Optional[str] = None,
+        optimize_direction: Optional[str] = None,
+        product_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         运行完整分析流程（orchestrator 主入口）
@@ -672,6 +783,9 @@ class CEOAgent:
                 product_url=query.strip(),
                 user_prompt=(user_prompt or "").strip(),
                 reference_images=list(selected_reference_images or []),
+                analysis_id=analysis_id,
+                optimize_direction=optimize_direction,
+                product_context=product_context,
             )
 
         # ==================== Vibe Marketing V1.0 - 电商URL优先处理 ====================

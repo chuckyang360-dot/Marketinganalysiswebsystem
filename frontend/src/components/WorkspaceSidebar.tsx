@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { WorkspaceAnalysisResult } from '../types/analysis';
+import type { AnalysisHistoryRecord } from '../types/history';
 import type { ReportSection } from '../types/report';
 import { getWorkspaceReportSections } from '../utils/reportSections';
 
@@ -8,6 +9,8 @@ interface Props {
   onBackToWelcome?: () => void;
   onNewAnalysis?: () => void;
   onScrollToSection?: (sectionId: string) => void;
+  historyRecords?: AnalysisHistoryRecord[];
+  onOpenHistory?: (record: AnalysisHistoryRecord) => void;
   lang?: 'zh' | 'en';
 }
 
@@ -16,6 +19,8 @@ export function WorkspaceSidebar({
   onBackToWelcome,
   onNewAnalysis,
   onScrollToSection,
+  historyRecords = [],
+  onOpenHistory,
   lang = 'zh'
 }: Props) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
@@ -41,6 +46,8 @@ export function WorkspaceSidebar({
       analysis: '深度分析',
       strategy: '策略建议',
       execution: '执行动作',
+      productAnalysis: '商品分析',
+      marketingReport: '营销分析',
     },
     en: {
       newAnalysis: 'New Analysis',
@@ -56,11 +63,20 @@ export function WorkspaceSidebar({
       analysis: 'Deep Analysis',
       strategy: 'Strategy',
       execution: 'Execution',
+      productAnalysis: 'Product Analysis',
+      marketingReport: 'Marketing Report',
     }
   };
 
   const text = t[lang];
   const isWelcomeState = currentResult === null;
+  const recentRecords = historyRecords.slice(0, 12);
+
+  const formatTagText = (record: AnalysisHistoryRecord) => {
+    const platform = record.platform || 'unknown';
+    const typeTag = record.type === 'ecom_product' ? text.productAnalysis : text.marketingReport;
+    return `${platform} · ${typeTag}`;
+  };
 
   const welcomeNavItems = [
     { id: 'new', icon: '➕', label: text.newAnalysis, action: onNewAnalysis },
@@ -143,6 +159,25 @@ export function WorkspaceSidebar({
           <div className="text-xs text-gray-500 mb-1">{text.currentAnalysis}</div>
           <div className="text-sm font-semibold text-gray-900 truncate">
             {currentTitle}
+          </div>
+        </div>
+      )}
+
+      {!isWelcomeState && recentRecords.length > 0 && (
+        <div className="px-4 py-3 border-b border-gray-100">
+          <div className="text-xs text-gray-500 mb-2">{text.recentAnalysis}</div>
+          <div className="space-y-2">
+            {recentRecords.map((record) => (
+              <button
+                key={record.id}
+                type="button"
+                onClick={() => onOpenHistory?.(record)}
+                className="w-full text-left px-2.5 py-2 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
+              >
+                <div className="text-sm font-medium text-gray-900 truncate">{record.title || record.display_value}</div>
+                <div className="text-xs text-gray-500 truncate">{formatTagText(record)}</div>
+              </button>
+            ))}
           </div>
         </div>
       )}

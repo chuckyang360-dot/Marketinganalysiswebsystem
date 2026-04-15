@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
 const TAGS = [
   { label: "市场分析", icon: "ri-radar-line", color: "#fb923c", bg: "rgba(251,146,60,0.08)", border: "rgba(251,146,60,0.2)" },
@@ -22,10 +23,17 @@ export default function WorkspaceInputArea({ onAnalyze, inputValue = "" }: Works
   const [input, setInput] = useState(inputValue);
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [focused, setFocused] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => { if (inputValue) setInput(inputValue); }, [inputValue]);
 
-  const handleSubmit = () => { if (input.trim()) onAnalyze(input.trim()); };
+  const handleSubmit = () => {
+    if (!input.trim()) return;
+    onAnalyze(input.trim());
+    // Navigate to ecom result page with a generated analysisId
+    const analysisId = `demo-${Date.now()}`;
+    navigate(`/workspace/ecom-result/${analysisId}`);
+  };
   const handleKeyDown = (e: React.KeyboardEvent) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSubmit(); };
 
   return (

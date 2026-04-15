@@ -4,10 +4,12 @@ import WorkspaceInputArea from "./components/WorkspaceInputArea";
 import WorkspaceExamples from "./components/WorkspaceExamples";
 import WorkspaceMockResult from "./components/WorkspaceMockResult";
 import WorkspaceRecentAnalysis from "./components/WorkspaceRecentAnalysis";
+import HistoryDrawer from "./components/HistoryDrawer";
 
 export default function WorkspacePage() {
   const [activeHistoryId, setActiveHistoryId] = useState("h1");
   const [inputValue, setInputValue] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const handleNew = () => { setActiveHistoryId(""); setInputValue(""); };
   const handleSelectHistory = (id: string) => setActiveHistoryId(id);
@@ -22,7 +24,7 @@ export default function WorkspacePage() {
     <div className="flex h-screen overflow-hidden" style={{ background: "#F7F8FA", fontFamily: "'Inter', sans-serif" }}>
       <WorkspaceSidebar activeId={activeHistoryId} onSelect={handleSelectHistory} onNew={handleNew} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <WorkspaceTopBar />
+        <WorkspaceTopBar onOpenHistory={() => setDrawerOpen(true)} />
         <div id="workspace-main" className="flex-1 overflow-y-auto" style={{ background: "#F7F8FA" }}>
           <div className="relative z-10">
             <WorkspaceInputArea onAnalyze={handleAnalyze} inputValue={inputValue} />
@@ -32,11 +34,16 @@ export default function WorkspacePage() {
           </div>
         </div>
       </div>
+      <HistoryDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </div>
   );
 }
 
-function WorkspaceTopBar() {
+interface WorkspaceTopBarProps {
+  onOpenHistory: () => void;
+}
+
+function WorkspaceTopBar({ onOpenHistory }: WorkspaceTopBarProps) {
   return (
     <header className="flex items-center justify-between px-5 py-3 shrink-0"
       style={{ background: "#ffffff", borderBottom: "1px solid #EAEAEA" }}>
@@ -65,6 +72,27 @@ function WorkspaceTopBar() {
           </div>
           <span className="text-[11px]" style={{ color: "#888888" }}>8/10 次</span>
         </div>
+
+        {/* History button */}
+        <button
+          onClick={onOpenHistory}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all duration-150 whitespace-nowrap"
+          style={{ background: "#F7F8FA", border: "1px solid #EAEAEA", color: "#555555" }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "#F0EEFF";
+            (e.currentTarget as HTMLElement).style.borderColor = "rgba(123,97,255,0.3)";
+            (e.currentTarget as HTMLElement).style.color = "#7B61FF";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = "#F7F8FA";
+            (e.currentTarget as HTMLElement).style.borderColor = "#EAEAEA";
+            (e.currentTarget as HTMLElement).style.color = "#555555";
+          }}
+        >
+          <i className="ri-history-line text-[13px]" />
+          <span className="text-[12px] font-medium hidden sm:block">历史</span>
+        </button>
+
         {/* Upgrade */}
         <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold cursor-pointer transition-all duration-150 whitespace-nowrap"
           style={{ background: "rgba(123,97,255,0.08)", border: "1px solid rgba(123,97,255,0.2)", color: "#7B61FF" }}

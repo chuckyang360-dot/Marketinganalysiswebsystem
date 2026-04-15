@@ -4,9 +4,10 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 type NavbarProps = {
   homeMode?: boolean;
+  onOpenHistory?: () => void;
 };
 
-export function Navbar({ homeMode = false }: NavbarProps) {
+export function Navbar({ homeMode = false, onOpenHistory }: NavbarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
@@ -22,6 +23,10 @@ export function Navbar({ homeMode = false }: NavbarProps) {
     { label: t('nav.workspace'), to: '/workspace' },
     { label: t('nav.about'), to: '/about' },
   ];
+  const historyActive = location.pathname !== '/workspace' && location.pathname.startsWith('/workspace');
+  const headerShadowClass = homeMode
+    ? 'shadow-[0_1px_8px_rgba(0,0,0,0.06)]'
+    : 'shadow-[0_1px_8px_rgba(0,0,0,0.06)]';
 
   const handleLogout = () => {
     logout();
@@ -29,12 +34,8 @@ export function Navbar({ homeMode = false }: NavbarProps) {
   };
 
   return (
-    <header
-      className={`fixed top-0 left-0 right-0 z-50 border-b bg-white transition-shadow duration-300 ${
-        homeMode ? 'h-16 lg:h-[68px] border-[#EAEAEA] shadow-[0_1px_8px_rgba(0,0,0,0.06)]' : 'h-20 border-gray-200'
-      }`}
-    >
-      <div className={`mx-auto h-full flex items-center justify-between px-6 ${homeMode ? 'max-w-[1280px] lg:px-10' : 'max-w-[1400px]'}`}>
+    <header className={`fixed top-0 left-0 right-0 z-50 h-16 border-b border-[#EAEAEA] bg-white ${headerShadowClass} transition-shadow duration-300 lg:h-[68px]`}>
+      <div className="mx-auto flex h-full max-w-[1280px] items-center justify-between px-6 lg:px-10">
         {/* 左侧 Logo */}
         <div className="flex items-center gap-3 shrink-0">
           <Link to="/" className="flex items-center gap-3">
@@ -54,32 +55,54 @@ export function Navbar({ homeMode = false }: NavbarProps) {
         </div>
 
         {/* 中间导航 */}
-        <nav className="flex items-center justify-center gap-8">
+        <nav className="flex items-center justify-center gap-1">
           {(navItems ?? []).map((item) => {
             const active = location.pathname === item.to;
             return (
               <Link
                 key={item.to}
                 to={item.to}
-                className="relative px-4 py-2 text-base font-medium transition-colors"
+                className={`relative rounded-lg px-3.5 py-1.5 text-[13.5px] font-medium leading-none transition-all duration-200 ${
+                  active
+                    ? 'text-[#7B61FF] bg-[rgba(123,97,255,0.07)]'
+                    : 'text-[#444444] hover:bg-[#F7F8FA] hover:text-[#111111]'
+                }`}
               >
-                <span className={active ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}>
-                  {item.label}
-                </span>
+                <span>{item.label}</span>
                 {active && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600 rounded-full" />
+                  <>
+                    <span className="absolute inset-0 rounded-lg bg-[rgba(123,97,255,0.07)] -z-10" />
+                    <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#7B61FF]" />
+                  </>
                 )}
               </Link>
             );
           })}
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenHistory) onOpenHistory();
+              else navigate('/workspace');
+            }}
+            className={`relative px-3.5 py-1.5 text-[13.5px] font-medium rounded-lg transition-all duration-200 ${
+              historyActive
+                ? 'text-[#7B61FF] bg-[rgba(123,97,255,0.07)]'
+                : 'text-[#444444] hover:text-[#111111] hover:bg-[#F7F8FA]'
+            }`}
+          >
+            {language === 'zh' ? '历史' : 'History'}
+            {historyActive && (
+              <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[#7B61FF]" />
+            )}
+          </button>
         </nav>
 
         {/* 右侧用户区 */}
-        <div className="flex shrink-0 items-center gap-4">
+        <div className="flex shrink-0 items-center gap-2.5">
           {/* 语言切换 */}
           <button
             onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-            className="text-base text-gray-700 hover:text-gray-900 transition-colors"
+            className="h-8 rounded-lg border border-[#EAEAEA] px-3 text-[13px] font-medium leading-none text-[#888888] transition-colors hover:bg-[#F7F8FA] hover:text-[#444444]"
             aria-label="Toggle language"
           >
             {language === 'zh' ? '中文' : 'EN'}
@@ -87,18 +110,18 @@ export function Navbar({ homeMode = false }: NavbarProps) {
 
           {isAuthenticated ? (
             <>
-              <span className="max-w-[180px] truncate text-base font-medium text-gray-900">
+              <span className="max-w-[180px] truncate px-2 text-[13px] font-medium leading-none text-[#111111]">
                 {displayName}
               </span>
               <button
                 onClick={handleLogout}
-                className="text-base text-gray-700 hover:text-red-600 transition-colors"
+                className="h-8 rounded-lg border border-[#EAEAEA] px-3 text-[13px] leading-none text-[#666666] transition-colors hover:bg-red-50 hover:text-red-600"
               >
                 {t('nav.logout')}
               </button>
             </>
           ) : (
-            <Link to="/login" className="text-base text-gray-700 hover:text-blue-600 transition-colors">
+            <Link to="/login" className="flex h-8 items-center rounded-lg border border-[#EAEAEA] px-3 text-[13px] leading-none text-[#666666] transition-colors hover:bg-[rgba(123,97,255,0.06)] hover:text-[#7B61FF]">
               {t('nav.login')}
             </Link>
           )}

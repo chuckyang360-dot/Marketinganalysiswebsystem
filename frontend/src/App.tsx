@@ -9,6 +9,7 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Pricing } from './pages/Pricing';
 import { Checkout } from './pages/Checkout';
+import { ContentEnginePage } from './pages/ContentEnginePage';
 import { AuthProvider } from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 
@@ -25,6 +26,9 @@ export function App() {
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/cases" element={<Cases />} />
           <Route path="/workspace" element={<Workspace />} />
+          <Route path="/workspace/marketing-result/:analysisId" element={<Workspace />} />
+          <Route path="/workspace/ecom-result/:analysisId" element={<Workspace />} />
+          <Route path="/content-engine" element={<ContentEnginePage />} />
           <Route path="/result" element={<AnalysisResult />} />
           <Route path="/about" element={<About />} />
           <Route path="/login" element={<Login />} />

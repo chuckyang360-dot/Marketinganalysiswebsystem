@@ -217,6 +217,19 @@ export interface EcomProductAnalysisResult {
   parse_data: EcomStructuredData;
   ceo_analysis: string;
   message?: string;
+  success?: boolean;
+  generated_images?: Array<{
+    url: string;
+    prompt?: string;
+    direction?: string;
+  }>;
+  hero_image_directions?: Array<{
+    key: string;
+    title: string;
+    description: string;
+    prompt: string;
+    rationale?: string;
+  }>;
   /** 与 parse_data 对齐的可选镜像字段（若后端顶层也返回） */
   optimized_images?: string[];
   image_generation_provider?: string;

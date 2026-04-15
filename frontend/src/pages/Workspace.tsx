@@ -1,38 +1,76 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Navbar } from '../components/Navbar';
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar';
 import { WorkspaceWelcome } from '../components/WorkspaceWelcome';
 import { WorkspaceResultView } from '../components/WorkspaceResultView';
-import EcomProductResultView from '../components/EcomProductResultView';
+import EcomGrowthDecisionPage from '../components/EcomGrowthDecisionPage';
+import AnalysisHistoryDrawer from '../components/AnalysisHistoryDrawer';
 import { runFullAnalysis } from '../services/api';
 import type { WorkspaceAnalysisResult } from '../types/analysis';
 import { isEcomProductAnalysisResult, isFullAnalysisResponse } from '../types/analysis';
 import { useLanguage } from '../contexts/LanguageContext';
+import type { AnalysisHistoryRecord } from '../types/history';
+import { getAnalysisHistoryRecordById, getAnalysisHistoryRecords, upsertAnalysisHistoryRecord } from '../services/history';
 
 export function Workspace() {
+  const navigate = useNavigate();
+  const { analysisId } = useParams();
   const { language: lang } = useLanguage();
   const [currentQuery, setCurrentQuery] = useState('');
+  const [currentSourceUrl, setCurrentSourceUrl] = useState('');
   const [currentResult, setCurrentResult] = useState<WorkspaceAnalysisResult | null>(null);
+  const [historyRecords, setHistoryRecords] = useState<AnalysisHistoryRecord[]>([]);
+  const [historyDrawerOpen, setHistoryDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isHttpUrl = (input: string) => /^https?:\/\//i.test(String(input || '').trim());
 
   const isEcomUrl = (input: string) => {
     const trimmed = (input || '').trim().toLowerCase();
     if (!trimmed.startsWith('http')) return false;
     return (
       trimmed.includes('amazon.') ||
-      trimmed.includes('shopify.') ||
-      trimmed.includes('taobao.') ||
-      trimmed.includes('tmall.') ||
-      trimmed.includes('jd.com') ||
-      trimmed.includes('ebay.') ||
-      trimmed.includes('walmart.') ||
       trimmed.includes('lazada.') ||
-      trimmed.includes('shopee.')
+      trimmed.includes('shopee.') ||
+      trimmed.includes('shop.tiktok.com') ||
+      trimmed.includes('tiktokshop.') ||
+      trimmed.includes('tiktok.com/shop')
     );
   };
 
+  const getContentRouteMeta = (input: string): { sourceType: string; contentType: 'video' | 'image' | 'article' } | null => {
+    const trimmed = (input || '').trim().toLowerCase();
+    if (!isHttpUrl(trimmed)) return null;
+
+    if (trimmed.includes('mp.weixin.qq.com')) return { sourceType: 'wechat', contentType: 'article' };
+    if (trimmed.includes('zhihu.com')) return { sourceType: 'zhihu', contentType: 'article' };
+    if (trimmed.includes('xiaohongshu.com') || trimmed.includes('xhslink.com')) return { sourceType: 'xiaohongshu', contentType: 'image' };
+    if (trimmed.includes('weibo.com')) return { sourceType: 'weibo', contentType: 'image' };
+    if (trimmed.includes('x.com') || trimmed.includes('twitter.com')) return { sourceType: 'x', contentType: 'image' };
+    if (trimmed.includes('youtube.com') || trimmed.includes('youtu.be')) return { sourceType: 'youtube', contentType: 'video' };
+
+    // Non-shop TikTok URLs go to content engine.
+    if (trimmed.includes('tiktok.com') && !trimmed.includes('shop.tiktok.com') && !trimmed.includes('tiktok.com/shop')) {
+      return { sourceType: 'tiktok', contentType: 'video' };
+    }
+    return null;
+  };
+
   const handleAnalyze = async (query: string) => {
+    const normalizedQuery = String(query || '').trim();
+    const contentRouteMeta = getContentRouteMeta(normalizedQuery);
+    if (contentRouteMeta) {
+      const params = new URLSearchParams({
+        sourceUrl: normalizedQuery,
+        sourceType: contentRouteMeta.sourceType,
+        contentType: contentRouteMeta.contentType,
+      });
+      navigate(`/content-engine?${params.toString()}`);
+      return;
+    }
+
     setCurrentQuery(query);
     setCurrentResult(null);
     setError(null);
@@ -41,8 +79,16 @@ export function Workspace() {
     try {
       const data = await runFullAnalysis(query);
       console.log("FULL_ANALYSIS_RESPONSE", data);
-
+      const saved = upsertAnalysisHistoryRecord(query, data);
+      setHistoryRecords(getAnalysisHistoryRecords(['marketing_report', 'ecom_product', 'content_creation']));
       setCurrentResult(data);
+      setCurrentQuery(saved.display_value || query);
+      if (isEcomProductAnalysisResult(data)) {
+        setCurrentSourceUrl(String(data.parse_data?.url || query || '').trim());
+      } else {
+        setCurrentSourceUrl('');
+      }
+      navigate(saved.result_route, { replace: true });
     } catch (err) {
       console.error('Analysis failed:', err);
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -62,11 +108,52 @@ export function Workspace() {
 
   const handleBackToWelcome = () => {
     setCurrentResult(null);
+    setCurrentQuery('');
+    setCurrentSourceUrl('');
+    navigate('/workspace');
   };
 
   const handleNewAnalysis = () => {
     setCurrentResult(null);
+    setCurrentQuery('');
+    setCurrentSourceUrl('');
+    navigate('/workspace');
   };
+
+  const openHistoryRecord = (record: AnalysisHistoryRecord) => {
+    const resultData = (record.result_data as WorkspaceAnalysisResult) || null;
+    setCurrentResult(resultData);
+    setCurrentQuery(record.display_value || record.title || record.input_value);
+    if (resultData && isEcomProductAnalysisResult(resultData)) {
+      const url = String(resultData.parse_data?.url || record.input_value || '').trim();
+      setCurrentSourceUrl(url);
+    } else {
+      setCurrentSourceUrl('');
+    }
+    setError(null);
+    navigate(record.result_route);
+    setHistoryDrawerOpen(false);
+  };
+
+  useEffect(() => {
+    setHistoryRecords(getAnalysisHistoryRecords(['marketing_report', 'ecom_product', 'content_creation']));
+  }, []);
+
+  useEffect(() => {
+    if (!analysisId) return;
+    const found = getAnalysisHistoryRecordById(analysisId);
+    if (!found) return;
+    const resultData = (found.result_data as WorkspaceAnalysisResult) || null;
+    setCurrentResult(resultData);
+    setCurrentQuery(found.display_value || found.title || found.input_value);
+    if (resultData && isEcomProductAnalysisResult(resultData)) {
+      const url = String(resultData.parse_data?.url || found.input_value || '').trim();
+      setCurrentSourceUrl(url);
+    } else {
+      setCurrentSourceUrl('');
+    }
+    setError(null);
+  }, [analysisId]);
 
   const handleScrollToSection = (sectionId: string) => {
     const element = document.getElementById(sectionId);
@@ -75,18 +162,21 @@ export function Workspace() {
     }
   };
 
+  const isEcomResult = currentResult != null && isEcomProductAnalysisResult(currentResult);
+
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-gray-50 via-white to-blue-50 pt-16">
-      <Navbar />
+      <Navbar onOpenHistory={() => setHistoryDrawerOpen(true)} />
       <main className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
-        <WorkspaceSidebar
-          currentResult={currentResult}
-          onBackToWelcome={handleBackToWelcome}
-          onNewAnalysis={handleNewAnalysis}
-          onScrollToSection={handleScrollToSection}
-          lang={lang}
-        />
+        {!isEcomResult && (
+          <WorkspaceSidebar
+            currentResult={currentResult}
+            onBackToWelcome={handleBackToWelcome}
+            onNewAnalysis={handleNewAnalysis}
+            onScrollToSection={handleScrollToSection}
+            lang={lang}
+          />
+        )}
 
         {/* Right Main Area */}
         <div className="flex-1 overflow-y-auto">
@@ -130,36 +220,41 @@ export function Workspace() {
             </div>
           ) : (
             <div className="min-h-full">
-              {/* Minimal Query Display */}
-              <div className="bg-white border-b border-gray-200 px-6 py-3">
-                <div className="max-w-7xl mx-auto flex items-center gap-4">
-                  <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center">
-                    <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-9-9m0 0l-9 9m0 0l-9 9" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-500">{lang === 'zh' ? '当前分析' : 'Current Analysis'}:</div>
-                    <div className="text-lg font-semibold text-gray-900">{currentQuery}</div>
-                  </div>
-                </div>
-              </div>
-              <div className="p-6">
-                {currentResult == null ? null : isEcomProductAnalysisResult(currentResult) ? (
-                  <EcomProductResultView
+              {currentResult == null ? null : isEcomProductAnalysisResult(currentResult) ? (
+                <div className="px-6 py-6">
+                  <EcomGrowthDecisionPage
                     key={currentQuery}
                     data={currentResult}
-                    productUrl={currentQuery}
+                    productUrl={currentSourceUrl}
+                    analysisId={analysisId || ''}
+                    onNewAnalysis={handleNewAnalysis}
                     onEcomResultUpdate={(next) => setCurrentResult(next)}
                   />
-                ) : isFullAnalysisResponse(currentResult) ? (
+                </div>
+              ) : isFullAnalysisResponse(currentResult) ? (
+                <div className="p-6">
                   <WorkspaceResultView data={currentResult} />
-                ) : null}
-              </div>
+                  <div className="max-w-7xl mx-auto mt-6 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleNewAnalysis}
+                      className="px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50"
+                    >
+                      {lang === 'zh' ? '新建分析' : 'Start New Analysis'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           )}
         </div>
       </main>
+      <AnalysisHistoryDrawer
+        open={historyDrawerOpen}
+        records={historyRecords}
+        onClose={() => setHistoryDrawerOpen(false)}
+        onOpenRecord={openHistoryRecord}
+      />
     </div>
   );
 }
