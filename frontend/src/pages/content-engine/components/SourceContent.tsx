@@ -70,9 +70,9 @@ export default function SourceContent({ data, contentType = "video" }: SourceCon
         </div>
 
         {contentType === "article" ? (
-          <ArticleSourceLayout data={data} platform={platform} />
+          <ArticleSourceLayout data={data} />
         ) : contentType === "image" ? (
-          <ImageSourceLayout data={data} platform={platform} />
+          <ImageSourceLayout data={data} />
         ) : (
           <VideoSourceLayout data={data} platform={platform} />
         )}
@@ -83,10 +83,8 @@ export default function SourceContent({ data, contentType = "video" }: SourceCon
 
 function ArticleSourceLayout({
   data,
-  platform,
 }: {
   data: SourceContentData;
-  platform: { icon: string; label: string; color: string };
 }) {
   const stats = [
     { icon: "ri-heart-3-line", value: data.likes, label: "点赞", color: "#ef4444" },
@@ -231,10 +229,8 @@ function ArticleSourceLayout({
 
 function ImageSourceLayout({
   data,
-  platform,
 }: {
   data: SourceContentData;
-  platform: { icon: string; label: string; color: string };
 }) {
   const [lightbox, setLightbox] = useState<number | null>(null);
 

@@ -133,7 +133,6 @@ export function ContentEnginePage() {
         <SourceContent
           data={{
             ...data,
-            sourceUrl,
             articleBody: contentType === "article" ? (MOCK_ARTICLE_ASSETS as ArticleAssetsData).originalArticle : undefined,
           }}
           contentType={contentType}
