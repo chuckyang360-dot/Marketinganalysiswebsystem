@@ -1,0 +1,529 @@
+"""
+Phase 2 Short Drama: xAI provider wiring, JSON parsing, schema validation, pipeline (mock).
+Run from backend/: PYTHONPATH=. python3 -m unittest tests.test_short_drama_phase2 -v
+"""
+
+import os
+
+# 默认生产关闭 mock；本文件集成测试在导入 app 前强制 mock，避免依赖 XAI_API_KEY。
+os.environ["SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER"] = "true"
+
+import json
+import unittest
+from unittest.mock import MagicMock, patch
+
+import httpx
+
+
+class TestJsonParser(unittest.TestCase):
+    def test_strip_fence(self):
+        from app.short_drama.utils.json_parser import parse_json_object
+
+        raw = '```json\n{"product_name": "x", "category": ""}\n```'
+        d = parse_json_object(raw)
+        self.assertEqual(d["product_name"], "x")
+
+    def test_invalid_raises(self):
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.utils.json_parser import parse_json_object
+
+        with self.assertRaises(ShortDramaInvalidModelOutputError):
+            parse_json_object("not json")
+
+
+class TestXAIExtractText(unittest.TestCase):
+    def test_responses_output_shape(self):
+        from app.short_drama.providers.xai_client import extract_assistant_text
+
+        payload = {
+            "id": "resp_1",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": '{"hello": "world"}'}],
+                }
+            ],
+        }
+        self.assertIn("hello", extract_assistant_text(payload))
+
+
+class TestProductParserXAI(unittest.TestCase):
+    def _fake_client(self, text: str):
+        client = MagicMock()
+
+        def _post(**kwargs):
+            return (
+                {
+                    "id": "r1",
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": text}],
+                        }
+                    ],
+                },
+                "r1",
+                12,
+            )
+
+        client.post_responses.side_effect = _post
+        return client
+
+    def _resp(self, text: str, rid: str = "r1"):
+        return (
+            {
+                "id": rid,
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                ],
+            },
+            rid,
+            12,
+        )
+
+    def test_valid_json_validates(self):
+        from app.short_drama.providers.xai_text_provider import XAITextProvider
+        from app.short_drama.services.product_parser_service import XAIProductParserProvider
+
+        good = {
+            "product_name": "面膜",
+            "category": "美妆",
+            "brand_name": "B",
+            "visual_features": [],
+            "core_features": [],
+            "selling_points": [],
+            "target_users": "",
+            "usage_scenarios": [],
+            "brand_tone": "",
+            "constraints": [],
+            "notes_for_story": "",
+        }
+        prov = XAIProductParserProvider(XAITextProvider(client=self._fake_client(json.dumps(good))))
+        ctx = prov.normalize(42, {"title": "面膜", "image_urls": []})
+        self.assertEqual(ctx.product_name, "面膜")
+
+    def test_invalid_json_raises_after_two_repairs(self):
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.providers.xai_text_provider import XAITextProvider
+        from app.short_drama.services.product_parser_service import XAIProductParserProvider
+
+        client = MagicMock()
+        client.post_responses.side_effect = [
+            self._resp("NOT JSON {{{", "a"),
+            self._resp("still {broken", "b"),
+            self._resp("also bad", "c"),
+        ]
+        prov = XAIProductParserProvider(XAITextProvider(client=client))
+        with self.assertRaises(ShortDramaInvalidModelOutputError) as ctx:
+            prov.normalize(1, {"title": "x"})
+        self.assertIn("repair", str(ctx.exception).lower())
+
+    def test_json_repair_second_attempt_succeeds(self):
+        from app.short_drama.providers.xai_text_provider import XAITextProvider
+        from app.short_drama.services.product_parser_service import XAIProductParserProvider
+
+        good = {
+            "product_name": "面膜",
+            "category": "",
+            "brand_name": "",
+            "visual_features": [],
+            "core_features": [],
+            "selling_points": [],
+            "target_users": "",
+            "usage_scenarios": [],
+            "brand_tone": "",
+            "constraints": [],
+            "notes_for_story": "",
+        }
+        client = MagicMock()
+        client.post_responses.side_effect = [
+            self._resp("NOT JSON", "a"),
+            self._resp("{broken", "b"),
+            self._resp(json.dumps(good), "c"),
+        ]
+        prov = XAIProductParserProvider(XAITextProvider(client=client))
+        ctx = prov.normalize(99, {"title": "面膜", "image_urls": []})
+        self.assertEqual(ctx.product_name, "面膜")
+        self.assertEqual(client.post_responses.call_count, 3)
+
+
+class TestEffectiveXAITextModel(unittest.TestCase):
+    def test_fallback_grok_41_fast(self):
+        from unittest.mock import patch
+
+        from app.config import settings
+        from app.short_drama.providers.xai_client import effective_xai_text_model
+
+        with patch.object(settings, "XAI_TEXT_MODEL", None), patch.object(settings, "XAI_MODEL", None):
+            self.assertEqual(effective_xai_text_model(), "grok-4.1-fast-non-reasoning")
+
+
+class TestShotPromptQuality(unittest.TestCase):
+    def test_vague_prompt_fails(self):
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.services.segment_director_service import validate_shot_prompt_quality
+
+        with self.assertRaises(ShortDramaInvalidModelOutputError) as ctx:
+            validate_shot_prompt_quality(
+                "show something nice and cinematic for the ad",
+                "make it cool with nice lighting",
+                shot_id="s1",
+                segment_id="seg_1",
+            )
+        self.assertTrue(
+            "vague" in str(ctx.exception).lower() or "filler" in str(ctx.exception).lower(),
+            msg=str(ctx.exception),
+        )
+
+    def test_good_prompt_passes(self):
+        from app.short_drama.services.segment_director_service import validate_shot_prompt_quality
+
+        validate_shot_prompt_quality(
+            (
+                "close-up of woman in modern office, holding skincare bottle, "
+                "soft window light, cinematic commercial ad style, vertical 9:16"
+            ),
+            (
+                "slow push-in on woman opening bottle, sitting at desk, "
+                "shallow depth of field, upbeat pacing for short drama ad"
+            ),
+            shot_id="s1",
+            segment_id="seg_1",
+        )
+
+
+def _minimal_assets_bundle():
+    from app.short_drama.schemas.asset import (
+        AssetSpecsBundleSchema,
+        CharacterAssetSchema,
+        ProductAssetSchema,
+        SceneAssetSchema,
+    )
+
+    return AssetSpecsBundleSchema(
+        characters=[
+            CharacterAssetSchema(
+                id=1,
+                name="Lead",
+                role_type="lead",
+                description="buyer persona",
+                visual_prompt="",
+                image_url=None,
+                meta={},
+            )
+        ],
+        scenes=[
+            SceneAssetSchema(
+                id=1,
+                name="Main Set",
+                scene_type="interior",
+                description="clean set",
+                visual_prompt="neutral studio wall",
+                image_url=None,
+                meta={},
+            )
+        ],
+        products=[
+            ProductAssetSchema(
+                id=1,
+                name="SKU-A",
+                description="generic consumer good",
+                visual_prompt="",
+                image_url=None,
+                meta={},
+            )
+        ],
+    )
+
+
+class TestSegmentSlotPipeline(unittest.TestCase):
+    """Structured slots → compose prompts (no category keyword tables)."""
+
+    def test_four_slots_composes_and_validates(self):
+        from app.short_drama.schemas.segment import SegmentScriptSchema, ShotSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.segment_director_service import _enrich_shot_prompts, validate_shot_prompt_quality
+
+        assets = _minimal_assets_bundle()
+        blueprint = StoryBlueprintSchema(
+            premise="product story",
+            segment_plan=[SegmentPlanItemSchema(segment_id="seg_1", summary="beat one")],
+        )
+        seg = SegmentScriptSchema(segment_id="seg_1", title="A", goal="g", shots=[])
+        shot = ShotSchema(
+            shot_id="h1",
+            scene_ref="Main Set",
+            character_refs=["Lead"],
+            scene_description="Bright indoor tabletop with soft daylight",
+            subject_description="Lead hands presenting the hero pack on matte surface",
+            action_description="Rotates the pack slightly to catch a clean label read",
+            camera_description="Macro-friendly three-quarter angle, vertical 9:16 ad framing",
+            image_prompt="ignored-by-server",
+            video_prompt="ignored-by-server",
+        )
+        sh2 = _enrich_shot_prompts(shot, seg, assets, blueprint, project_id=99)
+        self.assertIn("Static keyframe", sh2.image_prompt)
+        self.assertIn("Motion and pacing", sh2.video_prompt)
+        self.assertNotIn("ignored-by-server", sh2.image_prompt)
+        validate_shot_prompt_quality(
+            sh2.image_prompt, sh2.video_prompt, shot_id=sh2.shot_id, segment_id=seg.segment_id
+        )
+
+    def test_three_slots_missing_camera_filled(self):
+        from app.short_drama.schemas.segment import SegmentScriptSchema, ShotSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.segment_director_service import _enrich_shot_prompts
+
+        assets = _minimal_assets_bundle()
+        blueprint = StoryBlueprintSchema(segment_plan=[SegmentPlanItemSchema(segment_id="seg_1")])
+        seg = SegmentScriptSchema(segment_id="seg_1", title="A", goal="g", shots=[])
+        shot = ShotSchema(
+            shot_id="h2",
+            scene_ref="Main Set",
+            character_refs=["Lead"],
+            scene_description="Minimal studio corner with neutral gradient",
+            subject_description="Lead facing camera with product at chest height",
+            action_description="Raises the item smoothly into hero position",
+            camera_description="",
+        )
+        sh2 = _enrich_shot_prompts(shot, seg, assets, blueprint, project_id=1)
+        self.assertTrue((sh2.camera_description or "").strip() or "Cinematic" in sh2.image_prompt)
+
+    def test_two_missing_slots_raises_with_missing_fields(self):
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.schemas.segment import SegmentScriptSchema, ShotSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.segment_director_service import _enrich_shot_prompts
+
+        assets = _minimal_assets_bundle()
+        blueprint = StoryBlueprintSchema(segment_plan=[SegmentPlanItemSchema(segment_id="seg_1")])
+        seg = SegmentScriptSchema(segment_id="seg_1", title="A", goal="g", shots=[])
+        shot = ShotSchema(
+            shot_id="bad1",
+            scene_ref="Main Set",
+            character_refs=["Lead"],
+            scene_description="Only scene filled with enough characters to count",
+            subject_description="",
+            action_description="",
+            camera_description="",
+        )
+        with self.assertRaises(ShortDramaInvalidModelOutputError) as ctx:
+            _enrich_shot_prompts(shot, seg, assets, blueprint, project_id=1)
+        self.assertGreaterEqual(len(ctx.exception.missing_fields), 1)
+
+    def test_categories_generic_sneakers_swimsuit_razor(self):
+        from app.short_drama.schemas.segment import SegmentScriptSchema, ShotSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.segment_director_service import _enrich_shot_prompts, validate_shot_prompt_quality
+
+        assets = _minimal_assets_bundle()
+        blueprint = StoryBlueprintSchema(segment_plan=[SegmentPlanItemSchema(segment_id="seg_1")])
+        seg = SegmentScriptSchema(segment_id="seg_1", title="A", goal="g", shots=[])
+
+        sneakers = ShotSchema(
+            shot_id="cat1",
+            scene_ref="Main Set",
+            character_refs=["Lead"],
+            scene_description="Urban sidewalk at golden hour with long shadows",
+            subject_description="Athletic talent mid-stride wearing the featured footwear",
+            action_description="Push-off motion emphasizing sole contact with pavement",
+            camera_description="Low tracking shot, handheld micro-shake, 9:16 commercial",
+        )
+        swim = ShotSchema(
+            shot_id="cat2",
+            scene_ref="Main Set",
+            character_refs=["Lead"],
+            scene_description="Pool deck after practice under overcast skylight",
+            subject_description="Talent adjusting two-piece athletic swim kit at waist",
+            action_description="Small corrective motion while breathing after laps",
+            camera_description="Medium close-up, slow lateral drift, soft fill",
+        )
+        razor = ShotSchema(
+            shot_id="cat3",
+            scene_ref="Main Set",
+            character_refs=["Lead"],
+            scene_description="Steam-soft bathroom mirror ledge at morning routine",
+            subject_description="Grooming tool resting on porcelain next to faucet",
+            action_description="Picks up tool and begins a controlled glide along jawline",
+            camera_description="Tight portrait framing, specular highlights, calm pacing",
+        )
+        for sh in (sneakers, swim, razor):
+            sh2 = _enrich_shot_prompts(sh, seg, assets, blueprint, project_id=7)
+            validate_shot_prompt_quality(
+                sh2.image_prompt, sh2.video_prompt, shot_id=sh2.shot_id, segment_id=seg.segment_id
+            )
+            self.assertGreater(len(sh2.image_prompt), 35)
+
+
+class TestLegacySegmentReadNormalize(unittest.TestCase):
+    def test_infer_slots_when_new_fields_absent(self):
+        from app.short_drama.utils.segment_slots import normalize_shot_dict_for_read
+
+        raw = {
+            "shot_id": "old1",
+            "visual_description": "Morning routine beat",
+            "action_description": "",
+            "character_refs": ["Pat"],
+            "image_prompt": "Steam-soft bathroom, single-blade tool on sink, close portrait 9:16, soft key light.",
+            "video_prompt": "Slow push toward mirror; controlled hand motion; calm ad pacing.",
+        }
+        out = normalize_shot_dict_for_read(raw)
+        self.assertTrue((out.get("scene_description") or "").strip())
+        self.assertTrue((out.get("subject_description") or "").strip())
+        self.assertTrue((out.get("camera_description") or "").strip())
+
+    def test_preserves_existing_structured_fields(self):
+        from app.short_drama.utils.segment_slots import normalize_shot_dict_for_read
+
+        raw = {
+            "scene_description": "Office",
+            "subject_description": "Manager",
+            "action_description": "Nods",
+            "camera_description": "Wide",
+            "image_prompt": "x" * 80,
+            "video_prompt": "y" * 80,
+        }
+        out = normalize_shot_dict_for_read(raw)
+        self.assertEqual(out.get("scene_description"), "Office")
+
+
+class TestXAIClientTimeout(unittest.TestCase):
+    def test_timeout_raises_provider_error(self):
+        from app.short_drama.exceptions import ShortDramaProviderError
+        from app.short_drama.providers.xai_client import XAIClient
+
+        client = XAIClient(api_key="test-key", base_url="https://example.invalid", timeout_seconds=1.0)
+
+        def boom(*a, **k):
+            raise httpx.TimeoutException("timeout")
+
+        with patch("httpx.Client") as MockClient:
+            inst = MagicMock()
+            inst.__enter__.return_value = inst
+            inst.post.side_effect = boom
+            MockClient.return_value = inst
+            with self.assertRaises(ShortDramaProviderError):
+                client.post_responses(
+                    model="m",
+                    system_prompt="s",
+                    user_content="u",
+                    log_context={"project_id": 1},
+                )
+
+
+class TestStoryPlannerMock(unittest.TestCase):
+    def test_three_segments(self):
+        from app.short_drama.schemas.product import ProductContextSchema
+        from app.short_drama.services.story_planner_service import MockStoryPlannerProvider
+
+        p = ProductContextSchema(product_name="P")
+        bp = MockStoryPlannerProvider().plan(1, p, {"format": "single_ad", "duration": "45s"})
+        self.assertEqual(len(bp.segment_plan), 3)
+        self.assertEqual(bp.segment_plan[0].segment_id, "seg_1")
+
+
+class TestAssetSpecMock(unittest.TestCase):
+    def test_image_url_none(self):
+        from app.short_drama.schemas.product import ProductContextSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.asset_spec_service import MockAssetSpecProvider
+
+        prod = ProductContextSchema(product_name="X")
+        story = StoryBlueprintSchema(
+            segment_plan=[
+                SegmentPlanItemSchema(segment_id="seg_1"),
+                SegmentPlanItemSchema(segment_id="seg_2"),
+                SegmentPlanItemSchema(segment_id="seg_3"),
+            ]
+        )
+        bundle = MockAssetSpecProvider().build_specs(1, prod, story)
+        self.assertTrue(all(p.image_url is None for p in bundle.products))
+
+
+class TestSegmentDirectorMock(unittest.TestCase):
+    def test_three_segments_with_shots_and_prompts(self):
+        from app.short_drama.schemas.asset import AssetSpecsBundleSchema, CharacterAssetSchema, ProductAssetSchema, SceneAssetSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.segment_director_service import MockSegmentDirectorProvider, SegmentDirectorService
+
+        bp = StoryBlueprintSchema(
+            title="T",
+            segment_plan=[
+                SegmentPlanItemSchema(segment_id="seg_1"),
+                SegmentPlanItemSchema(segment_id="seg_2"),
+                SegmentPlanItemSchema(segment_id="seg_3"),
+            ],
+        )
+        assets = AssetSpecsBundleSchema(
+            characters=[CharacterAssetSchema(name="A", role_type="protagonist")],
+            scenes=[SceneAssetSchema(name="S", scene_type="interior")],
+            products=[ProductAssetSchema(name="P")],
+        )
+        segs = SegmentDirectorService(MockSegmentDirectorProvider()).generate(1, bp, assets, {})
+        self.assertEqual(len(segs), 3)
+        for seg in segs:
+            self.assertTrue(len(seg.shots) >= 1)
+            for sh in seg.shots:
+                self.assertTrue((sh.image_prompt or "").strip())
+                self.assertTrue((sh.video_prompt or "").strip())
+
+
+class TestShortDramaPipelineIntegration(unittest.TestCase):
+    def test_full_chain_mock(self):
+        from fastapi.testclient import TestClient
+
+        from app.database import SessionLocal
+        from app.main import app
+        from app.models import User
+
+        db = SessionLocal()
+        u = db.query(User).first()
+        if not u:
+            u = User(
+                username="sd_phase2",
+                name="SD Phase2",
+                email="sd_phase2@test.local",
+                password_hash="x" * 64,
+                is_active=True,
+            )
+            db.add(u)
+            db.commit()
+            db.refresh(u)
+        uid = u.id
+        db.close()
+
+        c = TestClient(app)
+        r = c.post("/api/short-drama/project", json={"user_id": uid, "project_name": "phase2"})
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["project"]["id"]
+        self.assertEqual(
+            200,
+            c.post(
+                "/api/short-drama/product/parse",
+                json={"project_id": pid, "input": {"title": "测试品", "image_urls": []}},
+            ).status_code,
+        )
+        self.assertEqual(200, c.post("/api/short-drama/story/generate", json={"project_id": pid}).status_code)
+        self.assertEqual(
+            200, c.post("/api/short-drama/assets/specs/generate", json={"project_id": pid}).status_code
+        )
+        self.assertEqual(200, c.post("/api/short-drama/segment/generate", json={"project_id": pid}).status_code)
+        pipe = c.get(f"/api/short-drama/project/{pid}/pipeline")
+        self.assertEqual(pipe.status_code, 200)
+        body = pipe.json()
+        self.assertEqual(body["project"]["status"], "segments_generated")
+        self.assertEqual(len(body["segment_scripts"]), 3)
+        script0 = body["segment_scripts"][0]["script"]
+        self.assertIn("shots", script0)
+        self.assertTrue(script0["shots"])
+        shot0 = script0["shots"][0]
+        self.assertIn("scene_description", shot0)
+        self.assertTrue((shot0.get("image_prompt") or "").strip())
+
+
+if __name__ == "__main__":
+    unittest.main()

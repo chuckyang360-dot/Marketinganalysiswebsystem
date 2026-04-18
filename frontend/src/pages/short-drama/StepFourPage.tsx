@@ -1,0 +1,395 @@
+import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { SDWorkflowNav } from './components/SDWorkflowNav';
+import { StepFourAssetLibrary } from './components/StepFourAssetLibrary';
+import { StepFourSegmentPanel } from './components/StepFourSegmentPanel';
+import { StepFourVideoPreview } from './components/StepFourVideoPreview';
+import { StepFourTimeline } from './components/StepFourTimeline';
+import { useStepFourPage } from './hooks/useStepFourPage';
+import { NEUTRAL_VERTICAL_POSTER, resolvePublicMediaUrl } from './utils/shortDramaMedia';
+import { SHORT_DRAMA_UI } from './utils/shortDramaUiCopy';
+import { withProjectQuery } from './utils/shortDramaRoutes';
+
+export function ShortDramaStepFourPage() {
+  const navigate = useNavigate();
+  const {
+    projectId,
+    navProjectName,
+    pipeline,
+    pipelineVm,
+    phase,
+    loadError,
+    segmentScriptsError,
+    segmentScriptsBlocked,
+    generateError,
+    mergeError,
+    segments,
+    activeSegment,
+    setActiveSegment,
+    previewTarget,
+    setPreviewTarget,
+    videoStatus,
+    batchGenerating,
+    mergeLoading,
+    canMergeAll,
+    canGenerateVideos,
+    hasBackendSegmentScripts,
+    doneCount,
+    displayTotal,
+    projectStatus,
+    assetLibraryVm,
+    handleGenerateAll,
+    handleGenerateVideo,
+    handleRegenerate,
+    mergeFinalVideo,
+    mergePrimaryActionsEnabled,
+    timelineMergeLabel,
+    footerMergeLabel,
+    isMockTestPatternVideo,
+    handleAddSegment,
+    goCreate,
+  } = useStepFourPage();
+
+  const active = segments.find((s) => s.id === activeSegment) ?? segments[0];
+  const posterUrl = NEUTRAL_VERTICAL_POSTER;
+  const videoSrc = active ? resolvePublicMediaUrl(active.videoUrl) : null;
+  const finalVideoResolved = resolvePublicMediaUrl(pipeline?.final_video_url);
+  const finalErrorDisplay = pipeline?.final_render_error || mergeError || null;
+
+  const projectVideoHeadline = useMemo(() => {
+    if (pipeline?.final_render_status === 'failed') {
+      return `最终成片合成失败：${finalErrorDisplay || '请检查日志或重试合成'}`;
+    }
+    const st = pipelineVm.currentVideoStage;
+    if (st === 'completed' || projectStatus === 'completed') {
+      return '项目状态：已完成（含最终成片）';
+    }
+    if (st === 'final_rendering') return '项目状态：最终成片合成中…';
+    if (st === 'segments_complete_pending_final') return '项目状态：片段已全部就绪，可合成完整视频';
+    if (st === 'segment_rendering') return '项目状态：片段视频生成中…';
+    if (projectStatus === 'video_segments_ready') return '项目状态：片段已齐，待合成最终成片';
+    if (projectStatus === 'video_rendering') return '项目状态：视频流程进行中（片段或成片）';
+    return '';
+  }, [
+    pipeline?.final_render_status,
+    pipelineVm.currentVideoStage,
+    projectStatus,
+    finalErrorDisplay,
+  ]);
+
+  const videoActionsDisabled = !hasBackendSegmentScripts || !canGenerateVideos || batchGenerating;
+  const mergeUiDisabled = !mergePrimaryActionsEnabled || batchGenerating;
+
+  if (phase === 'no_project' || projectId == null) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
+        <SDWorkflowNav currentStep={4} projectId={projectId} />
+        <div className="mt-24 max-w-md text-center space-y-4">
+          <h1 className="text-xl font-bold" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
+            {SHORT_DRAMA_UI.noProject.title}
+          </h1>
+          <p className="text-[14px]" style={{ color: '#8E8E93' }}>
+            {SHORT_DRAMA_UI.noProject.body}
+          </p>
+          <button
+            type="button"
+            onClick={goCreate}
+            className="px-6 py-2.5 rounded-xl text-[13px] font-semibold text-white cursor-pointer"
+            style={{ background: '#1D1D1F' }}
+          >
+            {SHORT_DRAMA_UI.noProject.cta}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'loading' || phase === 'generating_segments') {
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
+        <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} />
+        <div className="flex flex-1 items-center justify-center pt-14">
+          <div className="flex flex-col items-center gap-3">
+            <i className="ri-loader-4-line text-2xl animate-spin" style={{ color: '#1D1D1F' }} />
+            <p className="text-[13px]" style={{ color: '#8E8E93' }}>
+              {phase === 'generating_segments' ? SHORT_DRAMA_UI.stepFour.generatingSegmentScripts : SHORT_DRAMA_UI.loading.pipeline}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'error' && loadError) {
+    return (
+      <div className="min-h-screen flex flex-col" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
+        <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} />
+        <div className="flex flex-1 flex-col items-center justify-center pt-14 px-6 gap-4">
+          <p className="text-[14px] text-center max-w-lg" style={{ color: '#DC2626' }}>
+            {loadError}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-5 py-2 rounded-xl text-[13px] cursor-pointer"
+            style={{ background: '#F7F8FA', border: '1px solid #EAEAEA', color: '#444444' }}
+          >
+            {SHORT_DRAMA_UI.actions.retry}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
+      <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} />
+
+      {mergeLoading && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)' }}
+        >
+          <div className="text-center">
+            <div
+              className="w-20 h-20 flex items-center justify-center rounded-full mx-auto mb-6 relative"
+              style={{ background: '#F5F5F7', border: '1px solid #EAEAEA' }}
+            >
+              <div className="absolute inset-0 rounded-full animate-ping opacity-10" style={{ background: '#1D1D1F' }} />
+              <i className="ri-film-line text-[32px]" style={{ color: '#1D1D1F' }} />
+            </div>
+            <h3 className="text-xl font-bold mb-2" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
+              {SHORT_DRAMA_UI.generating.merge}
+            </h3>
+            <p className="text-[14px]" style={{ color: '#8E8E93' }}>
+              {SHORT_DRAMA_UI.generating.mergeSubtitle}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-1 pt-14" style={{ minHeight: 'calc(100vh - 56px)' }}>
+        <StepFourAssetLibrary library={assetLibraryVm} />
+
+        <div className="flex flex-col flex-1 overflow-hidden">
+          {(segmentScriptsBlocked ||
+            segmentScriptsError ||
+            !canGenerateVideos ||
+            generateError ||
+            mergeError ||
+            projectVideoHeadline ||
+            isMockTestPatternVideo) && (
+            <div className="px-5 pt-3 space-y-2 shrink-0">
+              {segmentScriptsBlocked && (
+                <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(180,83,9,0.08)', color: '#92400E', border: '1px solid rgba(180,83,9,0.2)' }}>
+                  {segmentScriptsBlocked}
+                </div>
+              )}
+              {segmentScriptsError && (
+                <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.06)', color: '#B91C1C', border: '1px solid rgba(220,38,38,0.2)' }}>
+                  {segmentScriptsError}
+                </div>
+              )}
+              {hasBackendSegmentScripts && !canGenerateVideos && (
+                <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(51,65,85,0.08)', color: '#334155', border: '1px solid rgba(51,65,85,0.2)' }}>
+                  {SHORT_DRAMA_UI.stepFour.videoStatusBlocked}
+                </div>
+              )}
+              {projectVideoHeadline && (
+                <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(51,65,85,0.06)', color: '#334155', border: '1px solid rgba(51,65,85,0.15)' }}>
+                  {projectVideoHeadline}
+                </div>
+              )}
+              {isMockTestPatternVideo && (
+                <div
+                  className="text-[12px] px-3 py-2 rounded-lg"
+                  style={{
+                    background: 'rgba(180,83,9,0.08)',
+                    color: '#92400E',
+                    border: '1px solid rgba(180,83,9,0.25)',
+                  }}
+                >
+                  {SHORT_DRAMA_UI.stepFour.mockTestVideoBanner}
+                </div>
+              )}
+              {generateError && (
+                <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.06)', color: '#B91C1C', border: '1px solid rgba(220,38,38,0.2)' }}>
+                  {generateError}
+                </div>
+              )}
+              {mergeError && (
+                <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(220,38,38,0.06)', color: '#B91C1C', border: '1px solid rgba(220,38,38,0.2)' }}>
+                  {mergeError}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div
+            className="px-5 pt-5 pb-3 flex items-center justify-between shrink-0"
+            style={{ borderBottom: '1px solid #EAEAEA', background: '#ffffff' }}
+          >
+            <div>
+              <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: '#8E8E93' }}>
+                STEP 04
+              </span>
+              <h1 className="text-xl font-black mt-0.5" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
+                片段脚本
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px]" style={{ color: '#8E8E93' }}>
+                {doneCount} / {displayTotal} 片段已生成
+              </span>
+              <div className="flex gap-1">
+                {segments.map((s) => (
+                  <div
+                    key={s.id}
+                    className="w-2 h-2 rounded-full"
+                    style={{
+                      background:
+                        videoStatus[s.id] === 'done'
+                          ? '#047857'
+                          : videoStatus[s.id] === 'generating'
+                            ? '#B45309'
+                            : '#EAEAEA',
+                      transition: 'background 0.3s',
+                    }}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={videoActionsDisabled}
+                onClick={() => void handleGenerateAll()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11.5px] whitespace-nowrap transition-all duration-200"
+                style={{
+                  background: videoActionsDisabled ? '#EAEAEA' : '#F7F8FA',
+                  color: videoActionsDisabled ? '#AEAEB2' : '#444444',
+                  border: '1px solid #EAEAEA',
+                  cursor: videoActionsDisabled ? 'not-allowed' : 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  if (videoActionsDisabled) return;
+                  (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
+                  (e.currentTarget as HTMLElement).style.color = '#ffffff';
+                  (e.currentTarget as HTMLElement).style.borderColor = '#1D1D1F';
+                }}
+                onMouseLeave={(e) => {
+                  if (videoActionsDisabled) return;
+                  (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
+                  (e.currentTarget as HTMLElement).style.color = '#444444';
+                  (e.currentTarget as HTMLElement).style.borderColor = '#EAEAEA';
+                }}
+              >
+                <i className="ri-video-add-line text-[11px]" />
+                {batchGenerating ? '生成中…' : '全部生成'}
+              </button>
+            </div>
+          </div>
+
+          {!hasBackendSegmentScripts ? (
+            <div className="flex-1 flex flex-col items-center justify-center px-8 py-12" style={{ background: '#ffffff' }}>
+              <i className="ri-file-list-3-line text-3xl mb-3" style={{ color: '#AEAEB2' }} />
+              <p className="text-[14px] font-semibold text-center mb-1" style={{ color: '#1D1D1F' }}>
+                {SHORT_DRAMA_UI.stepFour.segmentScriptsMissing}
+              </p>
+              <p className="text-[12px] text-center max-w-md" style={{ color: '#8E8E93' }}>
+                {segmentScriptsError || segmentScriptsBlocked || '请先完成前置流程，或返回「角色场景」页确认资产规范已生成。'}
+              </p>
+            </div>
+          ) : (
+            <StepFourSegmentPanel
+              segments={segments}
+              activeSegment={activeSegment}
+              videoStatus={videoStatus}
+              renderProgressMap={{}}
+              onSegmentChange={setActiveSegment}
+              videoGenerateDisabled={videoActionsDisabled}
+              onGenerateVideo={(id) => {
+                setActiveSegment(id);
+                void handleGenerateVideo(id);
+              }}
+            />
+          )}
+
+          <StepFourTimeline
+            segments={segments}
+            videoStatus={videoStatus}
+            activeSegment={activeSegment}
+            onSegmentClick={setActiveSegment}
+            onAddSegment={handleAddSegment}
+            onCompose={() =>
+              void mergeFinalVideo({ buttonType: 'merge_only', navigateOnSuccess: false })
+            }
+            mergeReady={canMergeAll}
+            coreDoneCount={doneCount}
+            coreTotal={displayTotal}
+            composeDisabled={mergeUiDisabled}
+            composeLabel={timelineMergeLabel}
+            addSegmentDisabled={!hasBackendSegmentScripts}
+          />
+        </div>
+
+        <StepFourVideoPreview
+          segmentId={active?.id ?? activeSegment}
+          videoStatus={videoStatus}
+          renderProgress={null}
+          onRegenerate={(id) => void handleRegenerate(id)}
+          displayName={active?.name}
+          accentColor={active?.color}
+          posterUrl={posterUrl}
+          videoSrc={videoSrc}
+          regenerateDisabled={videoActionsDisabled}
+          previewTarget={previewTarget}
+          onPreviewTargetChange={setPreviewTarget}
+          finalVideoSrc={finalVideoResolved}
+          finalRenderError={finalErrorDisplay}
+          segmentBackendKey={active?.backendSegmentId ?? null}
+          segmentVideoUrlRaw={active?.videoUrl ?? null}
+          finalVideoUrlRaw={pipeline?.final_video_url ?? null}
+        />
+      </div>
+
+      <div className="px-6 py-3 flex items-center justify-between" style={{ background: '#F7F8FA', borderTop: '1px solid #EAEAEA' }}>
+        <button
+          type="button"
+          onClick={() => navigate(withProjectQuery('/short-drama/assets', projectId))}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] cursor-pointer whitespace-nowrap transition-all duration-200"
+          style={{ background: '#ffffff', color: '#444444', border: '1px solid #EAEAEA' }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.background = '#EAEAEA';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.background = '#ffffff';
+          }}
+        >
+          <i className="ri-arrow-left-line text-[12px]" />
+          上一步
+        </button>
+        <button
+          type="button"
+          disabled={mergeUiDisabled}
+          onClick={() =>
+            void mergeFinalVideo({ buttonType: 'merge_and_view', navigateOnSuccess: true })
+          }
+          className="flex items-center gap-2 px-7 py-2.5 rounded-xl text-[13.5px] font-semibold text-white transition-all duration-200 whitespace-nowrap"
+          style={{
+            background: mergeUiDisabled ? '#D1D1D6' : '#1D1D1F',
+            cursor: mergeUiDisabled ? 'not-allowed' : 'pointer',
+          }}
+          onMouseEnter={(e) => {
+            if (!mergeUiDisabled) (e.currentTarget as HTMLElement).style.background = '#374151';
+          }}
+          onMouseLeave={(e) => {
+            if (!mergeUiDisabled) (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
+          }}
+        >
+          <i className="ri-film-line text-[13px]" />
+          {footerMergeLabel}
+          <i className="ri-arrow-right-line text-[12px]" />
+        </button>
+      </div>
+    </div>
+  );
+}

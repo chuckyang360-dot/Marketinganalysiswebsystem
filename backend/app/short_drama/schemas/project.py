@@ -1,0 +1,55 @@
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+class CreateShortDramaProjectRequest(BaseModel):
+    user_id: int = Field(..., description="Owner user id (existing users.id)")
+    project_name: str = Field(..., min_length=1, max_length=256)
+    duration: Optional[str] = Field(None, description="e.g. 60s")
+    format: Optional[str] = Field(None, description="e.g. vertical_9_16")
+    style: Optional[str] = Field(None, description="Tone / genre hints")
+    visual_style: Optional[str] = Field(None, description="Cinematography / look")
+    aspect_ratio: Optional[str] = Field(None, description="e.g. 9:16")
+
+
+class ShortDramaProjectResponse(BaseModel):
+    id: int
+    user_id: int
+    project_name: str
+    status: str
+    duration: Optional[str] = None
+    format: Optional[str] = None
+    style: Optional[str] = None
+    visual_style: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class CreateShortDramaProjectResponse(BaseModel):
+    project: ShortDramaProjectResponse
+
+
+class PipelineSummaryResponse(BaseModel):
+    project: ShortDramaProjectResponse
+    product_context: Optional[Dict[str, Any]] = None
+    story_blueprint: Optional[Dict[str, Any]] = None
+    assets: Dict[str, List[Dict[str, Any]]] = Field(
+        default_factory=lambda: {"characters": [], "scenes": [], "products": []}
+    )
+    segment_scripts: List[Dict[str, Any]] = Field(default_factory=list)
+    final_video_url: Optional[str] = None
+    #: 片段与成片状态（供 Step4 展示，不依赖前端猜测）
+    current_video_stage: Optional[str] = None
+    has_all_segment_videos: bool = False
+    has_final_video: bool = False
+    final_render_status: Optional[str] = None
+    final_render_error: Optional[str] = None
+    final_render_job_id: Optional[int] = None
+    #: 角色+场景+产品资产行中 image_url 非空的数量（与 DB 一致）
+    image_url_filled: int = 0
+    #: 角色+场景+产品资产总行数
+    asset_rows_total: int = 0

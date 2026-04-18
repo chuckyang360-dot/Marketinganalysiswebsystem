@@ -4,10 +4,10 @@ import { useNavigate, useLocation } from "react-router-dom";
 const NAV_LINKS = [
   { label: "首页", path: "/" },
   { label: "产品", path: "/product" },
-  { label: "定价", path: "/pricing" },
+  { label: "短剧", path: "/short-drama", badge: "NEW" },
   { label: "案例", path: "/case" },
-  { label: "工作台", path: "/workspace" },
-  { label: "关于", path: "/about" },
+  { label: "定价", path: "/pricing" },
+  { label: "关于我们", path: "/about" },
 ];
 
 const LANGUAGES = [
@@ -101,7 +101,7 @@ export default function Navbar() {
                 <button
                   key={link.label}
                   onClick={() => navigate(link.path)}
-                  className="relative px-3.5 py-1.5 text-[13.5px] font-medium rounded-lg transition-all duration-200 cursor-pointer whitespace-nowrap"
+                  className="relative flex items-center gap-1.5 px-3.5 py-1.5 text-[13.5px] font-medium rounded-lg transition-all duration-200 cursor-pointer whitespace-nowrap"
                   style={{
                     color: active ? "#7B61FF" : "#444444",
                     background: active ? "rgba(123,97,255,0.07)" : "transparent",
@@ -120,6 +120,14 @@ export default function Navbar() {
                   }}
                 >
                   {link.label}
+                  {(link as { badge?: string }).badge && (
+                    <span
+                      className="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none"
+                      style={{ background: "linear-gradient(135deg, #F59E0B, #EF4444)", color: "#fff" }}
+                    >
+                      {(link as { badge?: string }).badge}
+                    </span>
+                  )}
                   {active && (
                     <span
                       className="absolute bottom-0 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"

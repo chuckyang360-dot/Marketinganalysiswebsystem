@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     XAI_MODEL: Optional[str] = None  # Must be set explicitly via environment variable
     X_ANALYSIS_PROVIDER: str = "mock"  # Options: "mock", "xai"
 
+    # Short Drama / xAI text (Responses API); base URL falls back to XAI_API_URL when unset
+    XAI_BASE_URL: Optional[str] = Field(default=None, env="XAI_BASE_URL")
+    XAI_TEXT_MODEL: Optional[str] = Field(default=None, env="XAI_TEXT_MODEL")
+    XAI_TIMEOUT_SECONDS: int = Field(default=60, env="XAI_TIMEOUT_SECONDS")
+    XAI_MAX_RETRIES: int = Field(default=2, env="XAI_MAX_RETRIES")
+    SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER: bool = Field(default=False, env="SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER")
+
     # X (Twitter) API Configuration
     X_BEARER_TOKEN: Optional[str] = None  # Bearer token for X API v2
 
@@ -69,10 +76,34 @@ class Settings(BaseSettings):
         default="https://generativelanguage.googleapis.com/v1beta",
         env="GEMINI_API_URL",
     )
-    GEMINI_IMAGE_MODEL: str = Field(
-        default="gemini-2.5-flash-image",
-        env="GEMINI_IMAGE_MODEL",
-    )
+    # Short Drama / Gemini image：模型名以 short_drama.providers.gemini_image_client.effective_gemini_image_model() 为准
+    GEMINI_IMAGE_MODEL: Optional[str] = Field(default=None, env="GEMINI_IMAGE_MODEL")
+    GEMINI_BASE_URL: Optional[str] = Field(default=None, env="GEMINI_BASE_URL")
+    GEMINI_TIMEOUT_SECONDS: int = Field(default=120, env="GEMINI_TIMEOUT_SECONDS")
+    GEMINI_MAX_RETRIES: int = Field(default=2, env="GEMINI_MAX_RETRIES")
+    # Short Drama asset images: xai | gemini | mock (SHORT_DRAMA_USE_MOCK_IMAGE_PROVIDER still forces mock)
+    SHORT_DRAMA_IMAGE_PROVIDER: str = Field(default="xai", env="SHORT_DRAMA_IMAGE_PROVIDER")
+    SHORT_DRAMA_XAI_IMAGE_MODEL: Optional[str] = Field(default=None, env="SHORT_DRAMA_XAI_IMAGE_MODEL")
+    SHORT_DRAMA_IMAGE_RETURN_FORMAT: str = Field(default="url", env="SHORT_DRAMA_IMAGE_RETURN_FORMAT")
+    SHORT_DRAMA_IMAGE_ASPECT_RATIO: Optional[str] = Field(default=None, env="SHORT_DRAMA_IMAGE_ASPECT_RATIO")
+    SHORT_DRAMA_IMAGE_RESOLUTION: Optional[str] = Field(default=None, env="SHORT_DRAMA_IMAGE_RESOLUTION")
+    SHORT_DRAMA_USE_MOCK_IMAGE_PROVIDER: bool = Field(default=False, env="SHORT_DRAMA_USE_MOCK_IMAGE_PROVIDER")
+    SHORT_DRAMA_IMAGE_MAX_CONCURRENT: int = Field(default=1, env="SHORT_DRAMA_IMAGE_MAX_CONCURRENT")
+
+    # Short Drama / xAI video (Grok Imagine Video) — REST submit + poll
+    XAI_VIDEO_BASE_URL: str = Field(default="https://api.x.ai", env="XAI_VIDEO_BASE_URL")
+    XAI_VIDEO_MODEL: Optional[str] = Field(default=None, env="XAI_VIDEO_MODEL")
+    XAI_VIDEO_TIMEOUT_SECONDS: float = Field(default=120.0, env="XAI_VIDEO_TIMEOUT_SECONDS")
+    XAI_VIDEO_POLL_INTERVAL_MS: int = Field(default=5000, env="XAI_VIDEO_POLL_INTERVAL_MS")
+    XAI_VIDEO_POLL_TIMEOUT_SECONDS: float = Field(default=600.0, env="XAI_VIDEO_POLL_TIMEOUT_SECONDS")
+    XAI_VIDEO_MAX_RETRIES: int = Field(default=2, env="XAI_VIDEO_MAX_RETRIES")
+    SHORT_DRAMA_USE_MOCK_VIDEO_PROVIDER: bool = Field(default=True, env="SHORT_DRAMA_USE_MOCK_VIDEO_PROVIDER")
+    SHORT_DRAMA_VIDEO_MAX_CONCURRENT: int = Field(default=1, env="SHORT_DRAMA_VIDEO_MAX_CONCURRENT")
+    # Public origin for Short Drama /static URLs (API + xAI reference images). Priority: SHORT_DRAMA_PUBLIC_BASE_URL → PUBLIC_BASE_URL → legacy SHORT_DRAMA_PUBLIC_MEDIA_BASE_URL → localhost (dev).
+    SHORT_DRAMA_PUBLIC_BASE_URL: Optional[str] = Field(default=None, env="SHORT_DRAMA_PUBLIC_BASE_URL")
+    PUBLIC_BASE_URL: Optional[str] = Field(default=None, env="PUBLIC_BASE_URL")
+    # Legacy alias; still honored if the two above are unset
+    SHORT_DRAMA_PUBLIC_MEDIA_BASE_URL: Optional[str] = Field(default=None, env="SHORT_DRAMA_PUBLIC_MEDIA_BASE_URL")
 
     # Alibaba DashScope（Qwen 图片生成备选）
     DASHSCOPE_API_KEY: Optional[str] = Field(default=None, env="DASHSCOPE_API_KEY")

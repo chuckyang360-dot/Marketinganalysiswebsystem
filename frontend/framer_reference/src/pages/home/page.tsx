@@ -5,6 +5,7 @@ import GrowthEngineSection from "./components/GrowthEngineSection";
 import HowItWorksSection from "./components/HowItWorksSection";
 import OutputSection from "./components/OutputSection";
 import UseCasesSection from "./components/UseCasesSection";
+import ShortDramaSection from "./components/ShortDramaSection";
 import CtaFooter from "./components/CtaFooter";
 
 export default function Home() {
@@ -17,6 +18,7 @@ export default function Home() {
       <section><HowItWorksSection /></section>
       <section><OutputSection /></section>
       <section><UseCasesSection /></section>
+      <section><ShortDramaSection /></section>
       <CtaFooter />
     </div>
   );

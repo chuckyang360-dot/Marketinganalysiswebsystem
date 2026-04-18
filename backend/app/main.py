@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import logging
 import os
+import shutil
 
 from .config import settings
 from .database import init_db
@@ -21,9 +22,20 @@ from .services.ceo_agent import ceo_agent
 # Import all models to ensure they're registered with Base.metadata
 # This must be done before calling init_db()
 from .models import user, x_analysis
+from .short_drama.models import (  # Short Drama Engine tables
+    CharacterAsset,
+    ProductAsset,
+    ProductContextRecord,
+    RenderJob,
+    SceneAsset,
+    SegmentScriptRecord,
+    ShortDramaProject,
+    StoryBlueprintRecord,
+)
 
 # Import analyze router
 from .api.analyze.routes import router as analyze_router
+from .short_drama.routes import router as short_drama_router
 
 # Configure logging
 logging.basicConfig(
@@ -35,6 +47,11 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+ffmpeg_path = shutil.which("ffmpeg")
+logging.warning("[FFMPEG_CHECK] detected_path=%s", ffmpeg_path)
+if ffmpeg_path is None:
+    logging.error("[FFMPEG_CHECK] ffmpeg NOT FOUND in PATH")
 
 # Create FastAPI app
 app = FastAPI(
@@ -83,6 +100,7 @@ app.include_router(gap_analysis_router, prefix="/api/gap-analysis", tags=["Gap A
 app.include_router(content_ideas_router, prefix="/api/content-ideas", tags=["Content Ideas"])
 app.include_router(ceo_agent_router, prefix="/api/full-analysis", tags=["Full Analysis"])
 app.include_router(analyze_router, prefix="/api/analyze", tags=["Evidence Analysis"])
+app.include_router(short_drama_router, prefix="/api/short-drama", tags=["Short Drama"])
 
 # CEO analyze routes (non-/api paths) to prevent 404
 # /ceo/analyze?query=...
@@ -100,11 +118,32 @@ async def analyze(
     """
     return await ceo_agent.run_full_analysis(query=query, limit=limit)
 
-# Static files (for frontend integration) - only mount if directory exists
-# This allows backend to work independently of frontend (deployed on Vercel)
-frontend_build_path = Path("frontend/build")
-if frontend_build_path.exists():
-    app.mount("/static", StaticFiles(directory=str(frontend_build_path)), name="static")
+_backend_root = Path(__file__).resolve().parent.parent
+_repo_root = _backend_root.parent
+
+# Short Drama generated asset images (register before generic /static so paths are not shadowed)
+_short_drama_gen = _backend_root / "generated" / "short_drama_assets"
+_short_drama_gen.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/static/short-drama-assets",
+    StaticFiles(directory=str(_short_drama_gen)),
+    name="short_drama_asset_files",
+)
+
+_short_drama_vid = _backend_root / "generated" / "short_drama_videos"
+_short_drama_vid.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/static/short-drama-videos",
+    StaticFiles(directory=str(_short_drama_vid)),
+    name="short_drama_video_files",
+)
+
+# Generic /static (SPA build when present, else empty backend/static) — always mounted so /static/... routing is stable
+_static_fallback = _backend_root / "static"
+_static_fallback.mkdir(parents=True, exist_ok=True)
+_frontend_build = _repo_root / "frontend" / "build"
+_static_mount_dir = _frontend_build if _frontend_build.is_dir() else _static_fallback
+app.mount("/static", StaticFiles(directory=str(_static_mount_dir)), name="static")
 
 @app.get("/")
 async def root():

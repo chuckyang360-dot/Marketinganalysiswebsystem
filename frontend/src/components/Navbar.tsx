@@ -18,8 +18,9 @@ export function Navbar({ homeMode = false, onOpenHistory }: NavbarProps) {
   const navItems = [
     { label: t('nav.home'), to: '/' },
     { label: t('nav.product'), to: '/product' },
-    { label: t('nav.pricing'), to: '/pricing' },
+    { label: t('nav.shortDrama'), to: '/short-drama' },
     { label: t('nav.cases'), to: '/cases' },
+    { label: t('nav.pricing'), to: '/pricing' },
     { label: t('nav.workspace'), to: '/workspace' },
     { label: t('nav.about'), to: '/about' },
   ];
@@ -57,7 +58,9 @@ export function Navbar({ homeMode = false, onOpenHistory }: NavbarProps) {
         {/* 中间导航 */}
         <nav className="flex items-center justify-center gap-1">
           {(navItems ?? []).map((item) => {
-            const active = location.pathname === item.to;
+            const active =
+              location.pathname === item.to ||
+              (item.to === '/short-drama' && location.pathname.startsWith('/short-drama'));
             return (
               <Link
                 key={item.to}

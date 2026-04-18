@@ -13,6 +13,7 @@ const translations: Record<Language, Record<string, string>> = {
     // Navigation
     'nav.home': '首页',
     'nav.product': '产品',
+    'nav.shortDrama': '短剧',
     'nav.cases': '案例',
     'nav.about': '关于',
     'nav.workspace': '工作台',
@@ -318,6 +319,7 @@ const translations: Record<Language, Record<string, string>> = {
     // Navigation
     'nav.home': 'Home',
     'nav.product': 'Product',
+    'nav.shortDrama': 'Short Drama',
     'nav.cases': 'Cases',
     'nav.about': 'About',
     'nav.workspace': 'Workspace',
