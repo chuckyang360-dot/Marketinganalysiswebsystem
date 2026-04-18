@@ -28,6 +28,10 @@ from ..utils.video_storage import (
     local_path_from_public_video_url,
     save_segment_video_bytes,
 )
+from ..utils.xai_reference_image import (
+    build_xai_ready_reference_image,
+    local_path_from_xai_ready_public_url,
+)
 from .read_models import all_segment_scripts_have_video, list_asset_rows, list_segment_scripts
 from .workflow_orchestrator import orchestrator
 
@@ -85,7 +89,38 @@ class RenderExecutorService:
                 products=products,
                 project_aspect_ratio=project_ar,
             )
-            ref_for_api = [absolutize_media_url_for_provider(u) for u in plan.selected_reference_image_urls]
+            abs_refs = [absolutize_media_url_for_provider(u) for u in plan.selected_reference_image_urls]
+            ref_for_api: list[str] = []
+            for src_abs in abs_refs:
+                logger.info(
+                    "[XAI_REFERENCE_IMAGE_PREPARE_START] project_id=%s segment_id=%s source_url=%s",
+                    project_id,
+                    segment_id,
+                    src_abs,
+                )
+                pub_rel = build_xai_ready_reference_image(project_id, src_abs)
+                final_u = absolutize_media_url_for_provider(pub_rel)
+                ref_for_api.append(final_u)
+                xai_local = local_path_from_xai_ready_public_url(pub_rel)
+                xai_ok = xai_local.is_file()
+                xai_sz = xai_local.stat().st_size if xai_ok else 0
+                logger.info(
+                    "[XAI_REFERENCE_IMAGE_PREPARE_DONE] project_id=%s segment_id=%s source_url=%s "
+                    "output_public_url=%s output_absolute_path=%s file_exists=%s file_size=%s",
+                    project_id,
+                    segment_id,
+                    src_abs,
+                    pub_rel,
+                    str(xai_local.resolve()),
+                    xai_ok,
+                    xai_sz,
+                )
+            logger.info(
+                "[XAI_REFERENCE_IMAGE_FINAL_URLS] project_id=%s segment_id=%s urls=%s",
+                project_id,
+                segment_id,
+                ref_for_api,
+            )
 
             job = RenderJob(
                 project_id=project_id,
@@ -154,6 +189,15 @@ class RenderExecutorService:
                 "provider_request_id": rid,
                 "meta": meta,
             }
+            logger.info(
+                "[SEGMENT_VIDEO_WRITEBACK] project_id=%s segment_id=%s video_url=%s absolute_file_path=%s "
+                "file_exists=%s",
+                project_id,
+                segment_id,
+                url,
+                str(disk_path.resolve()),
+                disk_path.is_file(),
+            )
             rec.script_json = base
             db.add(job)
             db.add(rec)

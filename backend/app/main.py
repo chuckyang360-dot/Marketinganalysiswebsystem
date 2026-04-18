@@ -138,6 +138,14 @@ app.mount(
     name="short_drama_video_files",
 )
 
+_short_drama_xai_ref = _backend_root / "generated" / "short_drama_xai_assets"
+_short_drama_xai_ref.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/static/short-drama-xai-assets",
+    StaticFiles(directory=str(_short_drama_xai_ref)),
+    name="short_drama_xai_ref_files",
+)
+
 # Generic /static (SPA build when present, else empty backend/static) — always mounted so /static/... routing is stable
 _static_fallback = _backend_root / "static"
 _static_fallback.mkdir(parents=True, exist_ok=True)

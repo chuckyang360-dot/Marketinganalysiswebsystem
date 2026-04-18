@@ -1,6 +1,8 @@
 import logging
+import os
+import socket
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -67,8 +69,19 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
 async def generate_one_segment_video(
     segment_id: str,
     body: VideoProjectRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    logger.info(
+        "[SEGMENT_VIDEO_RUNTIME] project_id=%s segment_id=%s cwd=%s hostname=%s base_url_from_request=%s "
+        "request_url=%s",
+        body.project_id,
+        segment_id,
+        os.getcwd(),
+        socket.gethostname(),
+        str(request.base_url),
+        str(request.url),
+    )
     log_api_request(
         logger,
         "POST /videos/generate/{segment_id}",

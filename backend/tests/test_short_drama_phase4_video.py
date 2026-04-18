@@ -12,6 +12,18 @@ from unittest.mock import patch
 from sqlalchemy.orm import Session
 
 
+def _write_minimal_short_drama_asset_image(project_id: int, filename: str = "ch_1.png") -> None:
+    """Tiny PNG on disk for xAI reference-prep tests (generated/short_drama_assets)."""
+    from PIL import Image
+
+    from app.short_drama.utils.image_storage import short_drama_generated_root
+
+    d = short_drama_generated_root() / str(project_id)
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / filename
+    Image.new("RGB", (128, 128), color=(90, 120, 200)).save(p, format="PNG")
+
+
 class TestEffectiveXaiVideoModel(unittest.TestCase):
     def test_default_when_unset(self):
         from unittest.mock import patch as p
@@ -119,6 +131,7 @@ class TestRenderExecutorService(unittest.TestCase):
                 )
                 db.add(c)
                 db.commit()
+                _write_minimal_short_drama_asset_image(pid)
 
                 script = {
                     "segment_id": "seg_1",
@@ -197,7 +210,7 @@ class TestRenderExecutorService(unittest.TestCase):
                     name="Hero",
                     role_type="protagonist",
                     visual_prompt="x",
-                    image_url="/static/x/ch.png",
+                    image_url=f"/static/short-drama-assets/{pid}/ch_1.png",
                     meta_json={},
                 )
                 db.add(c)
@@ -233,6 +246,7 @@ class TestRenderExecutorService(unittest.TestCase):
                 )
                 db.add_all([c, good, bad])
                 db.commit()
+                _write_minimal_short_drama_asset_image(pid)
 
                 real = MockXAIVideoProvider()
 

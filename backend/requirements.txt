@@ -6,6 +6,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
 httpx
+Pillow>=10.0.0
 pydantic
 pydantic-settings
 email-validator>=2.0.0

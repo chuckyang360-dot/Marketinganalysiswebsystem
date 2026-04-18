@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 from typing import Any
 
@@ -16,6 +17,51 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_XAI_VIDEO_MODEL = "grok-imagine-video"
 
+# Reference-image precheck (GET): separate shorter connect vs read
+_REF_IMG_TIMEOUT_CONNECT = 10.0
+_REF_IMG_TIMEOUT_READ = 30.0
+_REF_IMG_TIMEOUT_WRITE = 30.0
+_REF_IMG_TIMEOUT_POOL = 5.0
+
+
+def _reference_image_check_timeout() -> httpx.Timeout:
+    return httpx.Timeout(
+        connect=_REF_IMG_TIMEOUT_CONNECT,
+        read=_REF_IMG_TIMEOUT_READ,
+        write=_REF_IMG_TIMEOUT_WRITE,
+        pool=_REF_IMG_TIMEOUT_POOL,
+    )
+
+
+def _log_xai_http_client_config(*, phase: str, timeout: httpx.Timeout) -> None:
+    logger.info(
+        "[XAI_HTTP_CLIENT_CONFIG] phase=%s http2=%s verify=%s follow_redirects=%s "
+        "timeout_connect=%s timeout_read=%s timeout_write=%s timeout_pool=%s",
+        phase,
+        False,
+        True,
+        True,
+        timeout.connect,
+        timeout.read,
+        timeout.write,
+        timeout.pool,
+    )
+
+
+def _is_xai_post_transport_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, ssl.SSLError):
+        return True
+    return isinstance(exc, (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError))
+
+
+def _log_xai_ssl_if_applicable(exc: BaseException, *, attempt: int) -> None:
+    if isinstance(exc, ssl.SSLError):
+        logger.error("[XAI_SSL_ERROR] attempt=%s exc=%s", attempt, exc)
+        return
+    c = getattr(exc, "__cause__", None)
+    if isinstance(c, ssl.SSLError):
+        logger.error("[XAI_SSL_ERROR] attempt=%s exc=%s ssl_cause=%s", attempt, exc, c)
+
 
 def validate_reference_image_urls_for_xai(
     *,
@@ -24,13 +70,19 @@ def validate_reference_image_urls_for_xai(
     segment_id: str,
 ) -> None:
     """GET each URL before xAI submit; fail fast if not HTTP 200 image/* (avoids HTML interstitials)."""
-    timeout = httpx.Timeout(30.0)
+    timeout = _reference_image_check_timeout()
+    _log_xai_http_client_config(phase="reference_image_check", timeout=timeout)
     for raw in urls:
         u = (raw or "").strip()
         if not u:
             continue
         try:
-            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            with httpx.Client(
+                timeout=timeout,
+                http2=False,
+                verify=True,
+                follow_redirects=True,
+            ) as client:
                 with client.stream("GET", u) as resp:
                     status = resp.status_code
                     ct = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
@@ -100,8 +152,30 @@ class XAIVideoClient:
     ):
         self._base = (base_url or effective_xai_video_base_url()).rstrip("/")
         self._api_key = api_key if api_key is not None else settings.XAI_API_KEY
-        self._timeout = httpx.Timeout(settings.XAI_VIDEO_TIMEOUT_SECONDS)
+        sec = float(settings.XAI_VIDEO_TIMEOUT_SECONDS)
+        self._timeout_connect = min(30.0, sec)
+        self._timeout_read = sec
+        self._timeout_write = sec
+        self._timeout_pool = 10.0
+        self._video_timeout = httpx.Timeout(
+            connect=self._timeout_connect,
+            read=self._timeout_read,
+            write=self._timeout_write,
+            pool=self._timeout_pool,
+        )
         self._max_retries = max(0, int(settings.XAI_VIDEO_MAX_RETRIES))
+
+    def _make_xai_video_http_client(self) -> httpx.Client:
+        return httpx.Client(
+            timeout=self._video_timeout,
+            http2=False,
+            verify=True,
+            follow_redirects=True,
+        )
+
+    def _post_video_generations_once(self, url: str, payload: dict[str, Any]) -> httpx.Response:
+        with self._make_xai_video_http_client() as client:
+            return client.post(url, headers=self._headers(), json=payload)
 
     def _headers(self) -> dict[str, str]:
         if not self._api_key:
@@ -169,86 +243,132 @@ class XAIVideoClient:
 
         logger.info("[XAI_REQUEST] POST /v1/videos/generations model=%s", model)
 
-        last_exc: Exception | None = None
-        for attempt in range(self._max_retries + 1):
-            t0 = time.perf_counter()
+        _log_xai_http_client_config(phase="start_video_generation", timeout=self._video_timeout)
+
+        t0 = time.perf_counter()
+        resp: httpx.Response | None = None
+        first_transport_error: BaseException | None = None
+
+        for attempt in (1, 2):
+            logger.info(
+                "[XAI_REQUEST_ATTEMPT] attempt=%s phase=start_video_generation url=%s",
+                attempt,
+                url,
+            )
             try:
-                with httpx.Client(timeout=self._timeout) as client:
-                    resp = client.post(url, headers=self._headers(), json=payload)
-                elapsed_ms = int((time.perf_counter() - t0) * 1000)
-                if resp.status_code >= 400:
-                    err = self._classify_http_error(resp)
-                    if resp.status_code >= 500 and attempt < self._max_retries:
-                        last_exc = err
-                        time.sleep(1.0 + attempt)
-                        continue
-                    log_ai_error(
-                        logger,
-                        "xai_video",
-                        model,
-                        str(err),
-                        project_id=project_id,
-                        segment_id=segment_id,
-                        phase="start_video_generation",
-                        duration_ms=elapsed_ms,
-                        http_status=resp.status_code,
-                    )
-                    raise err
-                data = resp.json()
-                rid = data.get("request_id")
-                if not rid:
-                    log_ai_error(
-                        logger,
-                        "xai_video",
-                        model,
-                        "missing_request_id",
-                        project_id=project_id,
-                        segment_id=segment_id,
-                        response_keys=list(data.keys())[:12] if isinstance(data, dict) else [],
-                    )
-                    raise ShortDramaVideoProviderError(f"xAI video start missing request_id: {data!r}")
-                logger.info("[XAI_RESPONSE] request_id=%s", rid)
-                log_ai_response(
+                resp = self._post_video_generations_once(url, payload)
+                logger.info("[XAI_RESPONSE_STATUS] status_code=%s", resp.status_code)
+                break
+            except httpx.TimeoutException as e:
+                logger.error(
+                    "[XAI_NETWORK_ERROR] exception_class=%s exc=%s attempt=%s",
+                    type(e).__name__,
+                    str(e),
+                    attempt,
+                )
+                log_ai_error(
                     logger,
                     "xai_video",
                     model,
+                    f"start_timeout: {e}",
                     project_id=project_id,
                     segment_id=segment_id,
                     phase="start_video_generation",
-                    request_id=str(rid),
-                    duration_ms=elapsed_ms,
                 )
-                return str(rid)
-            except httpx.TimeoutException as e:
-                last_exc = ShortDramaVideoProviderError(f"xAI video start timeout: {e}")
-                if attempt < self._max_retries:
-                    time.sleep(1.0 + attempt)
+                raise ShortDramaVideoProviderError(f"xAI video start timeout: {e}") from e
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, ssl.SSLError) as e:
+                logger.error(
+                    "[XAI_NETWORK_ERROR] exception_class=%s exc=%s attempt=%s",
+                    type(e).__name__,
+                    str(e),
+                    attempt,
+                )
+                _log_xai_ssl_if_applicable(e, attempt=attempt)
+                if attempt == 1:
+                    first_transport_error = e
+                    time.sleep(1.0)
                     continue
-                log_ai_error(
-                    logger,
-                    "xai_video",
-                    model,
-                    "start_timeout",
-                    project_id=project_id,
-                    segment_id=segment_id,
-                )
-                raise last_exc from e
+                raise ShortDramaVideoProviderError(
+                    "xAI video POST /v1/videos/generations failed after transport retries: "
+                    f"first_attempt_error={first_transport_error!r} second_attempt_error={e!r} "
+                    f"exception_class={type(e).__name__}"
+                ) from e
             except httpx.RequestError as e:
-                last_exc = ShortDramaVideoProviderError(f"xAI video start network error: {e}")
-                if attempt < self._max_retries:
-                    time.sleep(1.0 + attempt)
-                    continue
-                log_ai_error(
-                    logger,
-                    "xai_video",
-                    model,
-                    f"start_network: {e}",
-                    project_id=project_id,
-                    segment_id=segment_id,
+                logger.error(
+                    "[XAI_NETWORK_ERROR] exception_class=%s exc=%s attempt=%s",
+                    type(e).__name__,
+                    str(e),
+                    attempt,
                 )
-                raise last_exc from e
-        log_ai_error(logger, "xai_video", model, "start_exhausted_retries", project_id=project_id, segment_id=segment_id)
-        raise last_exc or ShortDramaVideoProviderError("xAI video start failed")
+                raise ShortDramaVideoProviderError(f"xAI video start network error: {e}") from e
+
+        if resp is None:
+            raise ShortDramaVideoProviderError("xAI video POST failed: no response")
+
+        server_retry = 0
+        while resp.status_code >= 500 and server_retry < self._max_retries:
+            time.sleep(1.0 + server_retry)
+            server_retry += 1
+            logger.info(
+                "[XAI_REQUEST_ATTEMPT] attempt=%s phase=start_video_generation_5xx_retry url=%s",
+                server_retry + 1,
+                url,
+            )
+            resp = self._post_video_generations_once(url, payload)
+            logger.info("[XAI_RESPONSE_STATUS] status_code=%s", resp.status_code)
+
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+        if resp.status_code >= 400:
+            err_body = ""
+            try:
+                err_body = (resp.text or "")[:500]
+            except Exception:
+                pass
+            logger.error(
+                "[XAI_ERROR_RESPONSE_BODY] status_code=%s body_prefix=%s",
+                resp.status_code,
+                err_body,
+            )
+            err = self._classify_http_error(resp)
+            log_ai_error(
+                logger,
+                "xai_video",
+                model,
+                str(err),
+                project_id=project_id,
+                segment_id=segment_id,
+                phase="start_video_generation",
+                duration_ms=elapsed_ms,
+                http_status=resp.status_code,
+            )
+            raise err
+
+        data = resp.json()
+        rid = data.get("request_id")
+        if not rid:
+            log_ai_error(
+                logger,
+                "xai_video",
+                model,
+                "missing_request_id",
+                project_id=project_id,
+                segment_id=segment_id,
+                response_keys=list(data.keys())[:12] if isinstance(data, dict) else [],
+            )
+            raise ShortDramaVideoProviderError(f"xAI video start missing request_id: {data!r}")
+        logger.info("[XAI_RESPONSE] request_id=%s", rid)
+        log_ai_response(
+            logger,
+            "xai_video",
+            model,
+            project_id=project_id,
+            segment_id=segment_id,
+            phase="start_video_generation",
+            request_id=str(rid),
+            duration_ms=elapsed_ms,
+        )
+        return str(rid)
 
     def poll_video_generation(
         self,
@@ -264,10 +384,11 @@ class XAIVideoClient:
         interval_s = max(0.05, float(settings.XAI_VIDEO_POLL_INTERVAL_MS) / 1000.0)
         poll_count = 0
         t0 = time.perf_counter()
+        _log_xai_http_client_config(phase="poll_video_generation", timeout=self._video_timeout)
         while time.monotonic() < deadline:
             poll_count += 1
             try:
-                with httpx.Client(timeout=self._timeout) as client:
+                with self._make_xai_video_http_client() as client:
                     resp = client.get(url, headers=self._headers())
                 if resp.status_code >= 400:
                     raise self._classify_http_error(resp)
@@ -339,7 +460,8 @@ class XAIVideoClient:
 
     def download_video_bytes(self, *, video_url: str, project_id: int, segment_id: str) -> bytes:
         try:
-            with httpx.Client(timeout=self._timeout, follow_redirects=True) as client:
+            _log_xai_http_client_config(phase="download_video_bytes", timeout=self._video_timeout)
+            with self._make_xai_video_http_client() as client:
                 resp = client.get(video_url)
             if resp.status_code >= 400:
                 raise ShortDramaVideoProviderError(

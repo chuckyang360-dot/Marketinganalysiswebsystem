@@ -40,7 +40,21 @@ def save_segment_video_bytes(*, project_id: int, segment_id: str, data: bytes) -
     except OSError as e:
         logger.exception("SHORT_DRAMA_VIDEO_SAVE_FAIL project_id=%s path=%s", project_id, path)
         raise ShortDramaVideoSaveError(f"Failed to save segment video: {e}") from e
-    return public_video_url_path(project_id, fname)
+    public = public_video_url_path(project_id, fname)
+    abs_path = str(path.resolve())
+    exists = path.is_file()
+    fsize = path.stat().st_size if exists else 0
+    logger.info(
+        "[SEGMENT_VIDEO_SAVED] project_id=%s segment_id=%s absolute_file_path=%s public_video_url=%s "
+        "file_exists=%s file_size=%s",
+        project_id,
+        segment_id,
+        abs_path,
+        public,
+        exists,
+        fsize,
+    )
+    return public
 
 
 def save_final_video_bytes(*, project_id: int, data: bytes) -> str:
