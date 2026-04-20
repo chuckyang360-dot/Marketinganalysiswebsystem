@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import os
 import logging
+import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session
 
 from ...config import settings
@@ -26,8 +31,6 @@ from ..utils.segment_mp4_validate import validate_segment_mp4_path
 from ..utils.video_prompt_builder import build_segment_video_plan
 from ..utils.video_storage import (
     absolutize_media_url_for_provider,
-    local_path_from_public_video_url,
-    save_segment_video_bytes,
 )
 from ..utils.xai_reference_image import (
     build_xai_ready_reference_image,
@@ -37,6 +40,45 @@ from .read_models import all_segment_scripts_have_video, list_asset_rows, list_s
 from .workflow_orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
+
+
+def download_video(video_url: str, *, project_id: int, segment_id: str) -> Path:
+    """Download provider video URL to a local temp .mp4 path."""
+    cmd_desc = f"download_video url={video_url}"
+    logger.info("[SEGMENT_VIDEO_DOWNLOAD_START] project_id=%s segment_id=%s desc=%s", project_id, segment_id, cmd_desc)
+    timeout = httpx.Timeout(connect=15.0, read=180.0, write=30.0, pool=10.0)
+    fd, tmp_name = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    out = Path(tmp_name)
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(video_url)
+        if resp.status_code >= 400:
+            raise RuntimeError(f"HTTP {resp.status_code}")
+        out.write_bytes(resp.content)
+        logger.info(
+            "[SEGMENT_VIDEO_DOWNLOAD_SUCCESS] project_id=%s segment_id=%s source_video_url=%s local_path=%s bytes=%s",
+            project_id,
+            segment_id,
+            video_url,
+            str(out.resolve()),
+            out.stat().st_size,
+        )
+        return out
+    except Exception as e:
+        logger.error(
+            "[SEGMENT_VIDEO_DOWNLOAD_FAIL] project_id=%s segment_id=%s source_video_url=%s exception_class=%s err=%s",
+            project_id,
+            segment_id,
+            video_url,
+            type(e).__name__,
+            str(e),
+        )
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 @dataclass
@@ -228,14 +270,37 @@ class RenderExecutorService:
             )
             trace["poll_completed"] = True
             trace["download_ok"] = True
-            url = save_segment_video_bytes(
-                project_id=project_id,
-                segment_id=segment_id,
-                data=result.video_bytes,
-            )
+            provider_video_url = (result.provider_video_url or "").strip()
+            if provider_video_url:
+                disk_path = download_video(provider_video_url, project_id=project_id, segment_id=segment_id)
+            else:
+                fd, tmp_name = tempfile.mkstemp(suffix=".mp4")
+                os.close(fd)
+                disk_path = Path(tmp_name)
+                disk_path.write_bytes(result.video_bytes)
+                logger.info(
+                    "[SEGMENT_VIDEO_DOWNLOAD_SUCCESS] project_id=%s segment_id=%s source_video_url=%s local_path=%s bytes=%s",
+                    project_id,
+                    segment_id,
+                    "",
+                    str(disk_path.resolve()),
+                    disk_path.stat().st_size,
+                )
+            ts = int(time.time() * 1000)
+            safe_seg = "".join(c if c.isalnum() or c in "-_" else "_" for c in segment_id)[:120]
+            r2_key = f"short-drama/videos/{project_id}/segment_{safe_seg}_{ts}.mp4"
+            url = upload_file(str(disk_path.resolve()), r2_key)
             trace["save_ok"] = True
             trace["final_video_url"] = url
-            disk_path = local_path_from_public_video_url(url)
+            logger.info(
+                "[SEGMENT_VIDEO_SAVED] project_id=%s segment_id=%s absolute_file_path=%s public_video_url=%s file_exists=%s file_size=%s",
+                project_id,
+                segment_id,
+                str(disk_path.resolve()),
+                url,
+                disk_path.is_file(),
+                disk_path.stat().st_size if disk_path.is_file() else 0,
+            )
             try:
                 validate_segment_mp4_path(disk_path, segment_id=segment_id)
             except ShortDramaInvalidSegmentVideoError:
@@ -291,6 +356,7 @@ class RenderExecutorService:
                 video_url=url,
                 render_job_id=job.id,
             )
+            
         except Exception as e:
             err_msg = str(e)
             trace["final_error"] = err_msg
@@ -332,6 +398,11 @@ class RenderExecutorService:
                 error_message=err_msg,
             )
         finally:
+            try:
+                if "disk_path" in locals():
+                    disk_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             logger.info(
                 "[SEGMENT_VIDEO_TRACE_SUMMARY] project_id=%s segment_id=%s reference_prepare_ok=%s "
                 "reference_check_ok=%s duration_check_ok=%s generation_start_ok=%s poll_completed=%s "
