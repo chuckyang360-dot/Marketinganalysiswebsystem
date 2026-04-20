@@ -146,6 +146,9 @@ class RenderExecutorService:
                     xai_sz,
                 )
             trace["reference_prepare_ok"] = True
+            ref_for_api = [
+                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e"
+            ]
             logger.info(
                 "[XAI_REFERENCE_IMAGE_FINAL_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,
