@@ -181,9 +181,22 @@ export type SingleSegmentVideoResponseDto = {
   project_id: number;
   segment_id: string;
   ok: boolean;
+  status: string;
+  progress: number;
   video_url?: string | null;
   render_job_id?: number | null;
   error?: string | null;
+};
+
+export type RenderJobStatusResponseDto = {
+  job_id: number;
+  project_id: number;
+  segment_id: string;
+  status: string;
+  progress: number;
+  video_url?: string | null;
+  error?: string | null;
+  request_id?: string | null;
 };
 
 export type MergeVideoResponseDto = {

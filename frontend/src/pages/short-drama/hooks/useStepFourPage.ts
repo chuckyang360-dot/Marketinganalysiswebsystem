@@ -4,19 +4,14 @@ import {
   generateShortDramaSegmentScripts,
   generateShortDramaSegmentVideos,
   generateShortDramaSingleSegmentVideo,
+  getShortDramaRenderJob,
   getShortDramaPipeline,
   mergeShortDramaProjectVideo,
   ShortDramaApiError,
 } from '../services/shortDramaApi';
-import type { Step4SegmentItem, Step4VideoStatusMap } from '../types/shortDrama';
-import type { PipelineSummaryDto } from '../types/shortDramaApi';
-import {
-  mergeVideoStatus,
-  pipelineAssetsToStepFourLibraryVm,
-  pipelineToStepFourViewModel,
-  pipelineUsesMockTestPatternVideo,
-  type StepFourAssetLibraryVm,
-} from '../utils/stepFourAdapters';
+import type { Step4SegmentItem, Step4VideoStatus, Step4VideoStatusMap } from '../types/shortDrama';
+import type { PipelineSummaryDto, RenderJobStatusResponseDto } from '../types/shortDramaApi';
+import { mergeVideoStatus, pipelineAssetsToStepFourLibraryVm, pipelineToStepFourViewModel, pipelineUsesMockTestPatternVideo, type StepFourAssetLibraryVm } from '../utils/stepFourAdapters';
 import { resolvePublicMediaUrl } from '../utils/shortDramaMedia';
 import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
 import { withProjectQuery } from '../utils/shortDramaRoutes';
@@ -58,7 +53,8 @@ export function useStepFourPage() {
 
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
-  const [pendingSegmentIds, setPendingSegmentIds] = useState<Set<number>>(() => new Set());
+  const [segmentStatusOverrides, setSegmentStatusOverrides] = useState<Partial<Record<number, Step4VideoStatus>>>({});
+  const [segmentRenderJobs, setSegmentRenderJobs] = useState<Record<number, number>>({});
 
   const [localAdditions, setLocalAdditions] = useState<Step4SegmentItem[]>([]);
   const [activeSegment, setActiveSegment] = useState(1);
@@ -84,6 +80,69 @@ export function useStepFourPage() {
   }, [projectId]);
 
   const pollEpochRef = useRef(0);
+  const segmentJobPollersRef = useRef<Record<number, number>>({});
+
+  const stopSegmentJobPolling = useCallback((segmentUiId: number) => {
+    const timerId = segmentJobPollersRef.current[segmentUiId];
+    if (timerId != null) {
+      window.clearInterval(timerId);
+      delete segmentJobPollersRef.current[segmentUiId];
+    }
+  }, []);
+
+  const startSegmentJobPolling = useCallback(
+    (segmentUiId: number, renderJobId: number) => {
+      stopSegmentJobPolling(segmentUiId);
+      setSegmentRenderJobs((prev) => ({ ...prev, [segmentUiId]: renderJobId }));
+      setSegmentStatusOverrides((prev) => ({ ...prev, [segmentUiId]: 'running' }));
+      console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segmentUiId, status: 'running' });
+
+      const tick = async () => {
+        try {
+          const job: RenderJobStatusResponseDto = await getShortDramaRenderJob(renderJobId);
+          const st = (job.status || '').toLowerCase();
+          const mapped: Step4VideoStatus =
+            st === 'completed' ? 'completed' : st === 'failed' ? 'failed' : st === 'queued' || st === 'pending' ? 'queued' : 'running';
+          console.info('[FRONT_RENDER_JOB_POLL]', {
+            render_job_id: renderJobId,
+            segment_id: job.segment_id,
+            status: mapped,
+            progress: job.progress,
+            video_url: job.video_url || '',
+          });
+          setSegmentStatusOverrides((prev) => ({ ...prev, [segmentUiId]: mapped }));
+          console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segmentUiId, status: mapped });
+          if (st === 'completed') {
+            stopSegmentJobPolling(segmentUiId);
+            console.info('[FRONT_RENDER_JOB_COMPLETED]', {
+              render_job_id: renderJobId,
+              segment_id: job.segment_id,
+              video_url: job.video_url || '',
+            });
+            setGenerateError(null);
+            await refreshPipeline();
+            return;
+          }
+          if (st === 'failed') {
+            stopSegmentJobPolling(segmentUiId);
+            setGenerateError(job.error || `片段 ${job.segment_id} 生成失败`);
+            await refreshPipeline();
+          }
+        } catch {
+          stopSegmentJobPolling(segmentUiId);
+          setSegmentStatusOverrides((prev) => ({ ...prev, [segmentUiId]: 'failed' }));
+          console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segmentUiId, status: 'failed' });
+        }
+      };
+
+      void tick();
+      const id = window.setInterval(() => {
+        void tick();
+      }, 2500);
+      segmentJobPollersRef.current[segmentUiId] = id;
+    },
+    [refreshPipeline, stopSegmentJobPolling],
+  );
 
   useEffect(() => {
     if (projectId == null || phase !== 'ready') return;
@@ -206,6 +265,15 @@ export function useStepFourPage() {
     };
   }, [projectId]);
 
+  useEffect(() => {
+    return () => {
+      Object.values(segmentJobPollersRef.current).forEach((id) => {
+        window.clearInterval(id);
+      });
+      segmentJobPollersRef.current = {};
+    };
+  }, []);
+
   const pipelineVm = useMemo(() => pipelineToStepFourViewModel(pipeline), [pipeline]);
 
   const assetLibraryVm: StepFourAssetLibraryVm = useMemo(
@@ -239,26 +307,35 @@ export function useStepFourPage() {
     return [...pipelineVm.coreSegments, ...localAdditions];
   }, [pipelineVm.coreSegments, localAdditions]);
 
-  const generatingOverrides = useMemo(() => {
-    const o: Partial<Record<number, 'generating'>> = {};
-    if (batchGenerating) {
-      for (const s of pipelineVm.coreSegments) {
-        if (s.backendSegmentId) o[s.id] = 'generating';
+  useEffect(() => {
+    for (const seg of pipelineVm.coreSegments) {
+      const row = pipeline?.segment_scripts?.find((x) => x.segment_id === seg.backendSegmentId);
+      if (!row?.render_job_id) continue;
+      const st = (row.render_status || '').toLowerCase();
+      if (st === 'running' || st === 'queued' || st === 'pending') {
+        startSegmentJobPolling(seg.id, row.render_job_id);
       }
     }
-    pendingSegmentIds.forEach((id) => {
-      o[id] = 'generating';
-    });
+  }, [pipeline?.segment_scripts, pipelineVm.coreSegments, startSegmentJobPolling]);
+
+  const runtimeStatusOverrides = useMemo(() => {
+    const o: Partial<Record<number, Step4VideoStatus>> = {};
+    if (batchGenerating) {
+      for (const s of pipelineVm.coreSegments) {
+        if (s.backendSegmentId) o[s.id] = 'running';
+      }
+    }
+    Object.assign(o, segmentStatusOverrides);
     return o;
-  }, [batchGenerating, pendingSegmentIds, pipelineVm.coreSegments]);
+  }, [batchGenerating, pipelineVm.coreSegments, segmentStatusOverrides]);
 
   const videoStatus: Step4VideoStatusMap = useMemo(() => {
     const base = { ...pipelineVm.videoStatusFromPipeline };
     for (const s of localAdditions) {
       if (base[s.id] === undefined) base[s.id] = 'idle';
     }
-    return mergeVideoStatus(base, generatingOverrides);
-  }, [pipelineVm.videoStatusFromPipeline, generatingOverrides, localAdditions]);
+    return mergeVideoStatus(base, runtimeStatusOverrides);
+  }, [pipelineVm.videoStatusFromPipeline, runtimeStatusOverrides, localAdditions]);
 
   const canMergeAll = pipelineVm.canMergeAll;
 
@@ -327,25 +404,29 @@ export function useStepFourPage() {
         return;
       }
       setGenerateError(null);
-      setPendingSegmentIds((prev) => new Set(prev).add(segId));
       try {
         const res = await generateShortDramaSingleSegmentVideo(projectId, seg.backendSegmentId);
-        if (!res.ok) {
-          setGenerateError(res.error || `片段 ${seg.backendSegmentId} 生成失败`);
+        if (!res.ok || !res.render_job_id) {
+          setGenerateError(res.error || `片段 ${seg.backendSegmentId} 创建任务失败`);
+          return;
         }
+        const queuedStatus: Step4VideoStatus = res.status === 'queued' || res.status === 'pending' ? 'queued' : 'running';
+        setSegmentStatusOverrides((prev) => ({ ...prev, [segId]: queuedStatus }));
+        console.info('[FRONT_RENDER_JOB_CREATED]', {
+          project_id: projectId,
+          segment_id: seg.backendSegmentId,
+          render_job_id: res.render_job_id,
+          status: queuedStatus,
+        });
+        console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segId, status: queuedStatus });
+        startSegmentJobPolling(segId, res.render_job_id);
         await refreshPipeline();
       } catch (e) {
         const msg = e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.error.videoSingle;
         setGenerateError(msg);
-      } finally {
-        setPendingSegmentIds((prev) => {
-          const next = new Set(prev);
-          next.delete(segId);
-          return next;
-        });
       }
     },
-    [projectId, refreshPipeline, segments, canGenerateVideos],
+    [projectId, refreshPipeline, segments, canGenerateVideos, startSegmentJobPolling],
   );
 
   const handleGenerateVideo = useCallback(
@@ -470,6 +551,7 @@ export function useStepFourPage() {
     videoStatus,
     batchGenerating,
     mergeLoading,
+    segmentRenderJobs,
     canMergeAll,
     canGenerateVideos,
     hasBackendSegmentScripts,

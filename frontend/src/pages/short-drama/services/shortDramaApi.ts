@@ -9,6 +9,7 @@ import type {
   ParseProductResponseDto,
   PipelineSummaryDto,
   ProductInputPayload,
+  RenderJobStatusResponseDto,
   ShortDramaProjectDto,
   SingleSegmentVideoResponseDto,
   VideoBatchSummaryResponseDto,
@@ -179,6 +180,10 @@ export async function generateShortDramaSingleSegmentVideo(
       body: JSON.stringify({ project_id: projectId }),
     },
   );
+}
+
+export async function getShortDramaRenderJob(jobId: number): Promise<RenderJobStatusResponseDto> {
+  return sdFetchJson<RenderJobStatusResponseDto>(`/api/short-drama/videos/render-jobs/${jobId}`);
 }
 
 export async function mergeShortDramaProjectVideo(projectId: number): Promise<MergeVideoResponseDto> {

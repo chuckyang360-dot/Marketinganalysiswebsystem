@@ -64,7 +64,7 @@ export function StepFourSegmentPanel({
                           新片段
                         </span>
                       )}
-                      {vStatus === "done" && !isActive && (
+                      {vStatus === "completed" && !isActive && (
                         <i className="ri-checkbox-circle-fill text-[12px]" style={{ color: "#047857" }} />
                       )}
                     </div>
@@ -72,7 +72,7 @@ export function StepFourSegmentPanel({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {!isNewEmpty && vStatus !== "done" && (
+                  {!isNewEmpty && vStatus !== "completed" && (
                     <div className="flex gap-1.5 flex-wrap">
                       {seg.characters.map((c) => (
                         <span key={c} className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: "rgba(180,83,9,0.08)", color: "#B45309" }}>
@@ -84,7 +84,7 @@ export function StepFourSegmentPanel({
                       </span>
                     </div>
                   )}
-                  {vStatus === "done" && !isActive && (
+                  {vStatus === "completed" && !isActive && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: "rgba(4,120,87,0.08)", color: "#047857" }}>
                         {SHORT_DRAMA_UI.done.segmentBadge}
                     </span>
@@ -128,11 +128,14 @@ export function StepFourSegmentPanel({
                                   {shot.id}
                                 </span>
                                 {/* When rendering this shot, show spinner */}
-                                {vStatus === "generating" && rProgress?.currentShot === shot.id && (
+                                {(vStatus === "queued" || vStatus === "running") && rProgress?.currentShot === shot.id && (
                                   <i className="ri-loader-4-line text-[11px] animate-spin" style={{ color: seg.color }} />
                                 )}
-                                {vStatus === "done" && (
+                                {vStatus === "completed" && (
                                   <i className="ri-checkbox-circle-fill text-[11px]" style={{ color: "#047857" }} />
+                                )}
+                                {vStatus === "failed" && (
+                                  <i className="ri-close-circle-fill text-[11px]" style={{ color: "#DC2626" }} />
                                 )}
                                 <span className="text-[12.5px]" style={{ color: "#444444" }}>{shot.desc}</span>
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "#EAEAEA", color: "#6E6E73" }}>
@@ -216,14 +219,14 @@ export function StepFourSegmentPanel({
 /* ── Segment Generate Button Area ── */
 interface GenerateAreaProps {
   seg: Step4SegmentItem;
-  vStatus: "idle" | "generating" | "done";
+  vStatus: "idle" | "queued" | "running" | "completed" | "failed";
   rProgress: import('../types/shortDrama').Step4RenderProgress | null;
   onGenerateVideo: (id: number) => void;
   disabled?: boolean;
 }
 
 function SegmentGenerateArea({ seg, vStatus, rProgress, onGenerateVideo, disabled = false }: GenerateAreaProps) {
-  if (vStatus === "generating" && !rProgress) {
+  if ((vStatus === "queued" || vStatus === "running") && !rProgress) {
     return (
       <div className="rounded-xl overflow-hidden" style={{ background: "#F7F8FA", border: `1px solid ${seg.color}25` }}>
         <div className="flex items-center gap-2.5 px-3 py-2.5">
@@ -232,7 +235,7 @@ function SegmentGenerateArea({ seg, vStatus, rProgress, onGenerateVideo, disable
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-[12px] font-semibold truncate" style={{ color: "#1D1D1F" }}>
-              正在请求生成视频…
+              视频生成中…
             </p>
             <p className="text-[10px] mt-0.5 truncate" style={{ color: "#8E8E93" }}>
               请等待后端处理完成后自动刷新
@@ -243,7 +246,7 @@ function SegmentGenerateArea({ seg, vStatus, rProgress, onGenerateVideo, disable
     );
   }
 
-  if (vStatus === "generating" && rProgress) {
+  if ((vStatus === "queued" || vStatus === "running") && rProgress) {
     return (
       <div className="rounded-xl overflow-hidden" style={{ background: "#F7F8FA", border: `1px solid ${seg.color}25` }}>
         {/* Phase label + spinner */}
@@ -277,7 +280,7 @@ function SegmentGenerateArea({ seg, vStatus, rProgress, onGenerateVideo, disable
     );
   }
 
-  if (vStatus === "done") {
+  if (vStatus === "completed") {
     return (
       <div className="flex gap-2">
         <div
@@ -309,6 +312,35 @@ function SegmentGenerateArea({ seg, vStatus, rProgress, onGenerateVideo, disable
         >
           <i className="ri-refresh-line text-[11px]" />
           重新生成
+        </button>
+      </div>
+    );
+  }
+
+  if (vStatus === "failed") {
+    return (
+      <div className="flex gap-2">
+        <div
+          className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[12px] font-medium"
+          style={{ background: "rgba(220,38,38,0.08)", color: "#B91C1C", border: "1px solid rgba(220,38,38,0.2)" }}
+        >
+          <i className="ri-close-circle-fill text-[12px]" />
+          生成失败
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onGenerateVideo(seg.id)}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] whitespace-nowrap transition-colors duration-150"
+          style={{
+            background: disabled ? "#F5F5F7" : "#F7F8FA",
+            color: disabled ? "#AEAEB2" : "#444444",
+            border: "1px solid #EAEAEA",
+            cursor: disabled ? "not-allowed" : "pointer",
+          }}
+        >
+          <i className="ri-refresh-line text-[11px]" />
+          重试
         </button>
       </div>
     );

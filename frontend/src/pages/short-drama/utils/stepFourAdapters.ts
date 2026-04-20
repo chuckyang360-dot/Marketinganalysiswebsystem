@@ -169,7 +169,7 @@ export function stepFourVideoStatusFromSegments(segments: Step4SegmentItem[]): S
   const m: Step4VideoStatusMap = {};
   for (const s of segments) {
     const has = !!resolvePublicMediaUrl(s.videoUrl);
-    m[s.id] = has ? 'done' : 'idle';
+    m[s.id] = has ? 'completed' : 'idle';
   }
   return m;
 }
@@ -213,6 +213,19 @@ export function pipelineToStepFourViewModel(pipeline: PipelineSummaryDto | null)
   const coreSegments = sorted.map((row, index) => segmentScriptDtoToStepSegmentViewModel(row, index));
 
   const videoStatusFromPipeline = stepFourVideoStatusFromSegments(coreSegments);
+  for (let i = 0; i < sorted.length; i += 1) {
+    const row = sorted[i];
+    const uiSegId = coreSegments[i]?.id;
+    if (!uiSegId) continue;
+    const st = String(row.render_status || '').toLowerCase();
+    if ((coreSegments[i].videoUrl || '').trim()) {
+      videoStatusFromPipeline[uiSegId] = 'completed';
+      continue;
+    }
+    if (st === 'failed') videoStatusFromPipeline[uiSegId] = 'failed';
+    else if (st === 'running') videoStatusFromPipeline[uiSegId] = 'running';
+    else if (st === 'queued' || st === 'pending') videoStatusFromPipeline[uiSegId] = 'queued';
+  }
   const allUrlsLocal =
     coreSegments.length > 0 && coreSegments.every((s) => !!resolvePublicMediaUrl(s.videoUrl));
   const canMergeAll =

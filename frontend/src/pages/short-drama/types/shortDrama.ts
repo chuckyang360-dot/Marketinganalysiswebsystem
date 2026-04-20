@@ -228,6 +228,6 @@ export interface Step4RenderProgress {
   totalFrames: number;
 }
 
-export type Step4VideoStatus = 'idle' | 'generating' | 'done';
+export type Step4VideoStatus = 'idle' | 'queued' | 'running' | 'completed' | 'failed';
 export type Step4VideoStatusMap = Record<number, Step4VideoStatus>;
 export type Step4RenderProgressMap = Record<number, Step4RenderProgress>;

@@ -248,10 +248,12 @@ export function ShortDramaStepFourPage() {
                     className="w-2 h-2 rounded-full"
                     style={{
                       background:
-                        videoStatus[s.id] === 'done'
+                        videoStatus[s.id] === 'completed'
                           ? '#047857'
-                          : videoStatus[s.id] === 'generating'
+                          : videoStatus[s.id] === 'queued' || videoStatus[s.id] === 'running'
                             ? '#B45309'
+                            : videoStatus[s.id] === 'failed'
+                              ? '#DC2626'
                             : '#EAEAEA',
                       transition: 'background 0.3s',
                     }}

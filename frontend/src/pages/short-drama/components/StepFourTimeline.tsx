@@ -3,7 +3,7 @@ import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
 
 interface TimelineProps {
   segments: Step4SegmentItem[];
-  videoStatus: Record<number, "idle" | "generating" | "done">;
+  videoStatus: Record<number, "idle" | "queued" | "running" | "completed" | "failed">;
   activeSegment: number;
   onSegmentClick: (id: number) => void;
   onAddSegment: () => void;
@@ -111,15 +111,18 @@ export function StepFourTimeline({
                 }}
               >
                 {/* Generating animation */}
-                {status === "generating" && (
+                {(status === "queued" || status === "running") && (
                   <div className="absolute inset-0 opacity-8 animate-pulse" style={{ background: seg.color }} />
                 )}
                 {/* Status icon */}
-                {status === "done" && (
+                {status === "completed" && (
                   <i className="ri-checkbox-circle-fill text-[10px] shrink-0" style={{ color: seg.color }} />
                 )}
-                {status === "generating" && (
+                {(status === "queued" || status === "running") && (
                   <i className="ri-loader-4-line text-[10px] animate-spin shrink-0" style={{ color: seg.color }} />
+                )}
+                {status === "failed" && (
+                  <i className="ri-close-circle-fill text-[10px] shrink-0" style={{ color: "#DC2626" }} />
                 )}
                 {status === "idle" && seg.isNew && (
                   <i className="ri-edit-line text-[10px] shrink-0" style={{ color: "#AEAEB2" }} />
@@ -181,10 +184,12 @@ export function StepFourTimeline({
                 className="w-1.5 h-1.5 rounded-full"
                 style={{
                   background:
-                    videoStatus[s.id] === "done"
+                    videoStatus[s.id] === "completed"
                       ? "#047857"
-                      : videoStatus[s.id] === "generating"
+                      : videoStatus[s.id] === "queued" || videoStatus[s.id] === "running"
                       ? "#B45309"
+                      : videoStatus[s.id] === "failed"
+                      ? "#DC2626"
                       : "#D1D1D6",
                 }}
               />

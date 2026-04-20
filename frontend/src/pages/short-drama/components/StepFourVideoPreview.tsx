@@ -72,7 +72,7 @@ export function StepFourVideoPreview({
 
   const effectiveSrc =
     previewTarget === "final" ? (finalVideoSrc || null) : (videoSrc || null);
-  const effectiveStatus = previewTarget === "final" ? (finalVideoSrc ? "done" : "idle") : status;
+  const effectiveStatus = previewTarget === "final" ? (finalVideoSrc ? "completed" : "idle") : status;
   const videoKey = `${previewTarget}-${segmentId}-${segmentBackendKey ?? "local"}-${effectiveSrc ?? ""}`;
 
   useEffect(() => {
@@ -194,8 +194,10 @@ export function StepFourVideoPreview({
             : finalVideoSrc
               ? "最终成片可预览"
               : "最终成片尚未合成"
-          : status === "generating"
+          : status === "queued" || status === "running"
             ? "当前片段生成中，请稍候"
+            : status === "failed"
+              ? "当前片段生成失败，可在左侧重试"
             : videoSrc
               ? "当前片段视频可预览"
               : "当前片段尚未生成视频"}
@@ -219,7 +221,7 @@ export function StepFourVideoPreview({
         )}
 
         {/* GENERATING — 无本地进度时简化为等待态 */}
-        {effectiveStatus === "generating" && !renderProgress && (
+        {(effectiveStatus === "queued" || effectiveStatus === "running") && !renderProgress && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3" style={{ background: "#1a1a1c" }}>
             <img
               src={info.img}
@@ -237,7 +239,7 @@ export function StepFourVideoPreview({
         )}
 
         {/* GENERATING — cinematic progressive reveal（保留 mock 阶段动画，当有 renderProgress 时） */}
-        {effectiveStatus === "generating" && renderProgress && (
+        {(effectiveStatus === "queued" || effectiveStatus === "running") && renderProgress && (
           <>
             {/* Blurred / dark base */}
             <img
@@ -312,7 +314,7 @@ export function StepFourVideoPreview({
         )}
 
         {/* DONE */}
-        {effectiveStatus === "done" && (
+        {effectiveStatus === "completed" && (
           <>
             {effectiveSrc ? (
               <video
@@ -380,7 +382,7 @@ export function StepFourVideoPreview({
       </div>
 
       {/* ── Generating progress detail ── */}
-      {effectiveStatus === "generating" && renderProgress && (
+      {(effectiveStatus === "queued" || effectiveStatus === "running") && renderProgress && (
         <div className="mb-3 rounded-xl overflow-hidden shrink-0" style={{ background: "#ffffff", border: "1px solid #EAEAEA" }}>
           {/* Progress bar */}
           <div className="px-4 pt-4 pb-3">
@@ -451,7 +453,7 @@ export function StepFourVideoPreview({
 
       {/* ── Actions ── */}
       <div className="space-y-2 mt-auto">
-        {previewTarget === "segment" && status === "done" && (
+        {previewTarget === "segment" && status === "completed" && (
           <>
             <button
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-[12.5px] font-medium cursor-pointer transition-all duration-200 whitespace-nowrap"
