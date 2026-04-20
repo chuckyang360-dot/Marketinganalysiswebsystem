@@ -332,6 +332,7 @@ export function ShortDramaStepFourPage() {
         </div>
 
         <StepFourVideoPreview
+          projectId={projectId}
           segmentId={active?.id ?? activeSegment}
           videoStatus={videoStatus}
           renderProgress={null}

@@ -6,6 +6,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 python-multipart
 httpx
+boto3
 Pillow>=10.0.0
 pydantic
 pydantic-settings

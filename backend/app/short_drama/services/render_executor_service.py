@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ...config import settings
 from ...database import SessionLocal
+from ...utils.r2_storage import upload_file
 from ..exceptions import ShortDramaInvalidSegmentVideoError, ShortDramaVideoInputError
 from ..models import RenderJob, SegmentScriptRecord, ShortDramaProject
 from ..providers.xai_video_client import effective_xai_video_model
@@ -130,10 +131,41 @@ class RenderExecutorService:
                     )
                     raise
                 final_u = absolutize_media_url_for_provider(pub_rel)
-                ref_for_api.append(final_u)
                 xai_local = local_path_from_xai_ready_public_url(pub_rel)
                 xai_ok = xai_local.is_file()
                 xai_sz = xai_local.stat().st_size if xai_ok else 0
+                filename = xai_local.name
+                r2_key = f"short-drama/{project_id}/{filename}"
+                logger.info(
+                    "[R2_UPLOAD_START] project_id=%s segment_id=%s file_path=%s key=%s",
+                    project_id,
+                    segment_id,
+                    str(xai_local.resolve()),
+                    r2_key,
+                )
+                try:
+                    r2_url = upload_file(str(xai_local.resolve()), r2_key)
+                    logger.info(
+                        "[R2_UPLOAD_SUCCESS] project_id=%s segment_id=%s file_path=%s key=%s url=%s",
+                        project_id,
+                        segment_id,
+                        str(xai_local.resolve()),
+                        r2_key,
+                        r2_url,
+                    )
+                    final_u = r2_url
+                except Exception as e:
+                    logger.error(
+                        "[R2_UPLOAD_FAIL] project_id=%s segment_id=%s file_path=%s key=%s exception_class=%s err=%s",
+                        project_id,
+                        segment_id,
+                        str(xai_local.resolve()),
+                        r2_key,
+                        type(e).__name__,
+                        str(e),
+                    )
+                    raise
+                ref_for_api.append(final_u)
                 logger.info(
                     "[XAI_REFERENCE_IMAGE_PREPARE_DONE] project_id=%s segment_id=%s source_url=%s "
                     "output_public_url=%s output_absolute_path=%s file_exists=%s file_size=%s",
@@ -146,9 +178,6 @@ class RenderExecutorService:
                     xai_sz,
                 )
             trace["reference_prepare_ok"] = True
-            ref_for_api = [
-                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e"
-            ]
             logger.info(
                 "[XAI_REFERENCE_IMAGE_FINAL_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,

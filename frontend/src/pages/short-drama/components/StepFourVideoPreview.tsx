@@ -4,6 +4,7 @@ import { NEUTRAL_VERTICAL_POSTER } from '../utils/shortDramaMedia';
 import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
 
 interface VideoPreviewProps {
+  projectId?: number | null;
   segmentId: number;
   videoStatus: Step4VideoStatusMap;
   renderProgress: Step4RenderProgress | null;
@@ -43,6 +44,7 @@ function getPhaseKey(phase: string): string {
 }
 
 export function StepFourVideoPreview({
+  projectId = null,
   segmentId,
   videoStatus,
   renderProgress,
@@ -71,17 +73,18 @@ export function StepFourVideoPreview({
   const effectiveSrc =
     previewTarget === "final" ? (finalVideoSrc || null) : (videoSrc || null);
   const effectiveStatus = previewTarget === "final" ? (finalVideoSrc ? "done" : "idle") : status;
+  const videoKey = `${previewTarget}-${segmentId}-${segmentBackendKey ?? "local"}-${effectiveSrc ?? ""}`;
 
   useEffect(() => {
-    console.info("[STEP4_SEGMENT_PREVIEW_BIND]", {
+    console.info("[FRONT_SEGMENT_PREVIEW_BIND]", {
+      project_id: projectId,
       active_segment_id: segmentId,
       preview_target: previewTarget,
-      bound_src: effectiveSrc ?? "",
-      segment_video_url: segmentVideoUrlRaw,
-      final_video_url: finalVideoUrlRaw,
-      segment_backend_id: segmentBackendKey,
+      raw_video_url: previewTarget === "final" ? finalVideoUrlRaw : segmentVideoUrlRaw,
+      resolved_video_url: effectiveSrc ?? "",
+      video_key: videoKey,
     });
-  }, [segmentId, previewTarget, effectiveSrc, segmentVideoUrlRaw, finalVideoUrlRaw, segmentBackendKey]);
+  }, [projectId, segmentId, previewTarget, effectiveSrc, segmentVideoUrlRaw, finalVideoUrlRaw, videoKey]);
 
   useEffect(() => {
     if (styleRef.current) return;
@@ -313,13 +316,34 @@ export function StepFourVideoPreview({
           <>
             {effectiveSrc ? (
               <video
-                key={`${previewTarget}-${segmentId}-${segmentBackendKey ?? "local"}-${effectiveSrc}`}
+                key={videoKey}
                 src={effectiveSrc}
                 className="w-full h-full object-cover object-top"
                 controls
                 playsInline
                 poster={info.img}
                 style={{ animation: "sd-vp-done-in 0.4s ease-out forwards" }}
+                onLoadedMetadata={(e) => {
+                  const media = e.currentTarget;
+                  console.info("[FRONT_SEGMENT_PREVIEW_LOADED]", {
+                    project_id: projectId,
+                    active_segment_id: segmentId,
+                    resolved_video_url: effectiveSrc ?? "",
+                    current_time: media.currentTime,
+                    duration: Number.isFinite(media.duration) ? media.duration : null,
+                  });
+                }}
+                onError={(e) => {
+                  const media = e.currentTarget;
+                  const err = media.error;
+                  console.error("[FRONT_SEGMENT_PREVIEW_ERROR]", {
+                    project_id: projectId,
+                    active_segment_id: segmentId,
+                    resolved_video_url: effectiveSrc ?? "",
+                    media_error_code: err?.code ?? null,
+                    media_error_message: err?.message ?? "video element load failed",
+                  });
+                }}
               />
             ) : (
               <>
