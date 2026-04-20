@@ -1,9 +1,8 @@
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, Query
 
-print("=== MAIN.PY VERSION MARKER: CORS_DEBUG_V5 ===")
+print("=== MAIN.PY VERSION MARKER: CORS_DEBUG_V6 ===")
 
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import logging
@@ -62,25 +61,17 @@ app = FastAPI(
     debug=settings.DEBUG,
 )
 
-# OPTIONS handler middleware - must be before CORSMiddleware
-@app.middleware("http")
-async def allow_options(request: Request, call_next):
-    """Allow all OPTIONS preflight requests"""
-    if request.method == "OPTIONS":
-        print(
-            f"[OPTIONS HANDLER] method={request.method} "
-            f"path={request.url.path} "
-            f"origin={request.headers.get('origin')} "
-            f"acr-method={request.headers.get('access-control-request-method')} "
-            f"acr-headers={request.headers.get('access-control-request-headers')}"
-        )
-        return Response(status_code=200)
-    return await call_next(request)
+# Explicit origins only (no wildcard). CORSMiddleware handles OPTIONS preflight with proper headers.
+SHORT_DRAMA_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://aimarcket2026.vercel.app",
+]
 
 # Configure CORS - must be added before routers
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=SHORT_DRAMA_CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,7 +156,7 @@ async def health_check():
     return {
         "status": "healthy",
         "message": "API is running",
-        "version_marker": "CORS_DEBUG_V5"
+        "version_marker": "CORS_DEBUG_V6"
     }
 
 if __name__ == "__main__":
