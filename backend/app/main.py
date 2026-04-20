@@ -49,9 +49,10 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 ffmpeg_path = shutil.which("ffmpeg")
-logging.warning("[FFMPEG_CHECK] detected_path=%s", ffmpeg_path)
-if ffmpeg_path is None:
-    logging.error("[FFMPEG_CHECK] ffmpeg NOT FOUND in PATH")
+if ffmpeg_path is not None:
+    logging.info("[FFMPEG_RUNTIME_READY] project_id=%s segment_id=%s ffmpeg_cmd=%s", "", "", ffmpeg_path)
+else:
+    logging.error("[FFMPEG_NOT_FOUND_IN_ENV] project_id=%s segment_id=%s ffmpeg_cmd=%s exception_class=%s err=%s", "", "", "ffmpeg", "FileNotFoundError", "ffmpeg not found in PATH")
 
 # Create FastAPI app
 app = FastAPI(

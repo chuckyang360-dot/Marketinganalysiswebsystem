@@ -8,8 +8,8 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol
+import shutil
 
 from ...config import settings
 from ..exceptions import ShortDramaVideoProviderError
@@ -19,11 +19,8 @@ from .xai_video_client import XAIVideoClient, effective_xai_video_model
 logger = logging.getLogger(__name__)
 _XAI_PROVIDER_DURATION_CAP_SECONDS = 10
 
-# Mock dev video must be produced by ffmpeg on disk paths we control.
-# Embedded base64 "minimal MP4" was removed: demux failed (e.g. H.264 "No start code is found") and
-# validate_segment_mp4_path rejected it. Re-introduce embedded fallback only if a blob is verified
-# with the same demux checks as production, and only when Path(MOCK_FFMPEG_BIN).is_file() is False.
-MOCK_FFMPEG_BIN = "/opt/homebrew/bin/ffmpeg"
+# Mock dev video must be produced by ffmpeg from runtime PATH.
+MOCK_FFMPEG_BIN = "ffmpeg"
 
 
 @dataclass
@@ -290,54 +287,109 @@ class MockXAIVideoProvider:
     def _produce_bytes(self, *, project_id: int, segment_id: str, duration_seconds: int) -> SegmentVideoResult:
         dur = max(1, min(10, int(duration_seconds)))
         t0 = time.perf_counter()
-        ffmpeg_exe = Path(MOCK_FFMPEG_BIN)
-
-        if not ffmpeg_exe.is_file():
+        ffmpeg_path = shutil.which(MOCK_FFMPEG_BIN)
+        if not ffmpeg_path:
+            cmd_preview = " ".join(
+                [
+                    MOCK_FFMPEG_BIN,
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"testsrc=duration={dur}:size=320x240:rate=24",
+                ]
+            )
+            logger.error(
+                "[FFMPEG_NOT_FOUND_IN_ENV] project_id=%s segment_id=%s ffmpeg_cmd=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                cmd_preview,
+                "FileNotFoundError",
+                "ffmpeg not found in PATH",
+            )
             log_ai_error(
                 logger,
                 "mock_video",
                 "mock-ffmpeg",
-                f"ffmpeg missing at {MOCK_FFMPEG_BIN} (embedded fallback disabled)",
+                f"ffmpeg missing in PATH (command={MOCK_FFMPEG_BIN})",
                 project_id=project_id,
             )
             raise ShortDramaVideoProviderError(
-                f"Mock video requires ffmpeg at {MOCK_FFMPEG_BIN}; binary not found. "
+                "Mock video requires ffmpeg in runtime PATH; binary not found. "
                 "Install ffmpeg or disable SHORT_DRAMA_USE_MOCK_VIDEO_PROVIDER."
             )
+        logger.info(
+            "[FFMPEG_RUNTIME_READY] project_id=%s segment_id=%s ffmpeg_cmd=%s",
+            project_id,
+            segment_id,
+            ffmpeg_path,
+        )
 
         fd, tmp_name = tempfile.mkstemp(suffix=".mp4")
         os.close(fd)
         out_path = Path(tmp_name)
+        ffmpeg_cmd = [
+            MOCK_FFMPEG_BIN,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=duration={dur}:size=320x240:rate=24",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(out_path),
+        ]
+        ffmpeg_cmd_str = " ".join(ffmpeg_cmd)
         try:
             try:
+                logger.info(
+                    "[FFMPEG_COMMAND_START] project_id=%s segment_id=%s ffmpeg_cmd=%s",
+                    project_id,
+                    segment_id,
+                    ffmpeg_cmd_str,
+                )
                 proc = subprocess.run(
-                    [
-                        str(ffmpeg_exe),
-                        "-y",
-                        "-f",
-                        "lavfi",
-                        "-i",
-                        f"testsrc=duration={dur}:size=320x240:rate=24",
-                        "-c:v",
-                        "libx264",
-                        "-pix_fmt",
-                        "yuv420p",
-                        "-movflags",
-                        "+faststart",
-                        str(out_path),
-                    ],
+                    ffmpeg_cmd,
                     capture_output=True,
                     timeout=60,
                 )
             except FileNotFoundError as e:
+                logger.error(
+                    "[FFMPEG_NOT_FOUND_IN_ENV] project_id=%s segment_id=%s ffmpeg_cmd=%s exception_class=%s err=%s",
+                    project_id,
+                    segment_id,
+                    ffmpeg_cmd_str,
+                    type(e).__name__,
+                    str(e),
+                )
                 log_ai_error(logger, "mock_video", "mock-ffmpeg", f"ffmpeg_skip: {e}", project_id=project_id)
                 raise ShortDramaVideoProviderError(
-                    f"Mock video could not execute ffmpeg at {MOCK_FFMPEG_BIN}: {e}"
+                    f"Mock video could not execute ffmpeg command '{MOCK_FFMPEG_BIN}': {e}"
                 ) from e
             except subprocess.TimeoutExpired as e:
+                logger.error(
+                    "[FFMPEG_COMMAND_FAIL] project_id=%s segment_id=%s ffmpeg_cmd=%s returncode=%s stderr_preview=%s",
+                    project_id,
+                    segment_id,
+                    ffmpeg_cmd_str,
+                    "timeout",
+                    str(e)[:500],
+                )
                 log_ai_error(logger, "mock_video", "mock-ffmpeg", f"ffmpeg_timeout: {e}", project_id=project_id)
                 raise ShortDramaVideoProviderError("Mock ffmpeg timed out generating segment video") from e
             except OSError as e:
+                logger.error(
+                    "[FFMPEG_COMMAND_FAIL] project_id=%s segment_id=%s ffmpeg_cmd=%s returncode=%s stderr_preview=%s",
+                    project_id,
+                    segment_id,
+                    ffmpeg_cmd_str,
+                    "oserror",
+                    str(e)[:500],
+                )
                 log_ai_error(logger, "mock_video", "mock-ffmpeg", f"ffmpeg_oserror: {e}", project_id=project_id)
                 raise ShortDramaVideoProviderError(f"Mock ffmpeg failed: {e}") from e
 
@@ -346,6 +398,14 @@ class MockXAIVideoProvider:
                 stderr = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
                 if len(stderr) > 2000:
                     stderr = stderr[:2000] + "…"
+                logger.error(
+                    "[FFMPEG_COMMAND_FAIL] project_id=%s segment_id=%s ffmpeg_cmd=%s returncode=%s stderr_preview=%s",
+                    project_id,
+                    segment_id,
+                    ffmpeg_cmd_str,
+                    proc.returncode,
+                    stderr[:500],
+                )
                 log_ai_error(
                     logger,
                     "mock_video",
@@ -356,6 +416,12 @@ class MockXAIVideoProvider:
                 raise ShortDramaVideoProviderError(
                     f"Mock ffmpeg failed (exit {proc.returncode}): {stderr or 'unknown error'}"
                 )
+            logger.info(
+                "[FFMPEG_COMMAND_SUCCESS] project_id=%s segment_id=%s ffmpeg_cmd=%s",
+                project_id,
+                segment_id,
+                ffmpeg_cmd_str,
+            )
 
             try:
                 video_bytes = out_path.read_bytes()

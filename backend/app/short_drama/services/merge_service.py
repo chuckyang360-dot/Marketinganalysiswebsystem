@@ -94,7 +94,7 @@ class MergeService:
         tmp_dir = ensure_video_project_dir(project_id)
         tmp_out = tmp_dir / "_merge_working_out.mp4"
         try:
-            merge_mp4_files(paths, tmp_out)
+            merge_mp4_files(paths, tmp_out, project_id=project_id, segment_id="final_merge")
             data = tmp_out.read_bytes()
         except ShortDramaFFmpegError as e:
             err_msg = str(e)
@@ -108,7 +108,7 @@ class MergeService:
         except OSError as e:
             err_msg = str(e)
             if "No such file or directory: 'ffmpeg'" in err_msg:
-                ferr = ShortDramaFFmpegError("ffmpeg not found. Expected at /opt/homebrew/bin/ffmpeg")
+                ferr = ShortDramaFFmpegError("ffmpeg not found in runtime environment")
                 ferr.__cause__ = e
                 err_msg = str(ferr)
                 job.status = RenderJobStatus.FAILED.value

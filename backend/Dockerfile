@@ -12,6 +12,9 @@ COPY requirements.txt .
 # 升级 pip
 RUN pip install --upgrade pip
 
+# 安装 ffmpeg（服务端依赖）
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
 # 安装依赖
 RUN pip install --no-cache-dir -r requirements.txt
 

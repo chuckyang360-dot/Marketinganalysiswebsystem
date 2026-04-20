@@ -41,25 +41,73 @@ def validate_segment_mp4_path(path: Path, *, segment_id: str | None = None) -> N
             f"{prefix}invalid MP4 (missing ftyp; not ISO BMFF) path={path}"
         )
 
-    proc = subprocess.run(
-        [
-            FFMPEG_BIN,
-            "-v",
-            "error",
-            "-i",
-            str(path.resolve()),
-            "-f",
-            "null",
-            "-",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
+    cmd = [
+        FFMPEG_BIN,
+        "-v",
+        "error",
+        "-i",
+        str(path.resolve()),
+        "-f",
+        "null",
+        "-",
+    ]
+    cmd_str = " ".join(cmd)
+    logger.info(
+        "[FFMPEG_COMMAND_START] project_id=%s segment_id=%s ffmpeg_cmd=%s",
+        "",
+        segment_id or "",
+        cmd_str,
     )
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except FileNotFoundError as e:
+        logger.error(
+            "[FFMPEG_NOT_FOUND_IN_ENV] project_id=%s segment_id=%s ffmpeg_cmd=%s exception_class=%s err=%s",
+            "",
+            segment_id or "",
+            cmd_str,
+            type(e).__name__,
+            str(e),
+        )
+        raise ShortDramaInvalidSegmentVideoError(
+            f"{prefix}ffmpeg not found in runtime environment; cmd={cmd_str}"
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        logger.error(
+            "[FFMPEG_COMMAND_FAIL] project_id=%s segment_id=%s ffmpeg_cmd=%s returncode=%s stderr_preview=%s",
+            "",
+            segment_id or "",
+            cmd_str,
+            "timeout",
+            str(e)[:500],
+        )
+        raise ShortDramaInvalidSegmentVideoError(
+            f"{prefix}invalid or corrupt MP4 (demux timed out) path={path}"
+        ) from e
+    if proc.returncode == 0:
+        logger.info(
+            "[FFMPEG_COMMAND_SUCCESS] project_id=%s segment_id=%s ffmpeg_cmd=%s",
+            "",
+            segment_id or "",
+            cmd_str,
+        )
     if proc.returncode != 0:
         tail = (proc.stderr or proc.stdout or "").strip()
         if len(tail) > 800:
             tail = tail[:800] + "…"
+        logger.error(
+            "[FFMPEG_COMMAND_FAIL] project_id=%s segment_id=%s ffmpeg_cmd=%s returncode=%s stderr_preview=%s",
+            "",
+            segment_id or "",
+            cmd_str,
+            proc.returncode,
+            tail[:500],
+        )
         logger.warning(
             "SEGMENT_MP4_DEMUX_FAIL %spath=%s rc=%s stderr=%s",
             prefix,

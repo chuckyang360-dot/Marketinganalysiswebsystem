@@ -51,7 +51,7 @@ class TestMockVideoProvider(unittest.TestCase):
 
         prov = MockXAIVideoProvider()
         try:
-            subprocess.run(["/opt/homebrew/bin/ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             self.skipTest("ffmpeg not available")
         with patch.object(video_storage, "short_drama_videos_root", return_value=Path("/tmp/sd-test-vid")):
@@ -87,7 +87,7 @@ class TestRenderExecutorService(unittest.TestCase):
         from app.short_drama.utils import video_storage
 
         try:
-            subprocess.run(["/opt/homebrew/bin/ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             self.skipTest("ffmpeg not available")
 
@@ -338,7 +338,7 @@ class TestMergeService(unittest.TestCase):
     def _ffmpeg_mp4(self, path: Path, seconds: float = 1.0) -> None:
         subprocess.run(
             [
-                "/opt/homebrew/bin/ffmpeg",
+                "ffmpeg",
                 "-y",
                 "-f",
                 "lavfi",
@@ -396,7 +396,7 @@ class TestMergeService(unittest.TestCase):
         from app.short_drama.utils import video_storage
 
         try:
-            subprocess.run(["/opt/homebrew/bin/ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             self.skipTest("ffmpeg not available")
 
@@ -459,7 +459,7 @@ class TestMergeService(unittest.TestCase):
         from app.models import User
 
         try:
-            subprocess.run(["/opt/homebrew/bin/ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=5, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             self.skipTest("ffmpeg not available")
 
