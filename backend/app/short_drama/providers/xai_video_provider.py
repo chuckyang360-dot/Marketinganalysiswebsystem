@@ -17,6 +17,7 @@ from ..utils.flow_logging import log_ai_error, log_ai_request, log_ai_response
 from .xai_video_client import XAIVideoClient, effective_xai_video_model
 
 logger = logging.getLogger(__name__)
+_XAI_PROVIDER_DURATION_CAP_SECONDS = 10
 
 # Mock dev video must be produced by ffmpeg on disk paths we control.
 # Embedded base64 "minimal MP4" was removed: demux failed (e.g. H.264 "No start code is found") and
@@ -102,6 +103,29 @@ class XAIVideoProvider:
     ) -> str:
         try:
             model = effective_xai_video_model()
+            dur = int(duration_seconds)
+            dur_pass = dur <= _XAI_PROVIDER_DURATION_CAP_SECONDS
+            logger.info(
+                "[XAI_SEGMENT_DURATION_CHECK] project_id=%s segment_id=%s requested_duration_seconds=%s provider_cap_seconds=%s pass=%s",
+                project_id,
+                segment_id,
+                dur,
+                _XAI_PROVIDER_DURATION_CAP_SECONDS,
+                dur_pass,
+            )
+            if not dur_pass:
+                err = (
+                    f"segment duration {dur}s exceeds provider cap {_XAI_PROVIDER_DURATION_CAP_SECONDS}s"
+                )
+                logger.error(
+                    "[XAI_SEGMENT_DURATION_REJECT] project_id=%s segment_id=%s requested_duration_seconds=%s provider_cap_seconds=%s err=%s",
+                    project_id,
+                    segment_id,
+                    dur,
+                    _XAI_PROVIDER_DURATION_CAP_SECONDS,
+                    err,
+                )
+                raise ShortDramaVideoProviderError(err)
             logger.info(
                 "[XAI_REFERENCE_IMAGE_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,
@@ -118,9 +142,23 @@ class XAIVideoProvider:
                 project_id=project_id,
                 segment_id=segment_id,
             )
-        except ShortDramaVideoProviderError:
+        except ShortDramaVideoProviderError as e:
+            logger.error(
+                "[XAI_GENERATION_START_FAIL] project_id=%s segment_id=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                type(e).__name__,
+                str(e),
+            )
             raise
         except Exception as e:
+            logger.error(
+                "[XAI_GENERATION_START_FAIL] project_id=%s segment_id=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                type(e).__name__,
+                str(e),
+            )
             raise ShortDramaVideoProviderError(f"XAI video generation failed: {e}") from e
 
     def complete_segment_video(
@@ -140,12 +178,22 @@ class XAIVideoProvider:
                 project_id=project_id,
                 segment_id=segment_id,
             )
+            logger.info(
+                "[XAI_PROVIDER_RAW_RESPONSE] project_id=%s segment_id=%s request_id=%s phase=%s status_code=%s payload_keys=%s payload_preview=%s",
+                project_id,
+                segment_id,
+                request_id,
+                "pre_download_metadata",
+                "",
+                list(final.keys())[:20] if isinstance(final, dict) else [],
+                (str(final)[:1000] + "…") if len(str(final)) > 1000 else str(final),
+            )
             video = final.get("video") or {}
             vurl = video.get("url") if isinstance(video, dict) else None
             if not vurl:
                 raise ShortDramaVideoProviderError(f"xAI video result missing video.url: {final!r}")
             data = self._client.download_video_bytes(
-                video_url=vurl, project_id=project_id, segment_id=segment_id
+                video_url=vurl, project_id=project_id, segment_id=segment_id, request_id=request_id
             )
             meta = {
                 "provider": "xai",

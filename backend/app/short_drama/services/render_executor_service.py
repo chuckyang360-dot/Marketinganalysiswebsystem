@@ -80,6 +80,19 @@ class RenderExecutorService:
     ) -> SegmentVideoAttemptResult:
         segment_id = rec.segment_id
         job: RenderJob | None = None
+        trace: dict[str, Any] = {
+            "reference_prepare_ok": False,
+            "reference_check_ok": False,
+            "duration_check_ok": False,
+            "generation_start_ok": False,
+            "poll_completed": False,
+            "download_ok": False,
+            "save_ok": False,
+            "writeback_ok": False,
+            "final_video_url": "",
+            "request_id": "",
+            "final_error": "",
+        }
         try:
             seg = SegmentScriptSchema.model_validate(rec.script_json)
             plan = build_segment_video_plan(
@@ -88,6 +101,12 @@ class RenderExecutorService:
                 scenes=scenes,
                 products=products,
                 project_aspect_ratio=project_ar,
+            )
+            logger.info(
+                "[SEGMENT_REFERENCE_SOURCE_URLS] project_id=%s segment_id=%s urls=%s",
+                project_id,
+                segment_id,
+                plan.selected_reference_image_urls,
             )
             abs_refs = [absolutize_media_url_for_provider(u) for u in plan.selected_reference_image_urls]
             ref_for_api: list[str] = []
@@ -98,7 +117,18 @@ class RenderExecutorService:
                     segment_id,
                     src_abs,
                 )
-                pub_rel = build_xai_ready_reference_image(project_id, src_abs)
+                try:
+                    pub_rel = build_xai_ready_reference_image(project_id, src_abs)
+                except Exception as e:
+                    logger.error(
+                        "[XAI_REFERENCE_IMAGE_PREPARE_FAIL] project_id=%s segment_id=%s source_url=%s exception_class=%s err=%s",
+                        project_id,
+                        segment_id,
+                        src_abs,
+                        type(e).__name__,
+                        str(e),
+                    )
+                    raise
                 final_u = absolutize_media_url_for_provider(pub_rel)
                 ref_for_api.append(final_u)
                 xai_local = local_path_from_xai_ready_public_url(pub_rel)
@@ -115,6 +145,7 @@ class RenderExecutorService:
                     xai_ok,
                     xai_sz,
                 )
+            trace["reference_prepare_ok"] = True
             logger.info(
                 "[XAI_REFERENCE_IMAGE_FINAL_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,
@@ -149,6 +180,10 @@ class RenderExecutorService:
                 project_id=project_id,
                 segment_id=segment_id,
             )
+            trace["reference_check_ok"] = True
+            trace["duration_check_ok"] = True
+            trace["generation_start_ok"] = True
+            trace["request_id"] = rid
             job.provider_request_id = rid
             job.status = RenderJobStatus.RUNNING.value
             db.commit()
@@ -159,11 +194,15 @@ class RenderExecutorService:
                 segment_id=segment_id,
                 duration_seconds=plan.duration_seconds,
             )
+            trace["poll_completed"] = True
+            trace["download_ok"] = True
             url = save_segment_video_bytes(
                 project_id=project_id,
                 segment_id=segment_id,
                 data=result.video_bytes,
             )
+            trace["save_ok"] = True
+            trace["final_video_url"] = url
             disk_path = local_path_from_public_video_url(url)
             try:
                 validate_segment_mp4_path(disk_path, segment_id=segment_id)
@@ -198,10 +237,22 @@ class RenderExecutorService:
                 str(disk_path.resolve()),
                 disk_path.is_file(),
             )
-            rec.script_json = base
-            db.add(job)
-            db.add(rec)
-            db.commit()
+            try:
+                rec.script_json = base
+                db.add(job)
+                db.add(rec)
+                db.commit()
+                trace["writeback_ok"] = True
+            except Exception as e:
+                logger.error(
+                    "[SEGMENT_VIDEO_WRITEBACK_FAIL] project_id=%s segment_id=%s video_url=%s exception_class=%s err=%s",
+                    project_id,
+                    segment_id,
+                    url,
+                    type(e).__name__,
+                    str(e),
+                )
+                raise
             return SegmentVideoAttemptResult(
                 segment_id=segment_id,
                 ok=True,
@@ -210,6 +261,7 @@ class RenderExecutorService:
             )
         except Exception as e:
             err_msg = str(e)
+            trace["final_error"] = err_msg
             jid = getattr(job, "id", None) if job is not None else None
             try:
                 db.rollback()
@@ -246,6 +298,25 @@ class RenderExecutorService:
                 ok=False,
                 render_job_id=jid,
                 error_message=err_msg,
+            )
+        finally:
+            logger.info(
+                "[SEGMENT_VIDEO_TRACE_SUMMARY] project_id=%s segment_id=%s reference_prepare_ok=%s "
+                "reference_check_ok=%s duration_check_ok=%s generation_start_ok=%s poll_completed=%s "
+                "download_ok=%s save_ok=%s writeback_ok=%s final_video_url=%s request_id=%s final_error=%s",
+                project_id,
+                segment_id,
+                trace["reference_prepare_ok"],
+                trace["reference_check_ok"],
+                trace["duration_check_ok"],
+                trace["generation_start_ok"],
+                trace["poll_completed"],
+                trace["download_ok"],
+                trace["save_ok"],
+                trace["writeback_ok"],
+                trace["final_video_url"],
+                trace["request_id"],
+                trace["final_error"],
             )
 
     def _thread_process_segment(

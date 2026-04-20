@@ -38,6 +38,14 @@ def save_segment_video_bytes(*, project_id: int, segment_id: str, data: bytes) -
     try:
         path.write_bytes(data)
     except OSError as e:
+        logger.error(
+            "[SEGMENT_VIDEO_SAVE_FAIL] project_id=%s segment_id=%s absolute_file_path=%s exception_class=%s err=%s",
+            project_id,
+            segment_id,
+            str(path.resolve()),
+            type(e).__name__,
+            str(e),
+        )
         logger.exception("SHORT_DRAMA_VIDEO_SAVE_FAIL project_id=%s path=%s", project_id, path)
         raise ShortDramaVideoSaveError(f"Failed to save segment video: {e}") from e
     public = public_video_url_path(project_id, fname)

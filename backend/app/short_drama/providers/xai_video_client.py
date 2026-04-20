@@ -63,6 +63,16 @@ def _log_xai_ssl_if_applicable(exc: BaseException, *, attempt: int) -> None:
         logger.error("[XAI_SSL_ERROR] attempt=%s exc=%s ssl_cause=%s", attempt, exc, c)
 
 
+def _payload_preview(payload: Any, *, limit: int = 1000) -> str:
+    try:
+        text = str(payload)
+    except Exception:
+        text = "<unprintable>"
+    if len(text) > limit:
+        return text[:limit] + "…"
+    return text
+
+
 def validate_reference_image_urls_for_xai(
     *,
     urls: list[str],
@@ -92,6 +102,14 @@ def validate_reference_image_urls_for_xai(
                         break
         except Exception as e:
             logger.error(
+                "[XAI_REFERENCE_IMAGE_CHECK_FAIL] project_id=%s segment_id=%s url=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                u,
+                type(e).__name__,
+                str(e),
+            )
+            logger.error(
                 "[XAI_REFERENCE_IMAGE_INVALID] project_id=%s segment_id=%s url=%s reason=request_error_%s",
                 project_id,
                 segment_id,
@@ -112,6 +130,14 @@ def validate_reference_image_urls_for_xai(
         )
         if status != 200:
             logger.error(
+                "[XAI_REFERENCE_IMAGE_CHECK_FAIL] project_id=%s segment_id=%s url=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                u,
+                "HttpStatusInvalid",
+                f"status_code={status}",
+            )
+            logger.error(
                 "[XAI_REFERENCE_IMAGE_INVALID] project_id=%s segment_id=%s url=%s reason=status_%s",
                 project_id,
                 segment_id,
@@ -122,6 +148,14 @@ def validate_reference_image_urls_for_xai(
                 f"Reference image URL returned HTTP {status} (project_id={project_id}, segment_id={segment_id}): {u}"
             )
         if not ct.startswith("image/"):
+            logger.error(
+                "[XAI_REFERENCE_IMAGE_CHECK_FAIL] project_id=%s segment_id=%s url=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                u,
+                "ContentTypeInvalid",
+                f"content_type={ct or '(empty)'}",
+            )
             logger.error(
                 "[XAI_REFERENCE_IMAGE_INVALID] project_id=%s segment_id=%s url=%s reason=bad_content_type_%s",
                 project_id,
@@ -240,6 +274,16 @@ class XAIVideoClient:
             aspect_ratio=aspect_ratio,
             resolution=resolution or "",
         )
+        logger.info(
+            "[XAI_GENERATION_START_REQUEST] project_id=%s segment_id=%s model=%s duration_seconds=%s aspect_ratio=%s resolution=%s reference_image_count=%s",
+            project_id,
+            segment_id,
+            model,
+            duration,
+            aspect_ratio,
+            resolution or "",
+            len(refs),
+        )
 
         logger.info("[XAI_REQUEST] POST /v1/videos/generations model=%s", model)
 
@@ -330,6 +374,16 @@ class XAIVideoClient:
                 resp.status_code,
                 err_body,
             )
+            logger.info(
+                "[XAI_PROVIDER_RAW_RESPONSE] project_id=%s segment_id=%s request_id=%s phase=%s status_code=%s payload_keys=%s payload_preview=%s",
+                project_id,
+                segment_id,
+                "",
+                "start_generation_http_error",
+                resp.status_code,
+                [],
+                _payload_preview(err_body),
+            )
             err = self._classify_http_error(resp)
             log_ai_error(
                 logger,
@@ -342,9 +396,26 @@ class XAIVideoClient:
                 duration_ms=elapsed_ms,
                 http_status=resp.status_code,
             )
+            logger.error(
+                "[XAI_GENERATION_START_FAIL] project_id=%s segment_id=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                type(err).__name__,
+                str(err),
+            )
             raise err
 
         data = resp.json()
+        logger.info(
+            "[XAI_PROVIDER_RAW_RESPONSE] project_id=%s segment_id=%s request_id=%s phase=%s status_code=%s payload_keys=%s payload_preview=%s",
+            project_id,
+            segment_id,
+            str(data.get("request_id") or ""),
+            "start_generation",
+            resp.status_code,
+            list(data.keys())[:20] if isinstance(data, dict) else [],
+            _payload_preview(data),
+        )
         rid = data.get("request_id")
         if not rid:
             log_ai_error(
@@ -357,6 +428,12 @@ class XAIVideoClient:
                 response_keys=list(data.keys())[:12] if isinstance(data, dict) else [],
             )
             raise ShortDramaVideoProviderError(f"xAI video start missing request_id: {data!r}")
+        logger.info(
+            "[XAI_GENERATION_START_SUCCESS] project_id=%s segment_id=%s request_id=%s",
+            project_id,
+            segment_id,
+            str(rid),
+        )
         logger.info("[XAI_RESPONSE] request_id=%s", rid)
         log_ai_response(
             logger,
@@ -393,16 +470,46 @@ class XAIVideoClient:
                 if resp.status_code >= 400:
                     raise self._classify_http_error(resp)
                 data = resp.json()
+                logger.info(
+                    "[XAI_PROVIDER_RAW_RESPONSE] project_id=%s segment_id=%s request_id=%s phase=%s status_code=%s payload_keys=%s payload_preview=%s",
+                    project_id,
+                    segment_id,
+                    request_id,
+                    "poll_generation",
+                    resp.status_code,
+                    list(data.keys())[:20] if isinstance(data, dict) else [],
+                    _payload_preview(data),
+                )
             except httpx.TimeoutException as e:
                 raise ShortDramaVideoProviderError(f"xAI video poll timeout: {e}") from e
             except httpx.RequestError as e:
                 raise ShortDramaVideoProviderError(f"xAI video poll network error: {e}") from e
 
             status = (data.get("status") or "").lower()
+            progress = data.get("progress")
+            video_obj = data.get("video") if isinstance(data.get("video"), dict) else {}
+            has_video_url = bool(video_obj.get("url")) if isinstance(video_obj, dict) else False
+            logger.info(
+                "[XAI_GENERATION_POLL_STATUS] project_id=%s segment_id=%s request_id=%s status=%s progress=%s has_video_url=%s",
+                project_id,
+                segment_id,
+                request_id,
+                status,
+                progress,
+                has_video_url,
+            )
             if status == "done":
                 elapsed_ms = int((time.perf_counter() - t0) * 1000)
                 video = data.get("video") if isinstance(data.get("video"), dict) else {}
                 vurl = video.get("url") if isinstance(video, dict) else None
+                logger.info(
+                    "[XAI_GENERATION_POLL_COMPLETED] project_id=%s segment_id=%s request_id=%s video_url=%s duration=%s",
+                    project_id,
+                    segment_id,
+                    request_id,
+                    str(vurl) if vurl else "",
+                    data.get("duration"),
+                )
                 log_ai_response(
                     logger,
                     "xai_video",
@@ -418,6 +525,14 @@ class XAIVideoClient:
                 )
                 return data
             if status in ("failed", "error"):
+                logger.error(
+                    "[XAI_GENERATION_POLL_FAILED] project_id=%s segment_id=%s request_id=%s status=%s err_payload=%s",
+                    project_id,
+                    segment_id,
+                    request_id,
+                    status,
+                    data,
+                )
                 log_ai_error(
                     logger,
                     "xai_video",
@@ -430,6 +545,14 @@ class XAIVideoClient:
                 )
                 raise ShortDramaVideoProviderError(f"xAI video generation failed: {data!r}")
             if status == "expired":
+                logger.error(
+                    "[XAI_GENERATION_POLL_FAILED] project_id=%s segment_id=%s request_id=%s status=%s err_payload=%s",
+                    project_id,
+                    segment_id,
+                    request_id,
+                    status,
+                    data,
+                )
                 log_ai_error(
                     logger,
                     "xai_video",
@@ -443,6 +566,14 @@ class XAIVideoClient:
             time.sleep(interval_s)
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        logger.error(
+            "[XAI_GENERATION_POLL_FAILED] project_id=%s segment_id=%s request_id=%s status=%s err_payload=%s",
+            project_id,
+            segment_id,
+            request_id,
+            "timeout",
+            {"poll_count": poll_count, "duration_ms": elapsed_ms},
+        )
         log_ai_error(
             logger,
             "xai_video",
@@ -458,8 +589,22 @@ class XAIVideoClient:
             f"xAI video poll exceeded {settings.XAI_VIDEO_POLL_TIMEOUT_SECONDS}s (request_id={request_id})"
         )
 
-    def download_video_bytes(self, *, video_url: str, project_id: int, segment_id: str) -> bytes:
+    def download_video_bytes(
+        self,
+        *,
+        video_url: str,
+        project_id: int,
+        segment_id: str,
+        request_id: str | None = None,
+    ) -> bytes:
         try:
+            logger.info(
+                "[XAI_VIDEO_DOWNLOAD_START] project_id=%s segment_id=%s request_id=%s video_url=%s",
+                project_id,
+                segment_id,
+                request_id or "",
+                video_url,
+            )
             _log_xai_http_client_config(phase="download_video_bytes", timeout=self._video_timeout)
             with self._make_xai_video_http_client() as client:
                 resp = client.get(video_url)
@@ -469,8 +614,27 @@ class XAIVideoClient:
                 )
             video_bytes = resp.content
             logger.info("[XAI_DOWNLOAD] video_bytes=%s", len(video_bytes))
+            logger.info(
+                "[XAI_VIDEO_DOWNLOAD_SUCCESS] project_id=%s segment_id=%s request_id=%s video_url=%s bytes_size=%s",
+                project_id,
+                segment_id,
+                request_id or "",
+                video_url,
+                len(video_bytes),
+            )
             return video_bytes
-        except httpx.TimeoutException as e:
-            raise ShortDramaVideoProviderError(f"Video download timeout: {e}") from e
-        except httpx.RequestError as e:
+        except (httpx.TimeoutException, httpx.RequestError, ShortDramaVideoProviderError) as e:
+            logger.error(
+                "[XAI_VIDEO_DOWNLOAD_FAIL] project_id=%s segment_id=%s request_id=%s video_url=%s exception_class=%s err=%s",
+                project_id,
+                segment_id,
+                request_id or "",
+                video_url,
+                type(e).__name__,
+                str(e),
+            )
+            if isinstance(e, ShortDramaVideoProviderError):
+                raise
+            if isinstance(e, httpx.TimeoutException):
+                raise ShortDramaVideoProviderError(f"Video download timeout: {e}") from e
             raise ShortDramaVideoProviderError(f"Video download network error: {e}") from e

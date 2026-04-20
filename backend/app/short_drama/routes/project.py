@@ -178,6 +178,16 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
             )
 
         final_u = _public_media_url(latest_final_video_url(db, project_id))
+        segment_video_map = {
+            str(item.get("segment_id")): str(item.get("video_url") or "")
+            for item in seg_payload
+        }
+        logger.info(
+            "[PIPELINE_SEGMENT_VIDEO_URLS] project_id=%s segment_video_urls=%s final_video_url=%s",
+            project_id,
+            segment_video_map,
+            final_u or "",
+        )
 
         def _nonempty_url(u: str | None) -> bool:
             return bool((u or "").strip())
