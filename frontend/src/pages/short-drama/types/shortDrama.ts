@@ -135,7 +135,7 @@ export type AssetsPageCharacterVm = {
   desc: string;
   tags: string[];
   voice: string;
-  img: string;
+  img: string | null;
   hasRealImage: boolean;
   visualPrompt: string;
 };
@@ -145,7 +145,7 @@ export type AssetsPageSceneVm = {
   name: string;
   type: string;
   desc: string;
-  img: string;
+  img: string | null;
   hasRealImage: boolean;
   visualPrompt: string;
 };
@@ -156,7 +156,7 @@ export type AssetsPageProductVm = {
   placement: string;
   cameraHint: string;
   desc: string;
-  img: string;
+  img: string | null;
   hasRealImage: boolean;
 };
 

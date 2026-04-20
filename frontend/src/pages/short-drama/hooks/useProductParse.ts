@@ -8,6 +8,7 @@ export function useProductParse() {
   const parse = useCallback(async (projectId: number, draft: ProductInputDraft): Promise<ProductPreviewSummary> => {
     const input = mapDraftToProductInputPayload(draft);
     const res = await parseShortDramaProduct(projectId, input);
+    console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: projectId, step: 'step_1', action: 'save_parse_product' });
     return productContextToPreview(res.product_context);
   }, []);
 

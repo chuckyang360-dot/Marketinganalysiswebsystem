@@ -12,6 +12,7 @@ from ..schemas.segment import GenerateSegmentsRequest, GenerateSegmentsResponse,
 from ..schemas.story import StoryBlueprintSchema
 from ..services.read_models import latest_story_blueprint, list_asset_rows, next_segment_batch_version
 from ..services.segment_director_service import segment_director_service
+from ..services.project_state_service import STEP_4, mark_step_completed, update_last_active_step
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -119,6 +120,8 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             db.flush()
             record_ids.append(row.id)
 
+        mark_step_completed(project, STEP_4)
+        update_last_active_step(project, STEP_4)
         orchestrator.advance_on_success(db, project, WorkflowStep.GENERATE_SEGMENTS)
         db.commit()
 

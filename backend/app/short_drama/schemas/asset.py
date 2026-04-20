@@ -61,3 +61,37 @@ class AssetImageBatchResponse(BaseModel):
     products_attempted: int = 0
     products_succeeded: int = 0
     errors: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class UpdateAssetRequest(BaseModel):
+    project_id: int
+    name: Optional[str] = None
+    role_type: Optional[str] = None
+    scene_type: Optional[str] = None
+    description: Optional[str] = None
+    visual_prompt: Optional[str] = None
+    voice_style: Optional[str] = None
+    reference_image_data_url: Optional[str] = None
+    reference_image_name: Optional[str] = None
+    product_usage: Optional[str] = None
+
+
+class UpdateAssetResponse(BaseModel):
+    project_id: int
+    asset_type: str
+    asset_id: int
+    stale_marked_step_4: bool = True
+
+
+class RegenerateOneAssetImageRequest(BaseModel):
+    project_id: int
+    asset_type: str
+    asset_id: int
+
+
+class RegenerateOneAssetImageResponse(BaseModel):
+    project_id: int
+    asset_type: str
+    asset_id: int
+    image_url: Optional[str] = None
+    stale_marked_step_4: bool = True

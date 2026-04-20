@@ -27,7 +27,7 @@ export const SHORT_DRAMA_UI = {
 
   generating: {
     assetSpecs: '正在生成资产规范…',
-    assetImages: '正在生成角色/场景/产品参考图（Gemini）…',
+    assetImages: '正在生成角色/场景/产品参考图...',
     story: '正在生成剧本…',
     segmentVideos: '正在生成片段视频…',
     merge: '正在合成完整视频…',

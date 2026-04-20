@@ -9,7 +9,13 @@ from ..http_errors import raise_short_drama_http
 from ..models import StoryBlueprintRecord
 from ..schemas.product import ProductContextSchema
 from ..schemas.story import GenerateStoryRequest, GenerateStoryResponse, StoryBlueprintSchema
-from ..services.read_models import latest_product_context, next_story_version
+from ..services.read_models import latest_product_context, latest_story_blueprint, next_story_version
+from ..services.project_state_service import (
+    STEP_2,
+    mark_step_completed,
+    propagate_downstream_stale,
+    update_last_active_step,
+)
 from ..services.story_planner_service import story_planner_service
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import WorkflowStep
@@ -26,6 +32,7 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(project, WorkflowStep.GENERATE_STORY)
+        had_existing_story = latest_story_blueprint(db, body.project_id) is not None
 
         pc_row = latest_product_context(db, body.project_id)
         if not pc_row:
@@ -63,6 +70,10 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
             approved=False,
         )
         db.add(record)
+        mark_step_completed(project, STEP_2)
+        if had_existing_story:
+            propagate_downstream_stale(project, STEP_2)
+        update_last_active_step(project, STEP_2)
         orchestrator.advance_on_success(db, project, WorkflowStep.GENERATE_STORY)
         db.commit()
         db.refresh(record)

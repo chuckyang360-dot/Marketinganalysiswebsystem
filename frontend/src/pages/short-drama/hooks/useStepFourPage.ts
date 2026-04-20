@@ -8,6 +8,7 @@ import {
   getShortDramaPipeline,
   mergeShortDramaProjectVideo,
   ShortDramaApiError,
+  touchShortDramaProjectStep,
 } from '../services/shortDramaApi';
 import type { Step4SegmentItem, Step4VideoStatus, Step4VideoStatusMap } from '../types/shortDrama';
 import type { PipelineSummaryDto, RenderJobStatusResponseDto } from '../types/shortDramaApi';
@@ -60,6 +61,7 @@ export function useStepFourPage() {
   const [activeSegment, setActiveSegment] = useState(1);
   /** 右侧预览：当前片段视频 vs 最终成片 */
   const [previewTarget, setPreviewTarget] = useState<'segment' | 'final'>('segment');
+  const [isDirty] = useState(false);
 
   const refreshPipeline = useCallback(async () => {
     if (projectId == null) return null;
@@ -266,6 +268,18 @@ export function useStepFourPage() {
   }, [projectId]);
 
   useEffect(() => {
+    if (!pipeline || projectId == null) return;
+    console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: projectId, page: 'step_4' });
+    if (pipeline.project?.step_status?.step_4 === 'stale') {
+      console.info('[FRONT_STEP_STALE_BANNER_SHOWN]', { project_id: projectId, step: 'step_4' });
+    }
+  }, [pipeline, projectId]);
+
+  useEffect(() => {
+    console.info('[FRONT_DIRTY_STATE_CHANGED]', { project_id: projectId ?? null, step: 'step_4', dirty: isDirty });
+  }, [isDirty, projectId]);
+
+  useEffect(() => {
     return () => {
       Object.values(segmentJobPollersRef.current).forEach((id) => {
         window.clearInterval(id);
@@ -384,6 +398,7 @@ export function useStepFourPage() {
     try {
       await generateShortDramaSegmentVideos(projectId);
       await refreshPipeline();
+      console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: projectId, step: 'step_4', action: 'generate_all_videos' });
     } catch (e) {
       const msg = e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.error.videoBatch;
       setGenerateError(msg);
@@ -421,6 +436,7 @@ export function useStepFourPage() {
         console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segId, status: queuedStatus });
         startSegmentJobPolling(segId, res.render_job_id);
         await refreshPipeline();
+        console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: projectId, step: 'step_4', action: 'generate_single_video' });
       } catch (e) {
         const msg = e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.error.videoSingle;
         setGenerateError(msg);
@@ -469,6 +485,7 @@ export function useStepFourPage() {
       try {
         const res = await mergeShortDramaProjectVideo(projectId);
         await refreshPipeline();
+        console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: projectId, step: 'step_4', action: 'merge_final' });
         const urlResolved = resolvePublicMediaUrl(res.final_video_url);
         if (!urlResolved) {
           setMergeError(SHORT_DRAMA_UI.error.mergeNoFinalUrl);
@@ -532,6 +549,23 @@ export function useStepFourPage() {
     navigate('/short-drama/create');
   }, [navigate]);
 
+  const saveDraft = useCallback(
+    async (intent: 'save_draft' | 'before_exit'): Promise<boolean> => {
+      if (projectId == null) return false;
+      try {
+        await touchShortDramaProjectStep(projectId, {
+          step: 'step_4',
+          save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft',
+        });
+        return true;
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : '保存失败，请稍后重试');
+        return false;
+      }
+    },
+    [projectId],
+  );
+
   return {
     projectId,
     navProjectName,
@@ -571,5 +605,7 @@ export function useStepFourPage() {
     isMockTestPatternVideo,
     handleAddSegment,
     goCreate,
+    isDirty,
+    saveDraft,
   };
 }

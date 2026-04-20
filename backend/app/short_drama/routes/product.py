@@ -9,7 +9,13 @@ from ..http_errors import raise_short_drama_http
 from ..models import ProductContextRecord
 from ..schemas.product import ParseProductRequest, ParseProductResponse, ProductContextSchema
 from ..services.product_parser_service import product_parser_service
-from ..services.read_models import next_product_context_version
+from ..services.project_state_service import (
+    STEP_1,
+    mark_step_completed,
+    propagate_downstream_stale,
+    update_last_active_step,
+)
+from ..services.read_models import latest_product_context, next_product_context_version
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -25,6 +31,7 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(project, WorkflowStep.PARSE_PRODUCT)
+        had_existing_context = latest_product_context(db, body.project_id) is not None
 
         try:
             normalized = product_parser_service.parse(body.project_id, body.input)
@@ -46,6 +53,10 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
             version=version,
         )
         db.add(record)
+        mark_step_completed(project, STEP_1)
+        if had_existing_context:
+            propagate_downstream_stale(project, STEP_1)
+        update_last_active_step(project, STEP_1)
         orchestrator.advance_on_success(db, project, WorkflowStep.PARSE_PRODUCT)
         db.commit()
         db.refresh(record)

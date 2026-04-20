@@ -48,6 +48,8 @@ export function ShortDramaStepFourPage() {
     isMockTestPatternVideo,
     handleAddSegment,
     goCreate,
+    isDirty,
+    saveDraft,
   } = useStepFourPage();
 
   const active = segments.find((s) => s.id === activeSegment) ?? segments[0];
@@ -79,11 +81,12 @@ export function ShortDramaStepFourPage() {
 
   const videoActionsDisabled = !hasBackendSegmentScripts || !canGenerateVideos || batchGenerating;
   const mergeUiDisabled = !mergePrimaryActionsEnabled || batchGenerating;
+  const step4Stale = pipeline?.project?.step_status?.step_4 === 'stale';
 
   if (phase === 'no_project' || projectId == null) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
-        <SDWorkflowNav currentStep={4} projectId={projectId} />
+        <SDWorkflowNav currentStep={4} projectId={projectId} isDirty={isDirty} onSaveDraft={saveDraft} />
         <div className="mt-24 max-w-md text-center space-y-4">
           <h1 className="text-xl font-bold" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
             {SHORT_DRAMA_UI.noProject.title}
@@ -107,7 +110,7 @@ export function ShortDramaStepFourPage() {
   if (phase === 'loading' || phase === 'generating_segments') {
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
-        <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} />
+        <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} isDirty={isDirty} onSaveDraft={saveDraft} />
         <div className="flex flex-1 items-center justify-center pt-14">
           <div className="flex flex-col items-center gap-3">
             <i className="ri-loader-4-line text-2xl animate-spin" style={{ color: '#1D1D1F' }} />
@@ -123,7 +126,7 @@ export function ShortDramaStepFourPage() {
   if (phase === 'error' && loadError) {
     return (
       <div className="min-h-screen flex flex-col" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
-        <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} />
+        <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} isDirty={isDirty} onSaveDraft={saveDraft} />
         <div className="flex flex-1 flex-col items-center justify-center pt-14 px-6 gap-4">
           <p className="text-[14px] text-center max-w-lg" style={{ color: '#DC2626' }}>
             {loadError}
@@ -143,7 +146,15 @@ export function ShortDramaStepFourPage() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} />
+      <SDWorkflowNav currentStep={4} projectName={navProjectName} projectId={projectId} isDirty={isDirty} onSaveDraft={saveDraft} />
+
+      {step4Stale ? (
+        <div className="px-5 pt-16">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+            你已修改剧本或资产，当前分镜/视频基于旧内容生成，请重新生成后生效。
+          </div>
+        </div>
+      ) : null}
 
       {mergeLoading && (
         <div

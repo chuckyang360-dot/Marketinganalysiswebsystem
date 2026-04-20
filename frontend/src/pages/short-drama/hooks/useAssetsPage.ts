@@ -70,8 +70,10 @@ export function useAssetsPage() {
     async (pid: number) => {
       setPhase('generating_images');
       setEmptyHint(null);
+      console.info('[FRONT_STEP3_GENERATION_STARTED]', { project_id: pid, stage: 'asset_images' });
       try {
         await generateShortDramaAssetImages(pid);
+        console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: pid, step: 'step_3', action: 'generate_asset_images' });
       } catch (e) {
         if (e instanceof ShortDramaApiError && e.status === 409) {
           let p = await getShortDramaPipeline(pid);
@@ -80,12 +82,14 @@ export function useAssetsPage() {
           touchProjectNameFromPipeline(pid, p.project?.project_name);
           return;
         }
+        console.warn('[FRONT_STEP3_GENERATION_FAILED]', { project_id: pid, stage: 'asset_images', message: e instanceof Error ? e.message : String(e) });
         throw e;
       }
       let p = await getShortDramaPipeline(pid);
       p = await waitUntilNotAssetRendering(pid, p, setPipeline);
       setPipeline(p);
       touchProjectNameFromPipeline(pid, p.project?.project_name);
+      console.info('[FRONT_STEP3_GENERATION_SUCCEEDED]', { project_id: pid, stage: 'asset_images' });
     },
     [],
   );
@@ -114,9 +118,11 @@ export function useAssetsPage() {
       if (p.project.status === 'assets_rendering') {
         setPhase('generating_images');
         setEmptyHint('检测到资产图任务进行中，正在同步状态…');
+        console.info('[FRONT_STEP3_GENERATION_STARTED]', { project_id: effectivePid, stage: 'asset_images_resume' });
         p = await waitUntilNotAssetRendering(effectivePid, p, setPipeline);
         setPipeline(p);
         touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
+        console.info('[FRONT_STEP3_GENERATION_SUCCEEDED]', { project_id: effectivePid, stage: 'asset_images_resume' });
       }
 
       const comp = getAssetsBundleCompleteness(p.assets);
@@ -165,11 +171,13 @@ export function useAssetsPage() {
       }
 
       setPhase('generating_specs');
+      console.info('[FRONT_STEP3_GENERATION_STARTED]', { project_id: effectivePid, stage: 'asset_specs' });
       console.info(
         `[FE_ASSET_SPECS_TRIGGER] projectId=${effectivePid} status=${p.project.status} trigger=auto`,
       );
       try {
         await generateShortDramaAssetSpecs(effectivePid, { trigger: 'auto' });
+        console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: effectivePid, step: 'step_3', action: 'save_generate_asset_specs_auto' });
       } catch (genErr) {
         if (genErr instanceof ShortDramaApiError && genErr.status === 409) {
           p = await getShortDramaPipeline(effectivePid);
@@ -207,11 +215,15 @@ export function useAssetsPage() {
         setEmptyHint(SHORT_DRAMA_UI.empty.assetsAfterCall);
       }
       setPhase('ready');
+      if (p.project.status !== 'assets_rendering') {
+        console.info('[FRONT_STEP3_GENERATION_SUCCEEDED]', { project_id: effectivePid, stage: 'asset_specs' });
+      }
     } catch (e) {
       const msg =
         e instanceof ShortDramaApiError ? e.message : e instanceof Error ? e.message : SHORT_DRAMA_UI.error.pipelineLoad;
       setPhase('error');
       setError(msg);
+      console.warn('[FRONT_STEP3_GENERATION_FAILED]', { project_id: effectivePid ?? null, message: msg });
     }
   }, [effectiveProjectId, runImageBatch, refreshSession]);
 
@@ -256,6 +268,7 @@ export function useAssetsPage() {
         );
         try {
           await generateShortDramaAssetSpecs(effectivePid, { trigger: 'next_button' });
+          console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: effectivePid, step: 'step_3', action: 'save_generate_asset_specs_next' });
         } catch (e) {
           if (e instanceof ShortDramaApiError && e.status === 409) {
             p = await getShortDramaPipeline(effectivePid);
@@ -318,6 +331,7 @@ export function useAssetsPage() {
       return;
     }
     setPhase('generating_specs');
+    console.info('[FRONT_STEP3_GENERATION_STARTED]', { project_id: effectivePid, stage: 'asset_specs_retry' });
     setError(null);
     setEmptyHint(null);
     try {
@@ -325,6 +339,7 @@ export function useAssetsPage() {
         `[FE_ASSET_SPECS_TRIGGER] projectId=${effectivePid} status=manual_retry trigger=retry_button`,
       );
       await generateShortDramaAssetSpecs(effectivePid, { trigger: 'retry_button' });
+      console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: effectivePid, step: 'step_3', action: 'save_generate_asset_specs_retry' });
       let p = await getShortDramaPipeline(effectivePid);
       setPipeline(p);
       touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
@@ -350,6 +365,7 @@ export function useAssetsPage() {
         e instanceof ShortDramaApiError ? e.message : e instanceof Error ? e.message : SHORT_DRAMA_UI.error.assetSpecs;
       setPhase('error');
       setError(msg);
+      console.warn('[FRONT_STEP3_GENERATION_FAILED]', { project_id: effectivePid, message: msg });
     }
   }, [effectiveProjectId, runImageBatch]);
 

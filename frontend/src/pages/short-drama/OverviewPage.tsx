@@ -112,7 +112,7 @@ export function ShortDramaOverviewPage() {
         style={{ background: '#ffffff', borderBottom: '1px solid #EAEAEA', boxShadow: '0 1px 6px rgba(0,0,0,0.04)' }}
       >
         <div className="flex items-center gap-3">
-          <button type="button" onClick={() => navigate('/short-drama')} className="flex items-center gap-2 cursor-pointer">
+          <button type="button" onClick={() => navigate('/short-drama/projects')} className="flex items-center gap-2 cursor-pointer">
             <div
               className="w-7 h-7 flex items-center justify-center rounded-lg"
               style={{ background: 'linear-gradient(135deg, #1D1D1F, #374151)' }}

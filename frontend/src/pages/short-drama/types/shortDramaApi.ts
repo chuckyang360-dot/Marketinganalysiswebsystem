@@ -10,12 +10,31 @@ export type ShortDramaProjectDto = {
   style?: string | null;
   visual_style?: string | null;
   aspect_ratio?: string | null;
+  last_active_step?: 'step_1' | 'step_2' | 'step_3' | 'step_4' | 'overview' | null;
+  step_status?: Record<string, string>;
+  overall_status?: 'draft' | 'stale' | 'generating' | 'completed' | null;
+  final_video_url?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
 
 export type CreateShortDramaProjectResponseDto = {
   project: ShortDramaProjectDto;
+};
+
+export type ShortDramaProjectListResponseDto = {
+  projects: ShortDramaProjectDto[];
+};
+
+export type ProjectEntryRedirectResponseDto = {
+  project_id: number;
+  redirect_to: string;
+  reason: 'completed_overview' | 'last_active_step' | 'default_step_1';
+};
+
+export type TouchProjectStepBody = {
+  step: 'step_1' | 'step_2' | 'step_3' | 'step_4' | 'overview';
+  save_intent?: 'save_draft' | 'before_exit';
 };
 
 export type ProductInputPayload = {
@@ -226,4 +245,38 @@ export type AssetImageBatchResponseDto = {
   products_attempted: number;
   products_succeeded: number;
   errors: Record<string, unknown>[];
+};
+
+export type UpdateAssetBody = {
+  project_id: number;
+  name?: string;
+  role_type?: string;
+  scene_type?: string;
+  description?: string;
+  visual_prompt?: string;
+  voice_style?: string;
+  reference_image_data_url?: string;
+  reference_image_name?: string;
+  product_usage?: string;
+};
+
+export type UpdateAssetResponseDto = {
+  project_id: number;
+  asset_type: string;
+  asset_id: number;
+  stale_marked_step_4: boolean;
+};
+
+export type RegenerateOneAssetImageBody = {
+  project_id: number;
+  asset_type: 'character' | 'scene' | 'product';
+  asset_id: number;
+};
+
+export type RegenerateOneAssetImageResponseDto = {
+  project_id: number;
+  asset_type: string;
+  asset_id: number;
+  image_url?: string | null;
+  stale_marked_step_4: boolean;
 };

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.sql import func
 
 from ...database import Base
@@ -17,5 +17,7 @@ class ShortDramaProject(Base):
     style = Column(String, nullable=True)
     visual_style = Column(String, nullable=True)
     aspect_ratio = Column(String, nullable=True)
+    last_active_step = Column(String, nullable=True, index=True)
+    step_status = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

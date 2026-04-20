@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { getShortDramaSession } from '../utils/shortDramaStorage';
 import { useShortDramaProject } from './useShortDramaProject';
 
@@ -18,26 +18,38 @@ function parseQueryProjectId(searchParams: URLSearchParams): number | null {
  */
 export function useEffectiveShortDramaProjectId() {
   const [searchParams] = useSearchParams();
+  const params = useParams<{ projectId?: string }>();
   const { projectId: sessionProjectId, projectName, setSession, refresh, clearSession, session } =
     useShortDramaProject();
 
+  const paramProjectId = useMemo(() => {
+    const raw = params.projectId;
+    if (!raw?.trim()) return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    const id = Math.trunc(n);
+    return id > 0 ? id : null;
+  }, [params.projectId]);
+
   const queryProjectId = useMemo(() => parseQueryProjectId(searchParams), [searchParams]);
+  const routedProjectId = paramProjectId ?? queryProjectId;
 
   useEffect(() => {
-    if (queryProjectId == null) return;
+    if (routedProjectId == null) return;
     const existing = getShortDramaSession();
-    if (existing?.projectId === queryProjectId) {
+    if (existing?.projectId === routedProjectId) {
       refresh();
       return;
     }
-    setSession(queryProjectId);
-  }, [queryProjectId, setSession, refresh]);
+    setSession(routedProjectId);
+  }, [routedProjectId, setSession, refresh]);
 
-  const effectiveProjectId = queryProjectId ?? sessionProjectId;
+  const effectiveProjectId = routedProjectId ?? sessionProjectId;
 
   return {
     effectiveProjectId,
     queryProjectId,
+    paramProjectId,
     sessionProjectId,
     projectName,
     setSession,

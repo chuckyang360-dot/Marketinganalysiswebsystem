@@ -1,5 +1,4 @@
 import {
-  ASSETS_PLACEHOLDER_CHAR,
   resolveAssetImageUrl,
 } from './assetsPageAdapters';
 import { resolvePublicMediaUrl } from './shortDramaMedia';
@@ -24,7 +23,7 @@ export function pipelineAssetsToStepFourLibraryVm(
   if (!assets) return { characters: [], scenes: [], products: [] };
 
   const characters = assets.characters.map((c) => {
-    const { src } = resolveAssetImageUrl(c.image_url, ASSETS_PLACEHOLDER_CHAR);
+    const { src } = resolveAssetImageUrl(c.image_url,);
     return { name: c.name, role: c.role_type?.trim() || '角色', img: src };
   });
 

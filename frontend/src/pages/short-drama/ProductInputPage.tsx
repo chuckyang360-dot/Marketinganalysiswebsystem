@@ -6,6 +6,7 @@ import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
 import { useProductParse } from './hooks/useProductParse';
 import { getShortDramaPipeline, getShortDramaProject } from './services/shortDramaApi';
+import { touchShortDramaProjectStep } from './services/shortDramaApi';
 import type { ProductInputDraft, ProductPreviewSummary } from './types/shortDrama';
 import {
   normalizedJsonToProductPreview,
@@ -46,6 +47,7 @@ export function ShortDramaProductInputPage() {
   const [isParsing, setIsParsing] = useState(false);
   const [navTitle, setNavTitle] = useState<string | null>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
     refreshSession();
@@ -79,10 +81,14 @@ export function ShortDramaProductInputPage() {
         const pipe = await getShortDramaPipeline(projectId);
         if (cancelled) return;
         touchProjectNameFromPipeline(projectId, pipe.project?.project_name);
+        console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: projectId, page: 'step_1' });
         const pc = pipe.product_context;
         if (pc?.raw_inputs != null) {
           const fromRaw = pipelineRawInputsToDraft(pc.raw_inputs);
-          if (fromRaw) setDraft(fromRaw);
+          if (fromRaw) {
+            setDraft(fromRaw);
+            setIsDirty(false);
+          }
         }
         if (pc?.normalized != null) {
           const fromNorm = normalizedJsonToProductPreview(pc.normalized);
@@ -111,6 +117,24 @@ export function ShortDramaProductInputPage() {
     const next = await parseSafe(projectId, draft);
     setIsParsing(false);
     setPreview(next);
+    if (next.status === 'ready') setIsDirty(false);
+  };
+
+  useEffect(() => {
+    console.info('[FRONT_DIRTY_STATE_CHANGED]', { project_id: projectId ?? null, step: 'step_1', dirty: isDirty });
+  }, [isDirty, projectId]);
+
+  const saveDraft = async (intent: 'save_draft' | 'before_exit'): Promise<boolean> => {
+    if (projectId == null) return false;
+    const next = await parseSafe(projectId, draft);
+    if (next.status !== 'ready') {
+      window.alert(next.errorMessage || '保存失败，请先修正输入后重试');
+      return false;
+    }
+    setPreview(next);
+    await touchShortDramaProjectStep(projectId, { step: 'step_1', save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft' });
+    setIsDirty(false);
+    return true;
   };
 
   const missingProject = projectId == null;
@@ -118,7 +142,7 @@ export function ShortDramaProductInputPage() {
 
   return (
     <div className="min-h-screen bg-[#F7F8FA]" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav currentStep={1} projectName={displayName} projectId={projectId} />
+      <SDWorkflowNav currentStep={1} projectName={displayName} projectId={projectId} isDirty={isDirty} onSaveDraft={saveDraft} />
       <div className="pt-14">
         <div className="mx-auto max-w-3xl px-6 py-10">
           <header className="mb-8">
@@ -153,7 +177,13 @@ export function ShortDramaProductInputPage() {
             </p>
           )}
 
-          <ProductInputForm draft={draft} setDraft={setDraft} />
+          <ProductInputForm
+            draft={draft}
+            setDraft={(updater) => {
+              setDraft(updater);
+              setIsDirty(true);
+            }}
+          />
 
           <div className="mt-10 flex justify-center">
             <button

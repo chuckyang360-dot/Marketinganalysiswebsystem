@@ -10,7 +10,13 @@ from ...database import get_db
 from ..exceptions import ShortDramaImageProviderError, ShortDramaImageSaveError
 from ..http_errors import raise_short_drama_http
 from ..models import CharacterAsset, ProductAsset, SceneAsset, ShortDramaProject
-from ..schemas.asset import AssetImageBatchResponse, GenerateAssetImagesRequest
+from ..schemas.asset import (
+    AssetImageBatchResponse,
+    GenerateAssetImagesRequest,
+    RegenerateOneAssetImageRequest,
+    RegenerateOneAssetImageResponse,
+)
+from ..services.project_state_service import STEP_3, mark_step_completed, propagate_downstream_stale, update_last_active_step
 from ..services.asset_image_service import asset_image_service
 from ..services.workflow_orchestrator import ASSET_IMAGE_RENDER_ALLOWED_STATUSES
 
@@ -170,3 +176,36 @@ async def generate_product_images_only(
         return _to_response(result)
     except (ShortDramaImageProviderError, ShortDramaImageSaveError) as e:
         raise_short_drama_http(e)
+
+
+@router.post("/regenerate-one", response_model=RegenerateOneAssetImageResponse)
+async def regenerate_one_asset_image(
+    body: RegenerateOneAssetImageRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        image_url = asset_image_service.regenerate_one_asset_image(
+            db,
+            project_id=body.project_id,
+            asset_type=body.asset_type,
+            asset_id=body.asset_id,
+        )
+        project = db.query(ShortDramaProject).filter(ShortDramaProject.id == body.project_id).first()
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        mark_step_completed(project, STEP_3)
+        propagate_downstream_stale(project, STEP_3)
+        update_last_active_step(project, STEP_3)
+        db.add(project)
+        db.commit()
+        return RegenerateOneAssetImageResponse(
+            project_id=body.project_id,
+            asset_type=body.asset_type,
+            asset_id=body.asset_id,
+            image_url=image_url,
+            stale_marked_step_4=True,
+        )
+    except (ShortDramaImageProviderError, ShortDramaImageSaveError) as e:
+        raise_short_drama_http(e)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

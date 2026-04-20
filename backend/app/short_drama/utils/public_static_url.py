@@ -16,6 +16,10 @@ def effective_short_drama_public_base() -> Tuple[str, str]:
     a = (getattr(settings, "SHORT_DRAMA_PUBLIC_BASE_URL", None) or "").strip().rstrip("/")
     if a:
         return a, "short_drama_public_base_url"
+    # Dev-safe default: when DEBUG=true and未显式配置 short drama 公网域名，
+    # 始终使用本地后端地址，避免误走 PUBLIC_BASE_URL(线上 Railway 域名)。
+    if bool(getattr(settings, "DEBUG", False)):
+        return "http://127.0.0.1:8000", "debug_local_default"
     b = (getattr(settings, "PUBLIC_BASE_URL", None) or "").strip().rstrip("/")
     if b:
         return b, "public_base_url"

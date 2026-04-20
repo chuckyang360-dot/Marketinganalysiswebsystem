@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ri, sdColors, sdFontHeading } from '../utils/shortDramaHelpers';
 
 type HeaderMode = 'landing' | 'workflow';
@@ -12,7 +12,10 @@ type ShortDramaLayoutProps = {
 
 export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDramaLayoutProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
+  const isProjectsPage = location.pathname.startsWith('/short-drama/projects');
+  const landingAnchorBase = location.pathname === '/short-drama' ? '' : '/short-drama';
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 50);
@@ -67,7 +70,7 @@ export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDra
             ].map(([label, hash]) => (
               <a
                 key={hash}
-                href={hash}
+                href={`${landingAnchorBase}${hash}`}
                 className="whitespace-nowrap text-[13px] font-medium text-[#8E8E93] transition-colors hover:text-[#1D1D1F]"
               >
                 {label}
@@ -85,6 +88,21 @@ export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDra
           >
             返回官网
           </Link>
+          {headerMode === 'landing' ? (
+            <Link
+              to="/short-drama/projects"
+              onClick={() => console.info('[FRONT_PROJECT_MANAGEMENT_NAV_CLICK]', { location: 'short_drama_header' })}
+              className="whitespace-nowrap rounded-md px-2 py-1 text-[13px] transition-colors"
+              style={{
+                color: isProjectsPage ? '#1D1D1F' : '#8E8E93',
+                background: isProjectsPage ? '#F5F5F7' : 'transparent',
+                fontWeight: isProjectsPage ? 600 : 400,
+                pointerEvents: isProjectsPage ? 'none' : 'auto',
+              }}
+            >
+              项目管理
+            </Link>
+          ) : null}
           {headerMode === 'landing' ? (
             <Link
               to="/short-drama/create"

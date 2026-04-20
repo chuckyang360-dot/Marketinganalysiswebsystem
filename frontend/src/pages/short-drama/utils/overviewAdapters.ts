@@ -1,5 +1,5 @@
 import type { PipelineSummaryDto, SegmentScriptPipelineRowDto, StoryBlueprintDto } from '../types/shortDramaApi';
-import { resolveAssetImageUrl, ASSETS_PLACEHOLDER_CHAR } from './assetsPageAdapters';
+import { resolveAssetImageUrl, } from './assetsPageAdapters';
 import { NEUTRAL_VERTICAL_POSTER, resolvePublicMediaUrl } from './shortDramaMedia';
 import { segmentScriptDtoToStepSegmentViewModel } from './stepFourAdapters';
 
@@ -76,7 +76,7 @@ export function assetsToOverviewStrip(
   }
 
   const characters: OverviewCharacterRowVm[] = assets.characters.map((c) => {
-    const { src } = resolveAssetImageUrl(c.image_url, ASSETS_PLACEHOLDER_CHAR);
+    const { src } = resolveAssetImageUrl(c.image_url,);
     return { name: c.name, role: c.role_type || '角色', img: src };
   });
 

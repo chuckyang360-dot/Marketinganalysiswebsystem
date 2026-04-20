@@ -109,6 +109,16 @@ export default function ShortDramaLandingPage() {
           >
             创建短剧项目
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              console.info('[FRONT_PROJECT_MANAGEMENT_NAV_CLICK]', { location: 'landing_cta' });
+              navigate('/short-drama/projects');
+            }}
+            className="mt-3 rounded-xl border border-[#EAEAEA] bg-white px-8 py-3 text-[14px] font-semibold text-[#444444]"
+          >
+            打开项目管理
+          </button>
         </div>
       </section>
 

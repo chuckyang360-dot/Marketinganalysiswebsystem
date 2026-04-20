@@ -14,31 +14,28 @@ import type {
 } from '../types/shortDramaApi';
 import { SHORT_DRAMA_UI } from './shortDramaUiCopy';
 
-/** 与历史 Framer 占位一致：无 image_url 时使用，非伪造后端图 */
-export const ASSETS_PLACEHOLDER_CHAR =
-  'https://readdy.ai/api/search-image?query=young%20chinese%20professional%20woman%20confident%20elegant%20modern%20outfit%20neutral%20expression%20studio%20portrait%20clean%20white%20background%20cinematic%20lighting%20lifestyle%20advertisement%20commercial%20photography%20realistic&width=200&height=260&seq=char01&orientation=portrait';
-
-export const ASSETS_PLACEHOLDER_SCENE =
-  'https://readdy.ai/api/search-image?query=abstract%20minimal%20studio%20backdrop%20soft%20gradient%20neutral%20tones%20no%20furniture%20clean%20horizontal%20advertising%20background%20realistic&width=320&height=200&seq=scene01&orientation=landscape';
-
-export const ASSETS_PLACEHOLDER_PRODUCT =
-  'https://readdy.ai/api/search-image?query=generic%20product%20silhouette%20soft%20shadow%20clean%20white%20background%20ecommerce%20placeholder%20minimal%20studio%20lighting%20no%20specific%20item&width=240&height=180&seq=prod01&orientation=landscape';
-
 export const ASSETS_PAGE_MESSAGES = SHORT_DRAMA_UI.assets;
 
-export function resolveAssetImageUrl(
-  imageUrl: string | null | undefined,
-  placeholder: string,
-): { src: string; hasRealImage: boolean } {
+function isLikelyRenderableUrl(input: string): boolean {
+  const u = input.trim().toLowerCase();
+  if (!u) return false;
+  if (u.startsWith('javascript:')) return false;
+  if (u.includes('undefined') || u.includes('null')) return false;
+  if (u.endsWith('.svg') || u.endsWith('.txt') || u.endsWith('.json')) return false;
+  return true;
+}
+
+export function resolveAssetImageUrl(imageUrl: string | null | undefined): { src: string | null; hasRealImage: boolean } {
   const u = imageUrl?.trim();
-  if (!u) return { src: placeholder, hasRealImage: false };
-  if (u.startsWith('data:') || u.startsWith('blob:')) return { src: u, hasRealImage: true };
-  if (u.startsWith('http://') || u.startsWith('https://')) return { src: u, hasRealImage: true };
+  if (!u || !isLikelyRenderableUrl(u)) return { src: null, hasRealImage: false };
+  if (u.startsWith('data:') || u.startsWith('blob:')) return { src: isLikelyRenderableUrl(u) ? u : null, hasRealImage: true };
+  if (u.startsWith('http://') || u.startsWith('https://')) return { src: isLikelyRenderableUrl(u) ? u : null, hasRealImage: true };
   if (u.startsWith('/')) {
     const base = API_BASE_URL.replace(/\/$/, '');
-    return { src: base ? `${base}${u}` : u, hasRealImage: true };
+    const resolved = base ? `${base}${u}` : u;
+    return { src: isLikelyRenderableUrl(resolved) ? resolved : null, hasRealImage: true };
   }
-  return { src: placeholder, hasRealImage: false };
+  return { src: null, hasRealImage: false };
 }
 
 function metaRecord(meta: unknown): Record<string, unknown> {
@@ -62,7 +59,7 @@ function tagsFromMeta(meta: Record<string, unknown>, fallback: string[]): string
 
 export function characterAssetDtoToViewModel(row: PipelineCharacterAssetDto): AssetsPageCharacterVm {
   const meta = metaRecord(row.meta);
-  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url, ASSETS_PLACEHOLDER_CHAR);
+  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url);
   const voice =
     pickString(meta, ['voice_style', 'voiceStyle', 'voice']) ||
     (row.role_type?.includes('主') ? '未指定（主角）' : '未指定');
@@ -82,7 +79,7 @@ export function characterAssetDtoToViewModel(row: PipelineCharacterAssetDto): As
 
 export function sceneAssetDtoToViewModel(row: PipelineSceneAssetDto): AssetsPageSceneVm {
   const meta = metaRecord(row.meta);
-  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url, ASSETS_PLACEHOLDER_SCENE);
+  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url);
   const visual = (row.visual_prompt ?? '').trim();
   const type = (row.scene_type ?? '').trim() || pickString(meta, ['sceneType', 'type']) || '场景';
   return {
@@ -98,7 +95,7 @@ export function sceneAssetDtoToViewModel(row: PipelineSceneAssetDto): AssetsPage
 
 export function productAssetDtoToViewModel(row: PipelineProductAssetDto): AssetsPageProductVm {
   const meta = metaRecord(row.meta);
-  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url, ASSETS_PLACEHOLDER_PRODUCT);
+  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url);
   const desc = (row.description ?? '').trim() || '—';
   const visual = (row.visual_prompt ?? '').trim();
   const placement =

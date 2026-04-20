@@ -16,6 +16,7 @@ import {
 import { SHORT_DRAMA_UI } from './utils/shortDramaUiCopy';
 import { workflowNavProjectName } from './utils/workflowProjectName';
 import { withProjectQuery } from './utils/shortDramaRoutes';
+import { touchShortDramaProjectStep } from './services/shortDramaApi';
 
 const EMPTY_VM = storyBlueprintDtoToPageView(null);
 
@@ -38,6 +39,7 @@ export function ShortDramaStoryBlueprintPage() {
   const [script, setScript] = useState<StoryBlueprintPageScriptVm>(EMPTY_VM.script);
   const [segments, setSegments] = useState<StoryBlueprintPageSegmentVm[]>(EMPTY_VM.segments);
   const [editedSegment, setEditedSegment] = useState<number | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
     refreshSession();
@@ -49,9 +51,11 @@ export function ShortDramaStoryBlueprintPage() {
     const vm = storyBlueprintDtoToPageView(raw);
     setScript(vm.script);
     setSegments(vm.segments);
+    setIsDirty(false);
   }, [pipeline]);
 
   const hasBlueprint = Boolean(pipeline?.story_blueprint?.blueprint && Object.keys(pipeline.story_blueprint.blueprint).length);
+  const step2Stale = pipeline?.project?.step_status?.step_2 === 'stale';
 
   const storyRegenerateLocked = isStoryPipelineLockedForRegenerate(pipeline);
 
@@ -71,6 +75,35 @@ export function ShortDramaStoryBlueprintPage() {
 
   const missingProject = projectId == null;
 
+  useEffect(() => {
+    if (!pipeline || projectId == null) return;
+    console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: projectId, page: 'step_2' });
+  }, [pipeline, projectId]);
+
+  useEffect(() => {
+    if (!step2Stale || projectId == null) return;
+    console.info('[FRONT_STEP_STALE_BANNER_SHOWN]', { project_id: projectId, step: 'step_2' });
+  }, [step2Stale, projectId]);
+
+  useEffect(() => {
+    console.info('[FRONT_DIRTY_STATE_CHANGED]', { project_id: projectId ?? null, step: 'step_2', dirty: isDirty });
+  }, [isDirty, projectId]);
+
+  const saveDraft = async (intent: 'save_draft' | 'before_exit'): Promise<boolean> => {
+    if (projectId == null) return false;
+    try {
+      await touchShortDramaProjectStep(projectId, {
+        step: 'step_2',
+        save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft',
+      });
+      setIsDirty(false);
+      return true;
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '保存失败，请稍后重试');
+      return false;
+    }
+  };
+
   const scriptFields: Array<{ key: keyof StoryBlueprintPageScriptVm; label: string; icon: string }> = [
     { key: 'title', label: '剧集标题', icon: 'ri-quill-pen-line' },
     { key: 'premise', label: '故事前提 Premise', icon: 'ri-book-open-line' },
@@ -82,7 +115,13 @@ export function ShortDramaStoryBlueprintPage() {
 
   return (
     <div className="min-h-screen bg-white" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav currentStep={2} projectName={displayName} projectId={projectId} />
+      <SDWorkflowNav
+        currentStep={2}
+        projectName={displayName}
+        projectId={projectId}
+        isDirty={isDirty}
+        onSaveDraft={saveDraft}
+      />
       <div className="flex min-h-screen pt-14">
         <StoryBlueprintLeftRail settings={leftRails.settings} globalFields={leftRails.globalFields} />
 
@@ -108,6 +147,12 @@ export function ShortDramaStoryBlueprintPage() {
             <div className="mb-4 flex items-center gap-2 text-[13px] text-[#8E8E93]">
               <i className="ri-loader-4-line animate-spin text-[16px] text-[#1D1D1F]" aria-hidden />
               {SHORT_DRAMA_UI.storyPage.loadingPipeline}
+            </div>
+          ) : null}
+
+          {step2Stale ? (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+              你已修改项目基础设定，当前剧本基于旧设定生成，请重新生成或更新。
             </div>
           ) : null}
 
@@ -231,7 +276,10 @@ export function ShortDramaStoryBlueprintPage() {
                 {isEditing === field.key ? (
                   <textarea
                     value={script[field.key]}
-                    onChange={(e) => setScript((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                    onChange={(e) => {
+                      setScript((prev) => ({ ...prev, [field.key]: e.target.value }));
+                      setIsDirty(true);
+                    }}
                     rows={field.key === 'title' ? 1 : 3}
                     className="w-full resize-none rounded-lg px-3 py-2.5 text-[13.5px] text-[#1D1D1F] outline-none transition-all"
                     style={{ background: '#F7F8FA', border: '1px solid #EAEAEA' }}

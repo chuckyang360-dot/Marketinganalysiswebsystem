@@ -35,3 +35,4 @@ env/
 # Railway
 .railway/
 *.png
+backend/generated/

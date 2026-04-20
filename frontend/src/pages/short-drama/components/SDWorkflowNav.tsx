@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ri, sdFontHeading } from '../utils/shortDramaHelpers';
 import { withProjectQuery } from '../utils/shortDramaRoutes';
@@ -15,13 +16,49 @@ export type SDWorkflowNavProps = {
   projectName?: string;
   /** 步骤间跳转时附带 ?projectId= */
   projectId?: number | null;
+  isDirty?: boolean;
+  onSaveDraft?: (intent: 'save_draft' | 'before_exit') => Promise<boolean>;
 };
 
 /**
  * Framer `SDSharedNav.tsx` 映射：布局 / 步骤展示 / 项目名称 / 右侧按钮位置一致。
  */
-export function SDWorkflowNav({ currentStep, projectName, projectId }: SDWorkflowNavProps) {
+export function SDWorkflowNav({ currentStep, projectName, projectId, isDirty = false, onSaveDraft }: SDWorkflowNavProps) {
   const navigate = useNavigate();
+  const [dialog, setDialog] = useState<null | 'leave' | 'save'>(null);
+
+  const handleLeaveHomeClick = () => {
+    if (!isDirty) {
+      navigate('/');
+      return;
+    }
+    console.info('[FRONT_LEAVE_CONFIRM_SHOWN]', { project_id: projectId ?? null, step: currentStep ?? null });
+    setDialog('leave');
+  };
+
+  const handleSaveDraftClick = () => {
+    console.info('[FRONT_SAVE_DRAFT_CONFIRM_SHOWN]', { project_id: projectId ?? null, step: currentStep ?? null });
+    setDialog('save');
+  };
+
+  const confirmSaveDraft = async (intent: 'save_draft' | 'before_exit') => {
+    if (!onSaveDraft) {
+      if (intent === 'save_draft') navigate('/short-drama/projects');
+      else navigate('/');
+      return;
+    }
+    const ok = await onSaveDraft(intent);
+    if (!ok) return;
+    if (intent === 'before_exit') {
+      console.info('[FRONT_SAVE_AND_EXIT_HOME]', { project_id: projectId ?? null, step: currentStep ?? null });
+      window.alert('已保存并返回官网');
+      navigate('/');
+      return;
+    }
+    console.info('[FRONT_SAVE_DRAFT_SUCCESS_REDIRECT]', { project_id: projectId ?? null, step: currentStep ?? null });
+    window.alert('草稿已保存');
+    navigate('/short-drama/projects');
+  };
 
   return (
     <header
@@ -109,7 +146,7 @@ export function SDWorkflowNav({ currentStep, projectName, projectId }: SDWorkflo
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
-            onClick={() => navigate('/')}
+            onClick={handleLeaveHomeClick}
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[12.5px] transition-all duration-200"
             style={{ color: '#8E8E93', background: 'transparent' }}
             onMouseEnter={(e) => {
@@ -126,6 +163,7 @@ export function SDWorkflowNav({ currentStep, projectName, projectId }: SDWorkflo
           </button>
           <button
             type="button"
+            onClick={handleSaveDraftClick}
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-4 py-1.5 text-[12.5px] font-medium text-[#444444] transition-all duration-200"
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = '#EAEAEA';
@@ -141,6 +179,60 @@ export function SDWorkflowNav({ currentStep, projectName, projectId }: SDWorkflo
           </button>
         </div>
       </div>
+      {dialog ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#EAEAEA] bg-white p-5 shadow-xl">
+            {dialog === 'leave' ? (
+              <>
+                <h3 className="text-[17px] font-bold text-[#1D1D1F]">离开当前项目？</h3>
+                <p className="mt-2 text-[13px] text-[#6E6E73]">当前修改尚未保存，是否先保存草稿再返回官网？</p>
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button type="button" onClick={() => setDialog(null)} className="rounded-lg border border-[#EAEAEA] px-3.5 py-2 text-[12.5px]">取消</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      console.info('[FRONT_EXIT_HOME_WITHOUT_SAVE]', { project_id: projectId ?? null, step: currentStep ?? null });
+                      setDialog(null);
+                      navigate('/');
+                    }}
+                    className="rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3.5 py-2 text-[12.5px]"
+                  >
+                    不保存并离开
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDialog(null);
+                      void confirmSaveDraft('before_exit');
+                    }}
+                    className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
+                  >
+                    保存并离开
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-[17px] font-bold text-[#1D1D1F]">保存当前进度？</h3>
+                <p className="mt-2 text-[13px] text-[#6E6E73]">保存后你可以稍后从项目管理页继续编辑。</p>
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button type="button" onClick={() => setDialog(null)} className="rounded-lg border border-[#EAEAEA] px-3.5 py-2 text-[12.5px]">取消</button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDialog(null);
+                      void confirmSaveDraft('save_draft');
+                    }}
+                    className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
+                  >
+                    确认保存
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
     </header>
   );
 }

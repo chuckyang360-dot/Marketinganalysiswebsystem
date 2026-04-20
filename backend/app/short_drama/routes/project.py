@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -15,8 +15,22 @@ from ..models import (
 from ..schemas.project import (
     CreateShortDramaProjectRequest,
     CreateShortDramaProjectResponse,
+    ProjectEntryRedirectResponse,
     PipelineSummaryResponse,
+    ShortDramaProjectListResponse,
     ShortDramaProjectResponse,
+    TouchProjectStepRequest,
+)
+from ..services.project_state_service import (
+    STEP_1,
+    STEP_2,
+    STEP_3,
+    STEP_4,
+    OVERVIEW,
+    compute_overall_status,
+    default_step_status,
+    normalize_step_status,
+    update_last_active_step,
 )
 from ..services.pipeline_video_state import build_pipeline_video_state, segment_row_video_fields
 from ..services.read_models import (
@@ -54,8 +68,26 @@ def _script_with_public_video_url(script: dict, video_url_public: str | None) ->
 router = APIRouter()
 
 
-def _project_to_response(p: ShortDramaProject) -> ShortDramaProjectResponse:
-    return ShortDramaProjectResponse.model_validate(p)
+def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProjectResponse:
+    final_video = latest_final_video_url(db, p.id)
+    step_status = normalize_step_status(p.step_status)
+    return ShortDramaProjectResponse(
+        id=p.id,
+        user_id=p.user_id,
+        project_name=p.project_name,
+        status=p.status,
+        duration=p.duration,
+        format=p.format,
+        style=p.style,
+        visual_style=p.visual_style,
+        aspect_ratio=p.aspect_ratio,
+        last_active_step=p.last_active_step,
+        step_status=step_status,
+        overall_status=compute_overall_status(db, p, final_video_url=final_video),
+        final_video_url=_public_media_url(final_video),
+        created_at=p.created_at,
+        updated_at=p.updated_at,
+    )
 
 
 @router.post("", response_model=CreateShortDramaProjectResponse)
@@ -79,6 +111,8 @@ async def create_project(body: CreateShortDramaProjectRequest, db: Session = Dep
             style=body.style,
             visual_style=body.visual_style,
             aspect_ratio=body.aspect_ratio,
+            last_active_step=STEP_1,
+            step_status=default_step_status(),
         )
         db.add(project)
         db.commit()
@@ -90,7 +124,7 @@ async def create_project(body: CreateShortDramaProjectRequest, db: Session = Dep
             user_id=body.user_id,
             status=project.status,
         )
-        return CreateShortDramaProjectResponse(project=_project_to_response(project))
+        return CreateShortDramaProjectResponse(project=_project_to_response(db, project))
     except HTTPException:
         raise
     except Exception as e:
@@ -98,12 +132,81 @@ async def create_project(body: CreateShortDramaProjectRequest, db: Session = Dep
         raise
 
 
+@router.get("", response_model=ShortDramaProjectListResponse)
+async def list_projects(user_id: int = Query(...), db: Session = Depends(get_db)):
+    log_api_request(logger, "GET /project", user_id=user_id)
+    rows = (
+        db.query(ShortDramaProject)
+        .filter(ShortDramaProject.user_id == user_id)
+        .order_by(ShortDramaProject.updated_at.desc(), ShortDramaProject.id.desc())
+        .all()
+    )
+    projects = [_project_to_response(db, p) for p in rows]
+    logger.info("[PROJECT_LIST_FETCH] user_id=%s total=%s", user_id, len(projects))
+    log_api_success(logger, "GET /project", user_id=user_id, total=len(projects))
+    return ShortDramaProjectListResponse(projects=projects)
+
+
 @router.get("/{project_id}", response_model=ShortDramaProjectResponse)
 async def get_project(project_id: int, db: Session = Depends(get_db)):
     project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    return _project_to_response(project)
+    return _project_to_response(db, project)
+
+
+@router.get("/{project_id}/entry", response_model=ProjectEntryRedirectResponse)
+async def get_project_entry(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    project_view = _project_to_response(db, project)
+
+    step_to_path = {
+        STEP_1: f"/short-drama/projects/{project_id}/step-1",
+        STEP_2: f"/short-drama/projects/{project_id}/step-2",
+        STEP_3: f"/short-drama/projects/{project_id}/step-3",
+        STEP_4: f"/short-drama/projects/{project_id}/step-4",
+        OVERVIEW: f"/short-drama/projects/{project_id}/overview",
+    }
+
+    if project_view.final_video_url and str(project.status or "").strip() == "completed":
+        redirect_to = step_to_path[OVERVIEW]
+        reason = "completed_overview"
+    elif project.last_active_step in step_to_path:
+        redirect_to = step_to_path[str(project.last_active_step)]
+        reason = "last_active_step"
+    else:
+        redirect_to = step_to_path[STEP_1]
+        reason = "default_step_1"
+
+    logger.info(
+        "[PROJECT_ENTRY_REDIRECT] project_id=%s reason=%s redirect_to=%s",
+        project_id,
+        reason,
+        redirect_to,
+    )
+    return ProjectEntryRedirectResponse(project_id=project_id, redirect_to=redirect_to, reason=reason)
+
+
+@router.post("/{project_id}/touch-step", response_model=ShortDramaProjectResponse)
+async def touch_project_step(
+    project_id: int,
+    body: TouchProjectStepRequest,
+    db: Session = Depends(get_db),
+):
+    project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    update_last_active_step(project, body.step)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    if body.save_intent == "before_exit":
+        logger.info("[PROJECT_SAVE_BEFORE_EXIT] project_id=%s step=%s", project_id, body.step)
+    elif body.save_intent == "save_draft":
+        logger.info("[PROJECT_SAVE_DRAFT_REDIRECT] project_id=%s step=%s", project_id, body.step)
+    return _project_to_response(db, project)
 
 
 @router.get("/{project_id}/pipeline", response_model=PipelineSummaryResponse)
@@ -229,7 +332,7 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
         )
 
         return PipelineSummaryResponse(
-            project=_project_to_response(project),
+            project=_project_to_response(db, project),
             product_context=(
                 {
                     "id": pc.id,

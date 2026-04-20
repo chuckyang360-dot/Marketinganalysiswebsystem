@@ -20,6 +20,7 @@ export function useStoryBlueprint(projectId: number | null) {
       const p = await getShortDramaPipeline(projectId);
       setPipeline(p);
       touchProjectNameFromPipeline(projectId, p.project?.project_name);
+      console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: projectId, page: 'step_2' });
     } catch (e) {
       const msg =
         e instanceof ShortDramaApiError ? e.message : e instanceof Error ? e.message : SHORT_DRAMA_UI.error.pipelineLoad;
@@ -37,6 +38,7 @@ export function useStoryBlueprint(projectId: number | null) {
     setGenerateError(null);
     try {
       await generateShortDramaStory(projectId);
+      console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: projectId, step: 'step_2', action: 'save_generate_story' });
       await loadPipeline();
     } catch (e) {
       const msg =

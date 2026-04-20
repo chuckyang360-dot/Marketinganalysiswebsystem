@@ -13,8 +13,11 @@ from ..schemas.asset import (
     GenerateAssetSpecsRequest,
     GenerateAssetSpecsResponse,
     ProductAssetSchema,
+    UpdateAssetRequest,
+    UpdateAssetResponse,
     SceneAssetSchema,
 )
+from ..services.project_state_service import STEP_3, mark_step_completed, propagate_downstream_stale, update_last_active_step
 from ..schemas.product import ProductContextSchema
 from ..schemas.story import StoryBlueprintSchema
 from ..services.asset_spec_service import asset_spec_service
@@ -28,12 +31,73 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+@router.patch("/{asset_type}/{asset_id}", response_model=UpdateAssetResponse)
+async def update_one_asset(
+    asset_type: str,
+    asset_id: int,
+    body: UpdateAssetRequest,
+    db: Session = Depends(get_db),
+):
+    model_map = {
+        "character": CharacterAsset,
+        "scene": SceneAsset,
+        "product": ProductAsset,
+    }
+    m = model_map.get((asset_type or "").strip().lower())
+    if m is None:
+        raise HTTPException(status_code=400, detail="Invalid asset_type")
+    row = db.query(m).filter(m.id == asset_id, m.project_id == body.project_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    project = orchestrator.get_project(db, body.project_id)
+
+    if body.name is not None:
+        row.name = body.name
+    if body.description is not None:
+        row.description = body.description
+    if body.visual_prompt is not None:
+        row.visual_prompt = body.visual_prompt
+    if m is CharacterAsset and body.role_type is not None:
+        row.role_type = body.role_type
+    if m is SceneAsset and body.scene_type is not None:
+        row.scene_type = body.scene_type
+
+    meta = dict(row.meta_json or {})
+    if body.voice_style is not None:
+        meta["voice_style"] = body.voice_style
+    if body.reference_image_data_url is not None:
+        meta["reference_image_data_url"] = body.reference_image_data_url
+    if body.reference_image_name is not None:
+        meta["reference_image_name"] = body.reference_image_name
+    if body.product_usage is not None:
+        meta["product_usage"] = body.product_usage
+    row.meta_json = meta
+    db.add(row)
+
+    mark_step_completed(project, STEP_3)
+    propagate_downstream_stale(project, STEP_3)
+    update_last_active_step(project, STEP_3)
+    db.add(project)
+    db.commit()
+    return UpdateAssetResponse(
+        project_id=body.project_id,
+        asset_type=asset_type,
+        asset_id=asset_id,
+        stale_marked_step_4=True,
+    )
+
+
 @router.post("/generate", response_model=GenerateAssetSpecsResponse)
 async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /assets/specs/generate", project_id=body.project_id)
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(project, WorkflowStep.GENERATE_ASSET_SPECS)
+        had_existing_assets = (
+            db.query(CharacterAsset.id).filter(CharacterAsset.project_id == body.project_id).first() is not None
+            or db.query(SceneAsset.id).filter(SceneAsset.project_id == body.project_id).first() is not None
+            or db.query(ProductAsset.id).filter(ProductAsset.project_id == body.project_id).first() is not None
+        )
 
         pc_row = latest_product_context(db, body.project_id)
         sb_row = latest_story_blueprint(db, body.project_id)
@@ -103,6 +167,10 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                 )
             )
 
+        mark_step_completed(project, STEP_3)
+        if had_existing_assets:
+            propagate_downstream_stale(project, STEP_3)
+        update_last_active_step(project, STEP_3)
         orchestrator.advance_on_success(db, project, WorkflowStep.GENERATE_ASSET_SPECS)
         db.commit()
 

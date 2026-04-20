@@ -7,12 +7,19 @@ import type {
   GenerateStoryResponseDto,
   MergeVideoResponseDto,
   ParseProductResponseDto,
+  ProjectEntryRedirectResponseDto,
   PipelineSummaryDto,
   ProductInputPayload,
   RenderJobStatusResponseDto,
+  RegenerateOneAssetImageBody,
+  RegenerateOneAssetImageResponseDto,
   ShortDramaProjectDto,
+  ShortDramaProjectListResponseDto,
   SingleSegmentVideoResponseDto,
+  UpdateAssetBody,
+  UpdateAssetResponseDto,
   VideoBatchSummaryResponseDto,
+  TouchProjectStepBody,
 } from '../types/shortDramaApi';
 
 export class ShortDramaApiError extends Error {
@@ -99,6 +106,24 @@ export async function getShortDramaProject(projectId: number): Promise<ShortDram
   return sdFetchJson<ShortDramaProjectDto>(`/api/short-drama/project/${projectId}`);
 }
 
+export async function listShortDramaProjects(userId: number): Promise<ShortDramaProjectListResponseDto> {
+  return sdFetchJson<ShortDramaProjectListResponseDto>(`/api/short-drama/project?user_id=${encodeURIComponent(String(userId))}`);
+}
+
+export async function getShortDramaProjectEntry(projectId: number): Promise<ProjectEntryRedirectResponseDto> {
+  return sdFetchJson<ProjectEntryRedirectResponseDto>(`/api/short-drama/project/${projectId}/entry`);
+}
+
+export async function touchShortDramaProjectStep(
+  projectId: number,
+  body: TouchProjectStepBody,
+): Promise<ShortDramaProjectDto> {
+  return sdFetchJson<ShortDramaProjectDto>(`/api/short-drama/project/${projectId}/touch-step`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getShortDramaPipeline(projectId: number): Promise<PipelineSummaryDto> {
   return sdFetchJson<PipelineSummaryDto>(`/api/short-drama/project/${projectId}/pipeline`);
 }
@@ -152,6 +177,29 @@ export async function generateShortDramaAssetImages(projectId: number): Promise<
   return sdFetchJson<AssetImageBatchResponseDto>('/api/short-drama/assets/images/generate', {
     method: 'POST',
     body: JSON.stringify({ project_id: projectId }),
+  });
+}
+
+export async function updateShortDramaAsset(
+  assetType: 'character' | 'scene' | 'product',
+  assetId: number,
+  body: UpdateAssetBody,
+): Promise<UpdateAssetResponseDto> {
+  return sdFetchJson<UpdateAssetResponseDto>(
+    `/api/short-drama/assets/specs/${encodeURIComponent(assetType)}/${assetId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export async function regenerateShortDramaOneAssetImage(
+  body: RegenerateOneAssetImageBody,
+): Promise<RegenerateOneAssetImageResponseDto> {
+  return sdFetchJson<RegenerateOneAssetImageResponseDto>('/api/short-drama/assets/images/regenerate-one', {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
 

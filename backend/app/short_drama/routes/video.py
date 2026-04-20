@@ -23,6 +23,8 @@ from ..schemas.video import (
     VideoProjectRequest,
 )
 from ..services.merge_service import merge_service
+from ..services.project_state_service import OVERVIEW, STEP_4, update_last_active_step
+from ..services.workflow_orchestrator import orchestrator
 from ..services.render_executor_service import render_executor_service
 from ..utils.enums import RenderTargetType
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -36,6 +38,10 @@ router = APIRouter()
 async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /videos/generate", project_id=body.project_id)
     try:
+        project = orchestrator.get_project(db, body.project_id)
+        update_last_active_step(project, STEP_4)
+        db.add(project)
+        db.commit()
         r = render_executor_service.generate_segment_videos(db, body.project_id)
         log_api_success(
             logger,
@@ -92,6 +98,10 @@ async def generate_one_segment_video(
         segment_id=segment_id,
     )
     try:
+        project = orchestrator.get_project(db, body.project_id)
+        update_last_active_step(project, STEP_4)
+        db.add(project)
+        db.commit()
         job = render_executor_service.enqueue_single_segment_video(db, body.project_id, segment_id)
         background_tasks.add_task(
             render_executor_service.run_single_segment_video_job,
@@ -179,6 +189,10 @@ async def merge_final_video(body: VideoProjectRequest, db: Session = Depends(get
     log_api_request(logger, "POST /videos/merge", project_id=body.project_id)
     try:
         url = merge_service.merge_project_video(db, body.project_id)
+        project = orchestrator.get_project(db, body.project_id)
+        update_last_active_step(project, OVERVIEW)
+        db.add(project)
+        db.commit()
         log_api_success(
             logger,
             "POST /videos/merge",

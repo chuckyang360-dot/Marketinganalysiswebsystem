@@ -2,14 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { AssetLightbox, type LightboxItem } from './components/AssetLightbox';
+import {
+  AssetInteractionModal,
+  type AssetEditorPayload,
+  type AssetInteractionEntity,
+  type AssetKind,
+} from './components/AssetInteractionModal';
 import { useAssetsPage } from './hooks/useAssetsPage';
-import type { AssetsPageCharacterVm, AssetsPageSceneVm } from './types/shortDrama';
+import type { AssetsPageProductVm } from './types/shortDrama';
 import {
   ASSETS_PAGE_MESSAGES,
   assetsPageViewModelEmpty,
 } from './utils/assetsPageAdapters';
 import { SHORT_DRAMA_UI } from './utils/shortDramaUiCopy';
 import { withProjectQuery } from './utils/shortDramaRoutes';
+import { touchShortDramaProjectStep } from './services/shortDramaApi';
+import { regenerateShortDramaOneAssetImage, updateShortDramaAsset } from './services/shortDramaApi';
 
 /** Step4 需已具备参考图批次结果（或后续阶段） */
 const CAN_LEAVE_ASSETS_STATUSES = new Set([
@@ -42,6 +50,18 @@ export function ShortDramaAssetsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('characters');
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
   const [capabilityNotice, setCapabilityNotice] = useState<string | null>(null);
+  const [isDirty] = useState(false);
+  const [invalidCharacterIds, setInvalidCharacterIds] = useState<Set<number>>(new Set());
+  const [invalidSceneIds, setInvalidSceneIds] = useState<Set<number>>(new Set());
+  const [invalidProductIds, setInvalidProductIds] = useState<Set<number>>(new Set());
+  const [interactionAsset, setInteractionAsset] = useState<AssetInteractionEntity | null>(null);
+  const [interactionMode, setInteractionMode] = useState<'detail' | 'edit'>('detail');
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorRegenerating, setEditorRegenerating] = useState(false);
+
+  // TODO(points): future paywall hook. Generation actions (asset regen / batch image generation / video generation)
+  // should call a centralized credit precheck here before executing.
+  const canRunGenerationAction = useCallback((_action: 'asset_regenerate' | 'asset_initial_generate') => true, []);
 
   const flashNotice = useCallback((msg: string) => {
     setCapabilityNotice(msg);
@@ -52,6 +72,13 @@ export function ShortDramaAssetsPage() {
     effectiveProjectId != null &&
     pipeline?.project?.status != null &&
     CAN_LEAVE_ASSETS_STATUSES.has(pipeline.project.status);
+  const step3Stale = pipeline?.project?.step_status?.step_3 === 'stale';
+  const isGeneratingAssets = phase === 'generating_specs' || phase === 'generating_images';
+  const skeletonCount = useMemo(() => {
+    if (activeTab === 'characters') return Math.max(4, viewModel.characters.length || 0);
+    if (activeTab === 'scenes') return Math.max(4, viewModel.scenes.length || 0);
+    return Math.max(4, viewModel.products.length || 0);
+  }, [activeTab, viewModel.characters.length, viewModel.scenes.length, viewModel.products.length]);
 
   useEffect(() => {
     const c = pipeline?.assets?.characters?.length ?? 0;
@@ -61,6 +88,122 @@ export function ShortDramaAssetsPage() {
       `[FE_STEP3_ENTER] projectId=${effectiveProjectId ?? 'null'} projectStatus=${pipeline?.project?.status ?? 'n/a'} hasCharacters=${c > 0} hasScenes=${s > 0} hasProducts=${p > 0} characterCount=${c} sceneCount=${s} productCount=${p}`,
     );
   }, [effectiveProjectId, pipeline]);
+
+  useEffect(() => {
+    if (!pipeline || effectiveProjectId == null) return;
+    console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: effectiveProjectId, page: 'step_3' });
+  }, [pipeline, effectiveProjectId]);
+
+  useEffect(() => {
+    if (!step3Stale || effectiveProjectId == null) return;
+    console.info('[FRONT_STEP_STALE_BANNER_SHOWN]', { project_id: effectiveProjectId, step: 'step_3' });
+  }, [step3Stale, effectiveProjectId]);
+
+  useEffect(() => {
+    if (!isGeneratingAssets) return;
+    console.info('[FRONT_STEP3_LOADING_VIEW_SHOWN]', { project_id: effectiveProjectId ?? null, phase, tab: activeTab });
+  }, [isGeneratingAssets, effectiveProjectId, phase, activeTab]);
+
+  useEffect(() => {
+    if (isGeneratingAssets || phase !== 'ready') return;
+    const blocked =
+      viewModel.characters.some((c) => !c.hasRealImage || !c.img) ||
+      viewModel.scenes.some((s) => !s.hasRealImage || !s.img) ||
+      viewModel.products.some((p) => !p.hasRealImage || !p.img);
+    if (blocked) {
+      console.info('[FRONT_STEP3_MOCK_DATA_BLOCKED]', { project_id: effectiveProjectId ?? null });
+    }
+  }, [isGeneratingAssets, phase, viewModel, effectiveProjectId]);
+
+  useEffect(() => {
+    console.info('[FRONT_DIRTY_STATE_CHANGED]', { project_id: effectiveProjectId ?? null, step: 'step_3', dirty: isDirty });
+  }, [isDirty, effectiveProjectId]);
+
+  const saveDraft = async (intent: 'save_draft' | 'before_exit'): Promise<boolean> => {
+    if (effectiveProjectId == null) return false;
+    try {
+      await touchShortDramaProjectStep(effectiveProjectId, {
+        step: 'step_3',
+        save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft',
+      });
+      return true;
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '保存失败，请稍后重试');
+      return false;
+    }
+  };
+
+  const openAssetDetail = useCallback(
+    (kind: AssetKind, id: number) => {
+      const getMeta = () => {
+        if (!pipeline?.assets) return {};
+        if (kind === 'character') return pipeline.assets.characters.find((x) => x.id === id)?.meta || {};
+        if (kind === 'scene') return pipeline.assets.scenes.find((x) => x.id === id)?.meta || {};
+        return pipeline.assets.products.find((x) => x.id === id)?.meta || {};
+      };
+      const meta = getMeta() as Record<string, unknown>;
+      if (kind === 'character') {
+        const row = viewModel.characters.find((x) => x.id === id);
+        if (!row) return;
+        setInteractionAsset({
+          id,
+          kind,
+          name: row.name,
+          typeLabel: row.role,
+          description: row.desc,
+          prompt: row.visualPrompt,
+          imageUrl: row.img,
+          sourceLabel: meta.reference_image_data_url ? '用户参考图' : '系统生成',
+          voiceStyle: typeof meta.voice_style === 'string' ? meta.voice_style : '未设置',
+          referenceImageDataUrl: typeof meta.reference_image_data_url === 'string' ? meta.reference_image_data_url : undefined,
+          referenceImageName: typeof meta.reference_image_name === 'string' ? meta.reference_image_name : undefined,
+        });
+      } else if (kind === 'scene') {
+        const row = viewModel.scenes.find((x) => x.id === id);
+        if (!row) return;
+        setInteractionAsset({
+          id,
+          kind,
+          name: row.name,
+          typeLabel: row.type,
+          description: row.desc,
+          prompt: row.visualPrompt,
+          imageUrl: row.img,
+          sourceLabel: meta.reference_image_data_url ? '用户参考图' : '系统生成',
+          referenceImageDataUrl: typeof meta.reference_image_data_url === 'string' ? meta.reference_image_data_url : undefined,
+          referenceImageName: typeof meta.reference_image_name === 'string' ? meta.reference_image_name : undefined,
+        });
+      } else {
+        const row = viewModel.products.find((x) => x.id === id);
+        if (!row) return;
+        setInteractionAsset({
+          id,
+          kind,
+          name: row.name,
+          typeLabel: 'product',
+          description: row.desc,
+          prompt: row.cameraHint,
+          imageUrl: row.img,
+          sourceLabel: meta.reference_image_data_url ? '用户参考图' : '系统生成',
+          productUsage: typeof meta.product_usage === 'string' ? meta.product_usage : row.placement,
+          referenceImageDataUrl: typeof meta.reference_image_data_url === 'string' ? meta.reference_image_data_url : undefined,
+          referenceImageName: typeof meta.reference_image_name === 'string' ? meta.reference_image_name : undefined,
+        });
+      }
+      setInteractionMode('detail');
+      console.info('[FRONT_ASSET_DETAIL_OPENED]', { project_id: effectiveProjectId ?? null, asset_type: kind, asset_id: id });
+    },
+    [pipeline?.assets, viewModel, effectiveProjectId],
+  );
+
+  const openAssetEditor = useCallback(
+    (kind: AssetKind, id: number) => {
+      openAssetDetail(kind, id);
+      setInteractionMode('edit');
+      console.info('[FRONT_ASSET_EDITOR_OPENED]', { project_id: effectiveProjectId ?? null, asset_type: kind, asset_id: id });
+    },
+    [openAssetDetail, effectiveProjectId],
+  );
 
   const TABS = useMemo(
     () =>
@@ -72,58 +215,119 @@ export function ShortDramaAssetsPage() {
     [viewModel],
   );
 
-  const openCharLightbox = useCallback((char: AssetsPageCharacterVm) => {
-    setLightbox({
-      img: char.img,
-      name: char.name,
-      subtitle: char.role,
-      desc: char.desc,
-      tags: char.tags,
-      orientation: 'portrait',
-      meta: [
-        { icon: 'ri-mic-line', label: '音色风格', value: char.voice },
-        {
-          icon: 'ri-image-line',
-          label: '图像来源',
-          value: char.hasRealImage ? '后端 image_url' : '占位图（无 URL）',
-        },
-        {
-          icon: 'ri-palette-line',
-          label: '视觉 Prompt',
-          value: char.visualPrompt.length > 180 ? `${char.visualPrompt.slice(0, 180)}…` : char.visualPrompt,
-        },
-      ],
-    });
-  }, []);
+  const openAssetLightbox = useCallback(
+    (kind: AssetKind, id: number) => {
+      let target: { img: string | null; name: string } | AssetsPageProductVm | undefined;
+      if (kind === 'character') {
+        target = viewModel.characters.find((x) => x.id === id);
+      } else if (kind === 'scene') {
+        target = viewModel.scenes.find((x) => x.id === id);
+      } else {
+        target = viewModel.products.find((x) => x.id === id);
+      }
+      if (!target?.img) return;
+      setLightbox({
+        img: target.img,
+        name: target.name,
+      });
+      console.info('[FRONT_ASSET_ZOOM_OPENED]', { project_id: effectiveProjectId ?? null, asset_type: kind, asset_id: id });
+    },
+    [viewModel, effectiveProjectId],
+  );
 
-  const openSceneLightbox = useCallback((scene: AssetsPageSceneVm) => {
-    setLightbox({
-      img: scene.img,
-      name: scene.name,
-      subtitle: scene.type,
-      desc: scene.desc,
-      orientation: 'landscape',
-      meta: [
-        { icon: 'ri-landscape-line', label: '场景类型', value: scene.type },
-        {
-          icon: 'ri-image-line',
-          label: '图像来源',
-          value: scene.hasRealImage ? '后端 image_url' : '占位图（无 URL）',
-        },
-        {
-          icon: 'ri-palette-line',
-          label: '视觉 Prompt',
-          value: scene.visualPrompt.length > 180 ? `${scene.visualPrompt.slice(0, 180)}…` : scene.visualPrompt,
-        },
-      ],
-    });
-  }, []);
+  const saveAssetEdit = useCallback(
+    async (payload: AssetEditorPayload) => {
+      if (!interactionAsset || effectiveProjectId == null) return;
+      setEditorSaving(true);
+      try {
+        if (payload.referenceImageDataUrl) {
+          console.info('[FRONT_ASSET_REFERENCE_UPLOAD_SELECTED]', {
+            project_id: effectiveProjectId,
+            asset_type: interactionAsset.kind,
+            asset_id: interactionAsset.id,
+          });
+        }
+        await updateShortDramaAsset(interactionAsset.kind, interactionAsset.id, {
+          project_id: effectiveProjectId,
+          name: payload.name,
+          role_type: interactionAsset.kind === 'character' ? payload.typeLabel : undefined,
+          scene_type: interactionAsset.kind === 'scene' ? payload.typeLabel : undefined,
+          description: payload.description,
+          visual_prompt: payload.prompt,
+          voice_style: payload.voiceStyle,
+          reference_image_data_url: payload.referenceImageDataUrl,
+          reference_image_name: payload.referenceImageName,
+          product_usage: payload.productUsage,
+        });
+        console.info('[FRONT_ASSET_EDIT_SAVED]', { project_id: effectiveProjectId, asset_type: interactionAsset.kind, asset_id: interactionAsset.id });
+        console.info('[FRONT_STEP3_STALE_MARKED_STEP4]', { project_id: effectiveProjectId, reason: 'asset_edit_saved' });
+        if (payload.referenceImageDataUrl) {
+          console.info('[FRONT_ASSET_REFERENCE_UPLOAD_SAVED]', { project_id: effectiveProjectId, asset_type: interactionAsset.kind, asset_id: interactionAsset.id });
+        }
+        await retryLoad();
+        setInteractionAsset(null);
+      } finally {
+        setEditorSaving(false);
+      }
+    },
+    [interactionAsset, effectiveProjectId, retryLoad, canRunGenerationAction],
+  );
 
-  const showDataGrids = phase !== 'no_project' && phase !== 'error';
+  const regenerateAsset = useCallback(
+    async (payload: AssetEditorPayload) => {
+      if (!interactionAsset || effectiveProjectId == null) return;
+      setEditorRegenerating(true);
+      console.info('[FRONT_ASSET_REGENERATE_STARTED]', { project_id: effectiveProjectId, asset_type: interactionAsset.kind, asset_id: interactionAsset.id });
+      try {
+        if (!canRunGenerationAction('asset_regenerate')) {
+          return;
+        }
+        await updateShortDramaAsset(interactionAsset.kind, interactionAsset.id, {
+          project_id: effectiveProjectId,
+          name: payload.name,
+          role_type: interactionAsset.kind === 'character' ? payload.typeLabel : undefined,
+          scene_type: interactionAsset.kind === 'scene' ? payload.typeLabel : undefined,
+          description: payload.description,
+          visual_prompt: payload.prompt,
+          voice_style: payload.voiceStyle,
+          reference_image_data_url: payload.referenceImageDataUrl,
+          reference_image_name: payload.referenceImageName,
+          product_usage: payload.productUsage,
+        });
+        await regenerateShortDramaOneAssetImage({
+          project_id: effectiveProjectId,
+          asset_type: interactionAsset.kind,
+          asset_id: interactionAsset.id,
+        });
+        console.info('[FRONT_ASSET_REGENERATE_SUCCEEDED]', { project_id: effectiveProjectId, asset_type: interactionAsset.kind, asset_id: interactionAsset.id });
+        console.info('[FRONT_STEP3_STALE_MARKED_STEP4]', { project_id: effectiveProjectId, reason: 'asset_regenerate_succeeded' });
+        await retryLoad();
+        setInteractionAsset(null);
+      } catch (e) {
+        console.warn('[FRONT_ASSET_REGENERATE_FAILED]', {
+          project_id: effectiveProjectId,
+          asset_type: interactionAsset.kind,
+          asset_id: interactionAsset.id,
+          message: e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        setEditorRegenerating(false);
+      }
+    },
+    [interactionAsset, effectiveProjectId, retryLoad],
+  );
+
+  const showDataGrids = phase === 'ready';
 
   return (
     <div className="min-h-screen" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav currentStep={3} projectName={projectName} projectId={effectiveProjectId} />
+      <SDWorkflowNav
+        currentStep={3}
+        projectName={projectName}
+        projectId={effectiveProjectId}
+        isDirty={isDirty}
+        onSaveDraft={saveDraft}
+      />
 
       <div className="pt-14">
         <div
@@ -140,9 +344,6 @@ export function ShortDramaAssetsPage() {
             <p className="text-[13px] mt-1" style={{ color: '#8E8E93' }}>
               构建可复用的视觉资产库，统一整部短剧的视觉风格
             </p>
-            {effectiveProjectId != null ? (
-              <p className="mt-2 text-[11px] font-mono text-[#AEAEB2]">project_id: {effectiveProjectId}</p>
-            ) : null}
           </div>
           <button
             type="button"
@@ -171,6 +372,15 @@ export function ShortDramaAssetsPage() {
           </div>
         ) : null}
 
+        {step3Stale ? (
+          <div
+            className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 lg:mx-10"
+            role="status"
+          >
+            你已修改上游设定/剧本，当前资产基于旧内容生成，请重新生成或手动调整。
+          </div>
+        ) : null}
+
         {phase === 'no_project' ? (
           <div className="mx-6 mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-[13px] text-amber-950 lg:mx-10">
             <p className="font-semibold">{SHORT_DRAMA_UI.noProject.title}</p>
@@ -195,14 +405,14 @@ export function ShortDramaAssetsPage() {
         {phase === 'generating_specs' ? (
           <div className="mx-6 mt-4 flex items-center gap-2 text-[13px] text-[#8E8E93] lg:mx-10">
             <i className="ri-loader-4-line animate-spin text-[16px] text-[#B45309]" aria-hidden />
-            {SHORT_DRAMA_UI.generating.assetSpecs}
+            正在生成角色/场景/产品参考图...
           </div>
         ) : null}
 
         {phase === 'generating_images' ? (
           <div className="mx-6 mt-4 flex items-center gap-2 text-[13px] text-[#8E8E93] lg:mx-10">
             <i className="ri-loader-4-line animate-spin text-[16px] text-[#047857]" aria-hidden />
-            {SHORT_DRAMA_UI.generating.assetImages}
+            正在生成角色/场景/产品参考图...
           </div>
         ) : null}
 
@@ -292,26 +502,26 @@ export function ShortDramaAssetsPage() {
                       <div
                         className="relative w-full h-52 overflow-hidden flex items-center justify-center group"
                         style={{ background: '#F5F5F7', cursor: 'pointer' }}
-                        onClick={() => openCharLightbox(char)}
+                        onClick={() => openAssetLightbox('character', char.id)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') openCharLightbox(char);
+                          if (e.key === 'Enter' || e.key === ' ') openAssetLightbox('character', char.id);
                         }}
                         role="button"
                         tabIndex={0}
                       >
-                        <img src={char.img} alt={char.name} className="w-full h-full object-contain" />
-                        {!char.hasRealImage ? (
-                          <span
-                            className="absolute top-2.5 right-2.5 text-[9px] font-semibold px-2 py-0.5 rounded-full"
-                            style={{
-                              background: 'rgba(255,255,255,0.92)',
-                              color: '#8E8E93',
-                              border: '1px solid rgba(0,0,0,0.06)',
+                        {char.img && !invalidCharacterIds.has(char.id) ? (
+                          <img
+                            src={char.img}
+                            alt={char.name}
+                            className="w-full h-full object-contain"
+                            onError={() => {
+                              setInvalidCharacterIds((prev) => new Set(prev).add(char.id));
+                              console.info('[FRONT_STEP3_ASSET_RENDER_SKIPPED_INVALID_URL]', { project_id: effectiveProjectId ?? null, tab: 'characters', asset_id: char.id });
                             }}
-                          >
-                            占位
-                          </span>
-                        ) : null}
+                          />
+                        ) : (
+                          <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />
+                        )}
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-200 flex items-end justify-end p-2.5">
                           <div
                             className="w-7 h-7 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0"
@@ -366,8 +576,7 @@ export function ShortDramaAssetsPage() {
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            title={ASSETS_PAGE_MESSAGES.regenSingle}
-                            onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.regenSingle)}
+                            onClick={() => openAssetLightbox('character', char.id)}
                             className="flex-1 py-2 rounded-lg text-[11.5px] font-medium cursor-pointer transition-all duration-200 whitespace-nowrap"
                             style={{ background: '#F7F8FA', color: '#444444', border: '1px solid #EAEAEA' }}
                             onMouseEnter={(e) => {
@@ -377,12 +586,12 @@ export function ShortDramaAssetsPage() {
                               (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
                             }}
                           >
-                            <i className="ri-refresh-line text-[11px] mr-1" />
-                            重新生成
+                            <i className="ri-zoom-in-line text-[11px] mr-1" />
+                            放大
                           </button>
                           <button
                             type="button"
-                            onClick={() => openCharLightbox(char)}
+                            onClick={() => openAssetDetail('character', char.id)}
                             className="flex-1 py-2 rounded-lg text-[11.5px] font-medium cursor-pointer transition-all duration-200 whitespace-nowrap"
                             style={{ background: '#1D1D1F', color: '#ffffff' }}
                             onMouseEnter={(e) => {
@@ -392,28 +601,28 @@ export function ShortDramaAssetsPage() {
                               (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
                             }}
                           >
-                            <i className="ri-zoom-in-line text-[11px] mr-1" />
+                            <i className="ri-information-line text-[11px] mr-1" />
                             查看详情
                           </button>
                         </div>
-                        <button
-                          type="button"
-                          title={ASSETS_PAGE_MESSAGES.upload}
-                          className="w-full mt-2 py-2 rounded-lg text-[11.5px] cursor-pointer transition-all duration-200 whitespace-nowrap"
-                          style={{ background: '#F7F8FA', color: '#8E8E93', border: '1.5px dashed #D1D1D6' }}
-                          onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.upload)}
-                          onMouseEnter={(e) => {
-                            (e.currentTarget as HTMLElement).style.borderColor = '#1D1D1F';
-                            (e.currentTarget as HTMLElement).style.color = '#1D1D1F';
-                          }}
-                          onMouseLeave={(e) => {
-                            (e.currentTarget as HTMLElement).style.borderColor = '#D1D1D6';
-                            (e.currentTarget as HTMLElement).style.color = '#8E8E93';
-                          }}
-                        >
-                          <i className="ri-upload-2-line text-[11px] mr-1" />
-                          上传参考图
-                        </button>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openAssetEditor('character', char.id)}
+                            className="py-2 rounded-lg text-[11.5px] border border-[#EAEAEA] bg-white"
+                          >
+                            <i className="ri-edit-line text-[11px] mr-1" />
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openAssetEditor('character', char.id)}
+                            className="py-2 rounded-lg text-[11.5px] border border-dashed border-[#D1D1D6] bg-[#F7F8FA]"
+                          >
+                            <i className="ri-upload-2-line text-[11px] mr-1" />
+                            上传参考图
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -454,26 +663,26 @@ export function ShortDramaAssetsPage() {
                       <div
                         className="relative w-full h-48 overflow-hidden group"
                         style={{ background: '#F7F8FA', cursor: 'pointer' }}
-                        onClick={() => openSceneLightbox(scene)}
+                        onClick={() => openAssetLightbox('scene', scene.id)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') openSceneLightbox(scene);
+                          if (e.key === 'Enter' || e.key === ' ') openAssetLightbox('scene', scene.id);
                         }}
                         role="button"
                         tabIndex={0}
                       >
-                        <img src={scene.img} alt={scene.name} className="w-full h-full object-cover object-center" />
-                        {!scene.hasRealImage ? (
-                          <span
-                            className="absolute top-3 right-3 text-[9px] font-semibold px-2 py-0.5 rounded-full"
-                            style={{
-                              background: 'rgba(255,255,255,0.9)',
-                              color: '#8E8E93',
-                              border: '1px solid rgba(0,0,0,0.06)',
+                        {scene.img && !invalidSceneIds.has(scene.id) ? (
+                          <img
+                            src={scene.img}
+                            alt={scene.name}
+                            className="w-full h-full object-cover object-center"
+                            onError={() => {
+                              setInvalidSceneIds((prev) => new Set(prev).add(scene.id));
+                              console.info('[FRONT_STEP3_ASSET_RENDER_SKIPPED_INVALID_URL]', { project_id: effectiveProjectId ?? null, tab: 'scenes', asset_id: scene.id });
                             }}
-                          >
-                            占位
-                          </span>
-                        ) : null}
+                          />
+                        ) : (
+                          <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />
+                        )}
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/18 transition-all duration-200 flex items-end justify-end p-2.5">
                           <div
                             className="w-7 h-7 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200"
@@ -506,8 +715,7 @@ export function ShortDramaAssetsPage() {
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            title={ASSETS_PAGE_MESSAGES.regenSingle}
-                            onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.regenSingle)}
+                            onClick={() => openAssetLightbox('scene', scene.id)}
                             className="flex-1 py-2 rounded-lg text-[11.5px] font-medium cursor-pointer whitespace-nowrap transition-colors"
                             style={{ background: '#F7F8FA', color: '#444444', border: '1px solid #EAEAEA' }}
                             onMouseEnter={(e) => {
@@ -517,12 +725,12 @@ export function ShortDramaAssetsPage() {
                               (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
                             }}
                           >
-                            <i className="ri-refresh-line text-[11px] mr-1" />
-                            重新生成
+                            <i className="ri-zoom-in-line text-[11px] mr-1" />
+                            放大
                           </button>
                           <button
                             type="button"
-                            onClick={() => openSceneLightbox(scene)}
+                            onClick={() => openAssetDetail('scene', scene.id)}
                             className="flex-1 py-2 rounded-lg text-[11.5px] font-medium cursor-pointer whitespace-nowrap transition-colors"
                             style={{ background: '#1D1D1F', color: '#ffffff' }}
                             onMouseEnter={(e) => {
@@ -532,8 +740,26 @@ export function ShortDramaAssetsPage() {
                               (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
                             }}
                           >
-                            <i className="ri-zoom-in-line text-[11px] mr-1" />
+                            <i className="ri-information-line text-[11px] mr-1" />
                             查看详情
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openAssetEditor('scene', scene.id)}
+                            className="py-2 rounded-lg text-[11.5px] border border-[#EAEAEA] bg-white"
+                          >
+                            <i className="ri-edit-line text-[11px] mr-1" />
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openAssetEditor('scene', scene.id)}
+                            className="py-2 rounded-lg text-[11.5px] border border-dashed border-[#D1D1D6] bg-[#F7F8FA]"
+                          >
+                            <i className="ri-upload-2-line text-[11px] mr-1" />
+                            上传参考图
                           </button>
                         </div>
                       </div>
@@ -550,20 +776,45 @@ export function ShortDramaAssetsPage() {
                       className="rounded-2xl overflow-hidden"
                       style={{ background: '#ffffff', border: '1px solid #EAEAEA' }}
                     >
-                      <div className="relative w-full h-44 overflow-hidden" style={{ background: '#F7F8FA' }}>
-                        <img src={asset.img} alt={asset.name} className="w-full h-full object-cover object-center" />
-                        {!asset.hasRealImage ? (
-                          <span
-                            className="absolute top-2 right-2 text-[9px] font-semibold px-2 py-0.5 rounded-full"
-                            style={{
-                              background: 'rgba(255,255,255,0.92)',
-                              color: '#8E8E93',
-                              border: '1px solid rgba(0,0,0,0.06)',
+                      <div
+                        className="relative w-full h-44 overflow-hidden group"
+                        style={{ background: '#F7F8FA', cursor: 'pointer' }}
+                        onClick={() => openAssetLightbox('product', asset.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') openAssetLightbox('product', asset.id);
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        {asset.img && !invalidProductIds.has(asset.id) ? (
+                          <img
+                            src={asset.img}
+                            alt={asset.name}
+                            className="w-full h-full object-cover object-center"
+                            onError={() => {
+                              setInvalidProductIds((prev) => new Set(prev).add(asset.id));
+                              console.info('[FRONT_STEP3_ASSET_RENDER_SKIPPED_INVALID_URL]', { project_id: effectiveProjectId ?? null, tab: 'products', asset_id: asset.id });
+                            }}
+                          />
+                        ) : (
+                          <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />
+                        )}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/18 transition-all duration-200 flex items-end justify-end p-2.5">
+                          <button
+                            type="button"
+                            aria-label="放大产品图"
+                            className="w-7 h-7 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0 cursor-pointer"
+                            style={{ background: 'rgba(255,255,255,0.92)', border: '1px solid rgba(0,0,0,0.08)' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAssetLightbox('product', asset.id);
                             }}
                           >
-                            占位
-                          </span>
-                        ) : null}
+                            <span className="text-[12px] leading-none" style={{ color: '#1D1D1F' }}>
+                              ➕
+                            </span>
+                          </button>
+                        </div>
                       </div>
                       <div className="p-4">
                         <h3
@@ -599,8 +850,7 @@ export function ShortDramaAssetsPage() {
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            title={ASSETS_PAGE_MESSAGES.editProduct}
-                            onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.editProduct)}
+                            onClick={() => openAssetLightbox('product', asset.id)}
                             className="flex-1 py-2 rounded-lg text-[11.5px] cursor-pointer whitespace-nowrap transition-colors"
                             style={{ background: '#F7F8FA', color: '#444444', border: '1px solid #EAEAEA' }}
                             onMouseEnter={(e) => {
@@ -610,13 +860,12 @@ export function ShortDramaAssetsPage() {
                               (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
                             }}
                           >
-                            <i className="ri-edit-line text-[11px] mr-1" />
-                            编辑
+                            <i className="ri-zoom-in-line text-[11px] mr-1" />
+                            放大
                           </button>
                           <button
                             type="button"
-                            title={ASSETS_PAGE_MESSAGES.regenSingle}
-                            onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.regenSingle)}
+                            onClick={() => openAssetDetail('product', asset.id)}
                             className="flex-1 py-2 rounded-lg text-[11.5px] cursor-pointer whitespace-nowrap transition-colors"
                             style={{ background: '#1D1D1F', color: '#ffffff' }}
                             onMouseEnter={(e) => {
@@ -626,8 +875,26 @@ export function ShortDramaAssetsPage() {
                               (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
                             }}
                           >
-                            <i className="ri-refresh-line text-[11px] mr-1" />
-                            重新生成
+                            <i className="ri-information-line text-[11px] mr-1" />
+                            查看详情
+                          </button>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openAssetEditor('product', asset.id)}
+                            className="py-2 rounded-lg text-[11.5px] border border-[#EAEAEA] bg-white"
+                          >
+                            <i className="ri-edit-line text-[11px] mr-1" />
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openAssetEditor('product', asset.id)}
+                            className="py-2 rounded-lg text-[11.5px] border border-dashed border-[#D1D1D6] bg-[#F7F8FA]"
+                          >
+                            <i className="ri-upload-2-line text-[11px] mr-1" />
+                            上传参考图
                           </button>
                         </div>
                       </div>
@@ -712,9 +979,45 @@ export function ShortDramaAssetsPage() {
             </div>
           </>
         ) : null}
+
+        {isGeneratingAssets ? (
+          <div className="px-6 lg:px-10 py-7">
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: skeletonCount }).map((_, i) => (
+                <div key={`skeleton-${activeTab}-${i}`} className="overflow-hidden rounded-2xl border border-[#EAEAEA] bg-white">
+                  <div className="h-48 animate-pulse bg-[#ECEDEF]" />
+                  <div className="space-y-2 p-4">
+                    <div className="h-4 w-2/3 animate-pulse rounded bg-[#ECEDEF]" />
+                    <div className="h-3 w-full animate-pulse rounded bg-[#F1F2F4]" />
+                    <div className="h-3 w-5/6 animate-pulse rounded bg-[#F1F2F4]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <AssetLightbox item={lightbox} onClose={() => setLightbox(null)} />
+      <AssetInteractionModal
+        asset={interactionAsset}
+        mode={interactionMode}
+        saving={editorSaving}
+        regenerating={editorRegenerating}
+        onClose={() => setInteractionAsset(null)}
+        onOpenEdit={() => setInteractionMode('edit')}
+        onSave={saveAssetEdit}
+        onRegenerate={regenerateAsset}
+        onReferenceSelected={({ name }) => {
+          if (!interactionAsset || effectiveProjectId == null) return;
+          console.info('[FRONT_ASSET_REFERENCE_UPLOAD_SELECTED]', {
+            project_id: effectiveProjectId,
+            asset_type: interactionAsset.kind,
+            asset_id: interactionAsset.id,
+            file_name: name,
+          });
+        }}
+      />
     </div>
   );
 }

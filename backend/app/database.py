@@ -57,7 +57,32 @@ def _sqlite_ensure_render_job_columns() -> None:
         logger.exception("SQLite migration for short_drama_render_jobs failed")
 
 
+def _sqlite_ensure_project_step_columns() -> None:
+    """SQLite: add project edit-tracking columns for existing DBs."""
+    if "sqlite" not in settings.DATABASE_URL:
+        return
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("short_drama_projects"):
+            return
+        cols = {c["name"] for c in insp.get_columns("short_drama_projects")}
+        alters: list[str] = []
+        if "last_active_step" not in cols:
+            alters.append("ALTER TABLE short_drama_projects ADD COLUMN last_active_step VARCHAR")
+        if "step_status" not in cols:
+            alters.append("ALTER TABLE short_drama_projects ADD COLUMN step_status TEXT")
+        if not alters:
+            return
+        with engine.begin() as conn:
+            for stmt in alters:
+                conn.execute(text(stmt))
+        logger.info("SQLite migration: short_drama_projects columns added: %s", alters)
+    except Exception:
+        logger.exception("SQLite migration for short_drama_projects failed")
+
+
 def init_db():
     """Initialize database tables - models must be imported before calling this"""
     Base.metadata.create_all(bind=engine)
     _sqlite_ensure_render_job_columns()
+    _sqlite_ensure_project_step_columns()

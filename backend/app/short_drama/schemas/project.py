@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,10 @@ class ShortDramaProjectResponse(BaseModel):
     style: Optional[str] = None
     visual_style: Optional[str] = None
     aspect_ratio: Optional[str] = None
+    last_active_step: Optional[Literal["step_1", "step_2", "step_3", "step_4", "overview"]] = None
+    step_status: Dict[str, str] = Field(default_factory=dict)
+    overall_status: Optional[Literal["draft", "stale", "generating", "completed"]] = None
+    final_video_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -31,6 +35,21 @@ class ShortDramaProjectResponse(BaseModel):
 
 class CreateShortDramaProjectResponse(BaseModel):
     project: ShortDramaProjectResponse
+
+
+class ShortDramaProjectListResponse(BaseModel):
+    projects: List[ShortDramaProjectResponse] = Field(default_factory=list)
+
+
+class ProjectEntryRedirectResponse(BaseModel):
+    project_id: int
+    redirect_to: str
+    reason: Literal["completed_overview", "last_active_step", "default_step_1"]
+
+
+class TouchProjectStepRequest(BaseModel):
+    step: Literal["step_1", "step_2", "step_3", "step_4", "overview"]
+    save_intent: Optional[Literal["save_draft", "before_exit"]] = None
 
 
 class PipelineSummaryResponse(BaseModel):

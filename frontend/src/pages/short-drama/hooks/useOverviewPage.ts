@@ -32,6 +32,7 @@ export function useOverviewPage() {
       const p = await getShortDramaPipeline(projectId);
       setPipeline(p);
       touchProjectNameFromPipeline(projectId, p.project?.project_name);
+      console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: projectId, page: 'overview' });
       setPhase('ready');
     } catch (e) {
       const msg =
