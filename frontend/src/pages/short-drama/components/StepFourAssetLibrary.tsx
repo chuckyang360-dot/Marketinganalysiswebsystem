@@ -67,7 +67,11 @@ export function StepFourAssetLibrary({ library, onDragAsset: _onDragAsset }: Ass
                 }}
               >
                 <div className="w-7 h-7 rounded-full overflow-hidden shrink-0">
-                  <img src={c.img} alt={c.name} className="w-full h-full object-cover" />
+                  {c.img ? (
+                    <img src={c.img} alt={c.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full bg-[#ECEDEF]" />
+                  )}
                 </div>
                 <div>
                   <p className="text-[11.5px] font-medium" style={{ color: "#1D1D1F" }}>{c.name}</p>

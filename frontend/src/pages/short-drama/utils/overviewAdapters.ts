@@ -21,7 +21,7 @@ export type OverviewProjectBannerVm = {
 export type OverviewCharacterRowVm = {
   name: string;
   role: string;
-  img: string;
+  img: string | null;
 };
 
 export type OverviewSegmentCardVm = {

@@ -58,41 +58,43 @@ export function ShortDramaProjectsPage() {
         {loading ? <div className="text-[13px] text-[#8E8E93]">加载中...</div> : null}
         {error ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-800">{error}</div> : null}
           <div className="space-y-3">
-            {sorted.map((p) => (
-              <div
-                key={p.id}
-                className="w-full rounded-2xl border border-[#EAEAEA] bg-white px-5 py-4"
-              >
-                {console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft' })}
-                <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[2fr_1.2fr_1.2fr_auto]">
-                  <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold text-[#1D1D1F]">{p.project_name || `项目 ${p.id}`}</p>
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-[#8E8E93]">
-                      <span>project_id: {p.id}</span>
-                      <span>updated_at: {p.updated_at || '-'}</span>
+            {sorted.map((p) => {
+              console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft' });
+              return (
+                <div
+                  key={p.id}
+                  className="w-full rounded-2xl border border-[#EAEAEA] bg-white px-5 py-4"
+                >
+                  <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[2fr_1.2fr_1.2fr_auto]">
+                    <div className="min-w-0">
+                      <p className="truncate text-[15px] font-semibold text-[#1D1D1F]">{p.project_name || `项目 ${p.id}`}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-[#8E8E93]">
+                        <span>project_id: {p.id}</span>
+                        <span>updated_at: {p.updated_at || '-'}</span>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1 text-[12px] text-[#6E6E73]">
+                      <span>last_active_step: {p.last_active_step || 'step_1'}</span>
+                      <span>overall_status: {statusLabel(p.overall_status)}</span>
+                    </div>
+                    <div className="grid grid-cols-1 gap-1 text-[12px] text-[#6E6E73]">
+                      <span>final_video: {p.final_video_url ? 'yes' : 'no'}</span>
+                      <span>step4_status: {p.step_status?.step_4 || 'not_started'}</span>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="rounded-full bg-[#F5F5F7] px-2.5 py-1 text-[11px] text-[#444444]">{statusLabel(p.overall_status)}</span>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/short-drama/projects/${p.id}`)}
+                        className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
+                      >
+                        {actionLabel(p.overall_status)}
+                      </button>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-1 text-[12px] text-[#6E6E73]">
-                    <span>last_active_step: {p.last_active_step || 'step_1'}</span>
-                    <span>overall_status: {statusLabel(p.overall_status)}</span>
-                  </div>
-                  <div className="grid grid-cols-1 gap-1 text-[12px] text-[#6E6E73]">
-                    <span>final_video: {p.final_video_url ? 'yes' : 'no'}</span>
-                    <span>step4_status: {p.step_status?.step_4 || 'not_started'}</span>
-                  </div>
-                  <div className="flex items-center justify-end gap-2">
-                    <span className="rounded-full bg-[#F5F5F7] px-2.5 py-1 text-[11px] text-[#444444]">{statusLabel(p.overall_status)}</span>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/short-drama/projects/${p.id}`)}
-                      className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
-                    >
-                      {actionLabel(p.overall_status)}
-                    </button>
-                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

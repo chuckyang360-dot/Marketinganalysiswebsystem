@@ -240,7 +240,11 @@ export function ShortDramaOverviewPage() {
                     CHARS.map((c, idx) => (
                       <div key={`${c.name}-${idx}`} className="flex items-center gap-2.5">
                         <div className="w-10 h-10 rounded-full overflow-hidden shrink-0">
-                          <img src={c.img} alt={c.name} className="w-full h-full object-cover" />
+                          {c.img ? (
+                            <img src={c.img} alt={c.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full bg-[#ECEDEF]" />
+                          )}
                         </div>
                         <div>
                           <p className="text-[12.5px] font-semibold" style={{ color: '#1D1D1F' }}>

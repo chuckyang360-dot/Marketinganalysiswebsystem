@@ -12,7 +12,7 @@ import type {
 const SEGMENT_COLORS = ['#B45309', '#DC2626', '#047857', '#334155', '#9333EA', '#0F766E'];
 
 export type StepFourAssetLibraryVm = {
-  characters: { name: string; role: string; img: string }[];
+  characters: { name: string; role: string; img: string | null }[];
   scenes: { name: string; type: string }[];
   products: { name: string; type: string }[];
 };
