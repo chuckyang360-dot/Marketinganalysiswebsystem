@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import urlparse
+
+import httpx
 
 from ..exceptions import ShortDramaVideoSaveError
 from .public_static_url import build_public_static_url
 
 logger = logging.getLogger(__name__)
+_SHORT_DRAMA_STATIC_VIDEO_PREFIX = "/static/short-drama-videos/"
+_SHORT_DRAMA_R2_VIDEO_PATH_MARKER = "/short-drama/videos/"
 
 
 def short_drama_videos_root() -> Path:
@@ -26,7 +32,7 @@ def ensure_video_project_dir(project_id: int) -> Path:
 
 
 def public_video_url_path(project_id: int, filename: str) -> str:
-    return f"/static/short-drama-videos/{project_id}/{filename}"
+    return f"{_SHORT_DRAMA_STATIC_VIDEO_PREFIX}{project_id}/{filename}"
 
 
 def save_segment_video_bytes(*, project_id: int, segment_id: str, data: bytes) -> str:
@@ -84,10 +90,9 @@ def local_path_from_public_video_url(public_url: str) -> Path:
     if u.startswith("http://") or u.startswith("https://"):
         parsed = urlparse(u)
         u = parsed.path or ""
-    prefix = "/static/short-drama-videos/"
-    if not u.startswith(prefix):
+    if not u.startswith(_SHORT_DRAMA_STATIC_VIDEO_PREFIX):
         raise ShortDramaVideoSaveError(f"Not a short drama video URL: {public_url}")
-    rel = u[len(prefix) :].lstrip("/")
+    rel = u[len(_SHORT_DRAMA_STATIC_VIDEO_PREFIX) :].lstrip("/")
     root = short_drama_videos_root().resolve()
     path = (root / rel).resolve()
     try:
@@ -95,6 +100,53 @@ def local_path_from_public_video_url(public_url: str) -> Path:
     except ValueError as e:
         raise ShortDramaVideoSaveError(f"Invalid video path escape: {public_url}") from e
     return path
+
+
+def is_short_drama_static_video_url(public_url: str) -> bool:
+    u = (public_url or "").strip()
+    if not u:
+        return False
+    if u.startswith("http://") or u.startswith("https://"):
+        parsed = urlparse(u)
+        u = parsed.path or ""
+    return u.startswith(_SHORT_DRAMA_STATIC_VIDEO_PREFIX) and u.lower().endswith(".mp4")
+
+
+def is_short_drama_r2_video_url(public_url: str) -> bool:
+    u = (public_url or "").strip()
+    if not u:
+        return False
+    if not (u.startswith("http://") or u.startswith("https://")):
+        return False
+    parsed = urlparse(u)
+    path = parsed.path or ""
+    return bool(parsed.netloc) and _SHORT_DRAMA_R2_VIDEO_PATH_MARKER in path and path.lower().endswith(".mp4")
+
+
+def is_short_drama_video_url(public_url: str) -> bool:
+    return is_short_drama_static_video_url(public_url) or is_short_drama_r2_video_url(public_url)
+
+
+def download_public_video_to_temp_mp4(public_url: str) -> Path:
+    timeout = httpx.Timeout(connect=15.0, read=180.0, write=30.0, pool=10.0)
+    fd, tmp_name = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    out = Path(tmp_name)
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+            resp = client.get(public_url)
+        if resp.status_code >= 400:
+            raise ShortDramaVideoSaveError(f"Failed to download video URL (HTTP {resp.status_code}): {public_url}")
+        out.write_bytes(resp.content)
+        return out
+    except Exception as e:
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if isinstance(e, ShortDramaVideoSaveError):
+            raise
+        raise ShortDramaVideoSaveError(f"Failed to download video URL: {public_url}; err={e}") from e
 
 
 def absolutize_media_url_for_provider(relative_or_absolute: str) -> str:
