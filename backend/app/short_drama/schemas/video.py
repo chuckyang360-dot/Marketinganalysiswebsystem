@@ -38,9 +38,22 @@ class SingleSegmentVideoResponse(BaseModel):
     project_id: int
     segment_id: str
     ok: bool
+    status: str
+    progress: int = 0
     video_url: Optional[str] = None
     render_job_id: Optional[int] = None
     error: Optional[str] = None
+
+
+class RenderJobStatusResponse(BaseModel):
+    job_id: int
+    project_id: int
+    segment_id: str
+    status: str
+    progress: int = 0
+    video_url: Optional[str] = None
+    error: Optional[str] = None
+    request_id: Optional[str] = None
 
 
 class MergeVideoResponse(BaseModel):

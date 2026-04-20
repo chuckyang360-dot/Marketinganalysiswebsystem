@@ -2,10 +2,11 @@ import logging
 import os
 import socket
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ..models import RenderJob
 from ..exceptions import (
     ShortDramaFFmpegError,
     ShortDramaMergeError,
@@ -16,12 +17,14 @@ from ..exceptions import (
 from ..http_errors import raise_short_drama_http
 from ..schemas.video import (
     MergeVideoResponse,
+    RenderJobStatusResponse,
     SingleSegmentVideoResponse,
     VideoBatchSummaryResponse,
     VideoProjectRequest,
 )
 from ..services.merge_service import merge_service
 from ..services.render_executor_service import render_executor_service
+from ..utils.enums import RenderTargetType
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,7 @@ async def generate_one_segment_video(
     segment_id: str,
     body: VideoProjectRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     logger.info(
@@ -88,23 +92,31 @@ async def generate_one_segment_video(
         segment_id=segment_id,
     )
     try:
-        r = render_executor_service.generate_single_segment_video(db, body.project_id, segment_id)
+        job = render_executor_service.enqueue_single_segment_video(db, body.project_id, segment_id)
+        background_tasks.add_task(
+            render_executor_service.run_single_segment_video_job,
+            body.project_id,
+            segment_id,
+            job.id,
+        )
         log_api_success(
             logger,
             "POST /videos/generate/{segment_id}",
             project_id=body.project_id,
-            segment_id=r.segment_id,
-            ok=r.ok,
-            video_url=r.video_url or "",
-            render_job_id=r.render_job_id,
+            segment_id=segment_id,
+            ok=True,
+            render_job_id=job.id,
+            status=job.status,
         )
         return SingleSegmentVideoResponse(
             project_id=body.project_id,
-            segment_id=r.segment_id,
-            ok=r.ok,
-            video_url=r.video_url,
-            render_job_id=r.render_job_id,
-            error=r.error_message,
+            segment_id=segment_id,
+            ok=True,
+            status=job.status,
+            progress=0,
+            video_url=None,
+            render_job_id=job.id,
+            error=None,
         )
     except ShortDramaVideoInputError as e:
         log_api_error(
@@ -134,6 +146,32 @@ async def generate_one_segment_video(
             status_code=e.status_code,
         )
         raise
+
+
+@router.get("/render-jobs/{job_id}", response_model=RenderJobStatusResponse)
+async def get_render_job_status(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(RenderJob).filter(RenderJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Render job {job_id} not found")
+    if job.target_type != RenderTargetType.SEGMENT.value:
+        raise HTTPException(status_code=400, detail=f"Render job {job_id} is not a segment video job")
+    meta = dict(job.meta_json or {})
+    status = str(job.status or meta.get("status") or "pending")
+    progress_raw = meta.get("progress", 0)
+    try:
+        progress = max(0, min(100, int(progress_raw)))
+    except (TypeError, ValueError):
+        progress = 0
+    return RenderJobStatusResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        segment_id=str(job.target_id),
+        status=status,
+        progress=progress,
+        video_url=job.output_url,
+        error=job.error_message,
+        request_id=job.provider_request_id,
+    )
 
 
 @router.post("/merge", response_model=MergeVideoResponse)
