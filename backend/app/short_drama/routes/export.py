@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from ...database import get_db
+from ..exceptions import ShortDramaVideoSaveError
 from ..models import ShortDramaProject
 from ..services.overview_export_zip import build_all_zip_bytes, build_videos_zip_bytes
 from ..services.read_models import latest_story_blueprint
@@ -17,7 +18,7 @@ router = APIRouter()
 
 @router.get("/{project_id}/export/videos")
 async def export_videos_zip(project_id: int, db: Session = Depends(get_db)):
-    logger.info("OVERVIEW_EXPORT_VIDEOS_START project_id=%s", project_id)
+    logger.info("OVERVIEW_EXPORT_VIDEOS_START project_id=%s export_type=video_bundle", project_id)
     project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
     if not project:
         logger.warning("OVERVIEW_EXPORT_VIDEOS_FAILED project_id=%s reason=not_found", project_id)
@@ -41,6 +42,17 @@ async def export_videos_zip(project_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="导出失败，请稍后重试",
         ) from e
+    except ShortDramaVideoSaveError as e:
+        logger.exception(
+            "OVERVIEW_EXPORT_VIDEOS_FAILED project_id=%s export_type=video_bundle err_class=%s err=%s",
+            project_id,
+            type(e).__name__,
+            e,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e) or "导出失败，请稍后重试",
+        ) from e
     except Exception as e:
         logger.exception("OVERVIEW_EXPORT_VIDEOS_FAILED project_id=%s err=%s", project_id, e)
         raise HTTPException(
@@ -48,7 +60,12 @@ async def export_videos_zip(project_id: int, db: Session = Depends(get_db)):
             detail="导出失败，请稍后重试",
         ) from e
 
-    logger.info("OVERVIEW_EXPORT_VIDEOS_SUCCESS project_id=%s filename=%s bytes=%s", project_id, filename, len(data))
+    logger.info(
+        "OVERVIEW_EXPORT_VIDEOS_SUCCESS project_id=%s export_type=video_bundle filename=%s bytes=%s",
+        project_id,
+        filename,
+        len(data),
+    )
     return Response(
         content=data,
         media_type="application/zip",
@@ -60,7 +77,7 @@ async def export_videos_zip(project_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{project_id}/export/all")
 async def export_all_zip(project_id: int, db: Session = Depends(get_db)):
-    logger.info("OVERVIEW_EXPORT_ALL_START project_id=%s", project_id)
+    logger.info("OVERVIEW_EXPORT_ALL_START project_id=%s export_type=export_all", project_id)
     project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
     if not project:
         logger.warning("OVERVIEW_EXPORT_ALL_FAILED project_id=%s reason=not_found", project_id)
@@ -88,6 +105,17 @@ async def export_all_zip(project_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="导出失败，请稍后重试",
         ) from e
+    except ShortDramaVideoSaveError as e:
+        logger.exception(
+            "OVERVIEW_EXPORT_ALL_FAILED project_id=%s export_type=export_all err_class=%s err=%s",
+            project_id,
+            type(e).__name__,
+            e,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e) or "导出失败，请稍后重试",
+        ) from e
     except Exception as e:
         logger.exception("OVERVIEW_EXPORT_ALL_FAILED project_id=%s err=%s", project_id, e)
         raise HTTPException(
@@ -95,7 +123,12 @@ async def export_all_zip(project_id: int, db: Session = Depends(get_db)):
             detail="导出失败，请稍后重试",
         ) from e
 
-    logger.info("OVERVIEW_EXPORT_ALL_SUCCESS project_id=%s filename=%s bytes=%s", project_id, filename, len(data))
+    logger.info(
+        "OVERVIEW_EXPORT_ALL_SUCCESS project_id=%s export_type=export_all filename=%s bytes=%s",
+        project_id,
+        filename,
+        len(data),
+    )
     return Response(
         content=data,
         media_type="application/zip",

@@ -27,7 +27,7 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
     log_api_request(logger, "POST /segment/generate", project_id=body.project_id)
     try:
         project = orchestrator.get_project(db, body.project_id)
-        orchestrator.assert_step_allowed(project, WorkflowStep.GENERATE_SEGMENTS)
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_SEGMENTS)
 
         sb_row = latest_story_blueprint(db, body.project_id)
         if not sb_row:

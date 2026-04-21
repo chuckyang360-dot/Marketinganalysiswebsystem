@@ -31,7 +31,7 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
     log_api_request(logger, "POST /story/generate", project_id=body.project_id)
     try:
         project = orchestrator.get_project(db, body.project_id)
-        orchestrator.assert_step_allowed(project, WorkflowStep.GENERATE_STORY)
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_STORY)
         had_existing_story = latest_story_blueprint(db, body.project_id) is not None
 
         pc_row = latest_product_context(db, body.project_id)
@@ -50,16 +50,29 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
             "aspect_ratio": project.aspect_ratio,
         }
 
+        status_before = project.status
         try:
             blueprint = story_planner_service.generate(body.project_id, product, project_config)
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
-            orchestrator.mark_failed(db, project)
-            db.commit()
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                body.project_id,
+                "S2_generate_story",
+                type(e).__name__,
+                status_before,
+                project.status,
+            )
             raise_short_drama_http(e)
-        except Exception:
+        except Exception as e:
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                body.project_id,
+                "S2_generate_story",
+                type(e).__name__,
+                status_before,
+                project.status,
+            )
             logger.exception("Story generation unexpected error project_id=%s", body.project_id)
-            orchestrator.mark_failed(db, project)
-            db.commit()
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Story generation failed")
 
         version = next_story_version(db, body.project_id)

@@ -7,6 +7,14 @@ from sqlalchemy.orm import Session
 from ..models import ShortDramaProject
 from ..utils.enums import ProjectStatus, WorkflowStep
 from ..utils.flow_logging import log_orchestrator
+from .read_models import (
+    all_segment_scripts_have_video,
+    latest_final_video_url,
+    latest_product_context,
+    latest_story_blueprint,
+    list_asset_rows,
+    list_segment_scripts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,27 +117,79 @@ _PARSE_PRODUCT_ALLOWED = frozenset(
 class WorkflowOrchestrator:
     """Owns legal status transitions; routes must not mutate status directly."""
 
+    def recover_failed_project_status(self, db: Session, project: ShortDramaProject) -> None:
+        """Map historical terminal `failed` to a retryable status from DB artifacts (best-effort)."""
+        if project.status != ProjectStatus.FAILED.value:
+            return
+        pid = project.id
+        from_status = project.status
+        reason_basis = ""
+
+        if latest_final_video_url(db, pid):
+            reason_basis = "latest_final_render_job_has_output_url"
+            project.status = ProjectStatus.COMPLETED.value
+        else:
+            segs = list_segment_scripts(db, pid)
+            if segs:
+
+                def _any_segment_video_url() -> bool:
+                    for s in segs:
+                        raw = s.script_json if isinstance(s.script_json, dict) else {}
+                        vr = raw.get("video_render")
+                        if isinstance(vr, dict) and (str(vr.get("video_url") or "").strip()):
+                            return True
+                    return False
+
+                if all_segment_scripts_have_video(db, pid):
+                    reason_basis = "all_segment_scripts_have_video_url"
+                    project.status = ProjectStatus.VIDEO_SEGMENTS_READY.value
+                elif _any_segment_video_url():
+                    reason_basis = "partial_segment_video_urls_present"
+                    project.status = ProjectStatus.VIDEO_RENDERING.value
+                else:
+                    reason_basis = "segment_scripts_no_videos_yet"
+                    project.status = ProjectStatus.SEGMENTS_GENERATED.value
+            else:
+                chars, scenes, products = list_asset_rows(db, pid)
+                if chars or scenes or products:
+
+                    def _filled(rows: list) -> int:
+                        return sum(1 for r in rows if (getattr(r, "image_url", None) or "").strip())
+
+                    if _filled(chars) + _filled(scenes) + _filled(products) > 0:
+                        reason_basis = "asset_rows_with_at_least_one_image_url"
+                        project.status = ProjectStatus.ASSETS_READY.value
+                    else:
+                        reason_basis = "asset_rows_exist_no_images_yet"
+                        project.status = ProjectStatus.ASSET_SPECS_GENERATED.value
+                elif latest_story_blueprint(db, pid):
+                    reason_basis = "story_blueprint_exists_no_segments"
+                    project.status = ProjectStatus.STORY_GENERATED.value
+                elif latest_product_context(db, pid):
+                    reason_basis = "product_context_exists_no_story"
+                    project.status = ProjectStatus.PRODUCT_PARSED.value
+                else:
+                    reason_basis = "no_pipeline_artifacts"
+                    project.status = ProjectStatus.CREATED.value
+
+        db.add(project)
+        recovered_status = project.status
+        logger.info(
+            "[SHORT_DRAMA_RECOVER_FAILED] project_id=%s from_status=%s recovered_status=%s reason_basis=%s",
+            pid,
+            from_status,
+            recovered_status,
+            reason_basis,
+        )
+
     def get_project(self, db: Session, project_id: int) -> ShortDramaProject:
         project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
         return project
 
-    def assert_step_allowed(self, project: ShortDramaProject, step: WorkflowStep) -> None:
-        if project.status == ProjectStatus.FAILED.value:
-            log_orchestrator(
-                logger,
-                _orch_mod(step),
-                "step_assert_denied",
-                project_id=project.id,
-                step=step.value,
-                reason="project_failed",
-                status=project.status,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Project is in failed state",
-            )
+    def assert_step_allowed(self, db: Session, project: ShortDramaProject, step: WorkflowStep) -> None:
+        self.recover_failed_project_status(db, project)
         if step == WorkflowStep.RENDER_ASSETS:
             if project.status not in _RENDER_ASSETS_ALLOWED:
                 log_orchestrator(
@@ -268,7 +328,7 @@ class WorkflowOrchestrator:
 
     def begin_asset_image_render(self, db: Session, project: ShortDramaProject) -> None:
         """Enter assets_rendering from specs ready or from segments_done (re-render)."""
-        self.assert_step_allowed(project, WorkflowStep.RENDER_ASSETS)
+        self.assert_step_allowed(db, project, WorkflowStep.RENDER_ASSETS)
         if project.status in (
             ProjectStatus.ASSET_SPECS_GENERATED.value,
             ProjectStatus.SEGMENTS_GENERATED.value,
@@ -357,24 +417,12 @@ class WorkflowOrchestrator:
         *,
         asset_row_count: int,
     ) -> None:
-        """If a previous run left project failed but asset rows exist, unblock image retry."""
-        if project.status != ProjectStatus.FAILED.value:
-            return
-        if asset_row_count <= 0:
-            log_orchestrator(
-                logger,
-                "asset_images",
-                "normalize_failed_skip_no_asset_rows",
-                project_id=project.id,
-            )
-            return
-        self.revert_to_asset_specs_after_image_batch_failure(
-            db,
-            project,
-            reason="normalize_failed_state_for_image_retry",
-        )
+        """Best-effort unblock after legacy `failed` (asset_row_count kept for API compatibility)."""
+        _ = asset_row_count
+        self.recover_failed_project_status(db, project)
 
     def mark_failed(self, db: Session, project: ShortDramaProject, message: Optional[str] = None) -> None:
+        """Set terminal failed (project-level only). Retryable step errors must not use this."""
         project.status = ProjectStatus.FAILED.value
         db.add(project)
         log_orchestrator(
@@ -387,7 +435,7 @@ class WorkflowOrchestrator:
 
     def begin_video_render(self, db: Session, project: ShortDramaProject) -> None:
         """assets_ready or segments_generated → video_rendering (segment scripts may follow asset images)."""
-        self.assert_step_allowed(project, WorkflowStep.RENDER_VIDEO)
+        self.assert_step_allowed(db, project, WorkflowStep.RENDER_VIDEO)
         if project.status in (
             ProjectStatus.ASSETS_READY.value,
             ProjectStatus.SEGMENTS_GENERATED.value,
@@ -413,18 +461,28 @@ class WorkflowOrchestrator:
         all_failed: bool,
         all_segments_succeeded: bool,
     ) -> None:
-        """After batch: all failed → failed; all segment jobs OK → video_segments_ready; else video_rendering."""
+        """After batch: all failed → segments_generated (retryable); all OK → video_segments_ready; else video_rendering."""
         if not had_attempts:
             return
         if all_failed:
-            project.status = ProjectStatus.FAILED.value
+            old_status = project.status
+            project.status = ProjectStatus.SEGMENTS_GENERATED.value
             db.add(project)
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                project.id,
+                "S4_segment_video_batch",
+                "all_segment_render_attempts_failed",
+                old_status,
+                project.status,
+            )
             log_orchestrator(
                 logger,
                 "video_generation",
                 "complete_segment_video_batch",
                 project_id=project.id,
-                outcome="all_failed",
+                outcome="all_segment_videos_failed_recoverable",
+                old_status=old_status,
                 new_status=project.status,
             )
             return

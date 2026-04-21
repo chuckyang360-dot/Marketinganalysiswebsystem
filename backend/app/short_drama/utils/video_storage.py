@@ -7,7 +7,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -89,7 +89,9 @@ def local_path_from_public_video_url(public_url: str) -> Path:
     u = public_url.strip()
     if u.startswith("http://") or u.startswith("https://"):
         parsed = urlparse(u)
-        u = parsed.path or ""
+        u = unquote(parsed.path or "")
+    else:
+        u = unquote(u)
     if not u.startswith(_SHORT_DRAMA_STATIC_VIDEO_PREFIX):
         raise ShortDramaVideoSaveError(f"Not a short drama video URL: {public_url}")
     rel = u[len(_SHORT_DRAMA_STATIC_VIDEO_PREFIX) :].lstrip("/")
@@ -108,7 +110,9 @@ def is_short_drama_static_video_url(public_url: str) -> bool:
         return False
     if u.startswith("http://") or u.startswith("https://"):
         parsed = urlparse(u)
-        u = parsed.path or ""
+        u = unquote(parsed.path or "")
+    else:
+        u = unquote(u)
     return u.startswith(_SHORT_DRAMA_STATIC_VIDEO_PREFIX) and u.lower().endswith(".mp4")
 
 

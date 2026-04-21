@@ -94,7 +94,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
     log_api_request(logger, "POST /assets/specs/generate", project_id=body.project_id)
     try:
         project = orchestrator.get_project(db, body.project_id)
-        orchestrator.assert_step_allowed(project, WorkflowStep.GENERATE_ASSET_SPECS)
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_ASSET_SPECS)
         had_existing_assets = (
             db.query(CharacterAsset.id).filter(CharacterAsset.project_id == body.project_id).first() is not None
             or db.query(SceneAsset.id).filter(SceneAsset.project_id == body.project_id).first() is not None
@@ -112,16 +112,29 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
         product = ProductContextSchema.model_validate(pc_row.normalized_context_json)
         blueprint = StoryBlueprintSchema.model_validate(sb_row.blueprint_json)
 
+        status_before = project.status
         try:
             bundle = asset_spec_service.generate(body.project_id, product, blueprint)
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
-            orchestrator.mark_failed(db, project)
-            db.commit()
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                body.project_id,
+                "S3_generate_asset_specs",
+                type(e).__name__,
+                status_before,
+                project.status,
+            )
             raise_short_drama_http(e)
-        except Exception:
+        except Exception as e:
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                body.project_id,
+                "S3_generate_asset_specs",
+                type(e).__name__,
+                status_before,
+                project.status,
+            )
             logger.exception("Asset spec unexpected error project_id=%s", body.project_id)
-            orchestrator.mark_failed(db, project)
-            db.commit()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Asset spec generation failed",

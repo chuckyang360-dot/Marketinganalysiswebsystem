@@ -41,7 +41,7 @@ class MergeService:
         resolved_inputs_count = 0
         downloaded_temp_inputs: list[Path] = []
         project = orchestrator.get_project(db, project_id)
-        orchestrator.assert_step_allowed(project, WorkflowStep.MERGE)
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.MERGE)
 
         segs = list_segment_scripts(db, project_id)
         if not segs:

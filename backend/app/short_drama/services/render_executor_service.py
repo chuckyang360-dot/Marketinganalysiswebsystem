@@ -525,6 +525,7 @@ class RenderExecutorService:
 
     def enqueue_single_segment_video(self, db: Session, project_id: int, segment_id: str) -> RenderJob:
         project = orchestrator.get_project(db, project_id)
+        orchestrator.recover_failed_project_status(db, project)
         st = project.status
         allowed = {
             ProjectStatus.ASSETS_READY.value,
@@ -777,6 +778,7 @@ class RenderExecutorService:
         segment_id: str,
     ) -> SegmentVideoAttemptResult:
         project = orchestrator.get_project(db, project_id)
+        orchestrator.recover_failed_project_status(db, project)
         st = project.status
         allowed = {
             ProjectStatus.ASSETS_READY.value,

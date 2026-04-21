@@ -40,11 +40,22 @@ from ..services.read_models import (
     list_asset_rows,
     list_segment_scripts,
 )
+from ..services.workflow_orchestrator import orchestrator
+from ..utils.enums import ProjectStatus
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.public_static_url import build_public_static_url
 from ..utils.segment_slots import normalize_segment_script_dict_for_read
 
 logger = logging.getLogger(__name__)
+
+
+def _persist_recover_if_failed(db: Session, project: ShortDramaProject) -> None:
+    """Legacy `failed` projects: infer retryable status from artifacts and persist."""
+    if project.status != ProjectStatus.FAILED.value:
+        return
+    orchestrator.recover_failed_project_status(db, project)
+    db.commit()
+    db.refresh(project)
 
 
 def _public_media_url(u: str | None) -> str | None:
@@ -152,6 +163,7 @@ async def get_project(project_id: int, db: Session = Depends(get_db)):
     project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    _persist_recover_if_failed(db, project)
     return _project_to_response(db, project)
 
 
@@ -160,6 +172,7 @@ async def get_project_entry(project_id: int, db: Session = Depends(get_db)):
     project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    _persist_recover_if_failed(db, project)
     project_view = _project_to_response(db, project)
 
     step_to_path = {
@@ -217,6 +230,8 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
         if not project:
             log_api_error(logger, "GET /project/{id}/pipeline", "Project not found", project_id=project_id)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+        _persist_recover_if_failed(db, project)
 
         pc = latest_product_context(db, project_id)
         sb = latest_story_blueprint(db, project_id)

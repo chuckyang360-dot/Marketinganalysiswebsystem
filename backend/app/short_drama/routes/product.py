@@ -30,19 +30,32 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
     log_api_request(logger, "POST /product/parse", project_id=body.project_id)
     try:
         project = orchestrator.get_project(db, body.project_id)
-        orchestrator.assert_step_allowed(project, WorkflowStep.PARSE_PRODUCT)
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.PARSE_PRODUCT)
         had_existing_context = latest_product_context(db, body.project_id) is not None
 
+        status_before = project.status
         try:
             normalized = product_parser_service.parse(body.project_id, body.input)
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
-            orchestrator.mark_failed(db, project)
-            db.commit()
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                body.project_id,
+                "S1_parse_product",
+                type(e).__name__,
+                status_before,
+                project.status,
+            )
             raise_short_drama_http(e)
-        except Exception:
+        except Exception as e:
+            logger.info(
+                "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
+                body.project_id,
+                "S1_parse_product",
+                type(e).__name__,
+                status_before,
+                project.status,
+            )
             logger.exception("Product parse unexpected error project_id=%s", body.project_id)
-            orchestrator.mark_failed(db, project)
-            db.commit()
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Product parse failed")
 
         version = next_product_context_version(db, body.project_id)
