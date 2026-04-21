@@ -20,7 +20,11 @@ from ..services.read_models import latest_final_video_url, list_segment_scripts
 from ..services.overview_export_markdown import build_script_markdown, build_storyboard_markdown
 from ..utils.segment_slots import normalize_segment_script_dict_for_read
 from ..utils.public_static_url import build_public_static_url
-from ..utils.video_storage import download_public_video_to_temp_mp4, local_path_from_public_video_url
+from ..utils.video_storage import (
+    download_public_video_to_temp_mp4,
+    is_short_drama_static_video_url,
+    local_path_from_public_video_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,25 +48,142 @@ def _public_url_from_script(script: dict) -> str | None:
     return u or None
 
 
-def _resolve_archive_video_path(public_url: str, temp_cleanup: list[Path]) -> Path:
+def _log_zip_video_collect(
+    *,
+    project_id: int,
+    archive_name: str,
+    source_url: str,
+    resolved_local_path: str,
+    exists: bool,
+    strategy: str,
+) -> None:
+    logger.info(
+        "[OVERVIEW_EXPORT_ZIP_VIDEO] project_id=%s archive_name=%s source_url=%s "
+        "resolved_local_path=%s exists=%s strategy=%s",
+        project_id,
+        archive_name,
+        source_url[:800],
+        resolved_local_path[:800],
+        exists,
+        strategy,
+    )
+
+
+def _resolve_archive_video_path(
+    public_url: str,
+    temp_cleanup: list[Path],
+    *,
+    project_id: int,
+    export_type: str,
+    file_role: str,
+    file_identifier: str,
+    archive_name: str,
+) -> Path:
     s = (public_url or "").strip()
     if not s:
         raise ValueError("empty video url")
     abs_url = build_public_static_url(s) if not (s.startswith("http://") or s.startswith("https://")) else s
+
+    # Local static mounts must be read from disk only. HTTP loopback to the same app often returns
+    # 503 under a single worker (export holds the worker while httpx tries to fetch /static/...).
+    if is_short_drama_static_video_url(s) or is_short_drama_static_video_url(abs_url):
+        try:
+            p = local_path_from_public_video_url(abs_url)
+        except (ShortDramaVideoSaveError, OSError, ValueError) as e:
+            logger.warning(
+                "[OVERVIEW_EXPORT_ZIP_COLLECT] project_id=%s export_type=%s file_role=%s "
+                "identifier=%s source_kind=static_resolve_failed abs_url=%s err=%s",
+                project_id,
+                export_type,
+                file_role,
+                file_identifier,
+                abs_url[:500],
+                e,
+            )
+            _log_zip_video_collect(
+                project_id=project_id,
+                archive_name=archive_name,
+                source_url=s,
+                resolved_local_path="",
+                exists=False,
+                strategy="local_static",
+            )
+            raise
+        rp = str(p.resolve())
+        if p.is_file():
+            _log_zip_video_collect(
+                project_id=project_id,
+                archive_name=archive_name,
+                source_url=s,
+                resolved_local_path=rp,
+                exists=True,
+                strategy="local_static",
+            )
+            return p
+        logger.error(
+            "[OVERVIEW_EXPORT_ZIP_COLLECT] project_id=%s export_type=%s file_role=%s identifier=%s "
+            "source_kind=static_missing_on_disk expected_path=%s",
+            project_id,
+            export_type,
+            file_role,
+            file_identifier,
+            rp[:500],
+        )
+        _log_zip_video_collect(
+            project_id=project_id,
+            archive_name=archive_name,
+            source_url=s,
+            resolved_local_path=rp,
+            exists=False,
+            strategy="local_static",
+        )
+        raise ShortDramaVideoSaveError(
+            f"本地视频文件不存在（请确认生成目录未清理或重新合并/渲染）: {p}"
+        )
+
     try:
         p = local_path_from_public_video_url(abs_url)
         if p.is_file():
+            rp = str(p.resolve())
+            _log_zip_video_collect(
+                project_id=project_id,
+                archive_name=archive_name,
+                source_url=s,
+                resolved_local_path=rp,
+                exists=True,
+                strategy="local_static",
+            )
             return p
     except (ShortDramaVideoSaveError, OSError, ValueError) as e:
-        logger.info("[OVERVIEW_EXPORT_VIDEO_NOT_LOCAL] url=%s err=%s", abs_url[:200], e)
+        logger.info(
+            "[OVERVIEW_EXPORT_ZIP_COLLECT] project_id=%s export_type=%s file_role=%s identifier=%s "
+            "source_kind=not_local_static url=%s err=%s",
+            project_id,
+            export_type,
+            file_role,
+            file_identifier,
+            abs_url[:500],
+            e,
+        )
 
     tmp = download_public_video_to_temp_mp4(abs_url)
     temp_cleanup.append(tmp)
+    tr = str(tmp.resolve())
+    _log_zip_video_collect(
+        project_id=project_id,
+        archive_name=archive_name,
+        source_url=s,
+        resolved_local_path=tr,
+        exists=tmp.is_file(),
+        strategy="remote_http",
+    )
     return tmp
 
 
 def _write_zip(
     *,
+    project_id: int,
+    export_type: str,
     root_folder: str,
     final_public_url: str | None,
     segment_rows: list[Any],
@@ -71,14 +192,43 @@ def _write_zip(
     include_docs: bool,
 ) -> bytes:
     temp_cleanup: list[Path] = []
+    files_collected_count = 0
     try:
+        seg_with_url = sum(
+            1
+            for row in segment_rows
+            if _public_url_from_script(
+                normalize_segment_script_dict_for_read(
+                    dict(row.script_json if isinstance(getattr(row, "script_json", None), dict) else {})
+                )
+            )
+        )
+        logger.info(
+            "[OVERVIEW_EXPORT_ZIP_START] project_id=%s export_type=%s include_docs=%s "
+            "has_final=%s segment_rows=%s segments_with_video_url=%s",
+            project_id,
+            export_type,
+            include_docs,
+            bool(final_public_url and str(final_public_url).strip()),
+            len(segment_rows),
+            seg_with_url,
+        )
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
             # final
             if final_public_url and str(final_public_url).strip():
-                fp = _resolve_archive_video_path(str(final_public_url), temp_cleanup)
                 arc = f"{root_folder}/final/{_safe_dir_name(project_row.project_name)}-final.mp4"
+                fp = _resolve_archive_video_path(
+                    str(final_public_url),
+                    temp_cleanup,
+                    project_id=project_id,
+                    export_type=export_type,
+                    file_role="final",
+                    file_identifier="final",
+                    archive_name=arc,
+                )
                 zf.write(fp, arcname=arc)
+                files_collected_count += 1
 
             # segments
             for idx, row in enumerate(segment_rows, start=1):
@@ -87,9 +237,18 @@ def _write_zip(
                 vu = _public_url_from_script(script)
                 if not vu:
                     continue
-                sp = _resolve_archive_video_path(vu, temp_cleanup)
                 arc = f"{root_folder}/segments/{_segment_mp4_filename(idx, script, str(row.segment_id))}"
+                sp = _resolve_archive_video_path(
+                    vu,
+                    temp_cleanup,
+                    project_id=project_id,
+                    export_type=export_type,
+                    file_role="segment",
+                    file_identifier=str(row.segment_id),
+                    archive_name=arc,
+                )
                 zf.write(sp, arcname=arc)
+                files_collected_count += 1
 
             if include_docs:
                 pname = _safe_dir_name(project_row.project_name)
@@ -119,7 +278,17 @@ def _write_zip(
                     json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8"),
                 )
 
-        return buf.getvalue()
+        out = buf.getvalue()
+        logger.info(
+            "[OVERVIEW_EXPORT_ZIP_DONE] project_id=%s export_type=%s include_docs=%s "
+            "files_collected_count=%s zip_bytes=%s",
+            project_id,
+            export_type,
+            include_docs,
+            files_collected_count,
+            len(out),
+        )
+        return out
     finally:
         for p in temp_cleanup:
             try:
@@ -140,6 +309,8 @@ def build_videos_zip_bytes(db: Session, project_id: int) -> tuple[bytes, str]:
     final_u = latest_final_video_url(db, project_id)
     root = f"{_safe_dir_name(project.project_name)}-videos"
     data = _write_zip(
+        project_id=project_id,
+        export_type="video_bundle",
         root_folder=root,
         final_public_url=final_u,
         segment_rows=segs,
@@ -163,6 +334,8 @@ def build_all_zip_bytes(db: Session, project_id: int, blueprint_json: dict | Non
     final_u = latest_final_video_url(db, project_id)
     root = f"{_safe_dir_name(project.project_name)}-export"
     data = _write_zip(
+        project_id=project_id,
+        export_type="export_all",
         root_folder=root,
         final_public_url=final_u,
         segment_rows=segs,
