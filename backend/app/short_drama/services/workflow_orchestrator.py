@@ -90,6 +90,21 @@ _SINGLE_SEGMENT_VIDEO_ALLOWED = frozenset(
     }
 )
 
+_PARSE_PRODUCT_ALLOWED = frozenset(
+    {
+        ProjectStatus.CREATED.value,
+        ProjectStatus.PRODUCT_PARSED.value,
+        ProjectStatus.STORY_GENERATED.value,
+        ProjectStatus.ASSET_SPECS_GENERATED.value,
+        ProjectStatus.SEGMENTS_GENERATED.value,
+        ProjectStatus.ASSETS_RENDERING.value,
+        ProjectStatus.ASSETS_READY.value,
+        ProjectStatus.VIDEO_RENDERING.value,
+        ProjectStatus.VIDEO_SEGMENTS_READY.value,
+        ProjectStatus.COMPLETED.value,
+    }
+)
+
 
 class WorkflowOrchestrator:
     """Owns legal status transitions; routes must not mutate status directly."""
@@ -132,6 +147,26 @@ class WorkflowOrchestrator:
                     detail=(
                         f"Invalid status for asset image render: have {project.status}, "
                         f"need one of {sorted(_RENDER_ASSETS_ALLOWED)}"
+                    ),
+                )
+            return
+        if step == WorkflowStep.PARSE_PRODUCT:
+            if project.status not in _PARSE_PRODUCT_ALLOWED:
+                log_orchestrator(
+                    logger,
+                    _orch_mod(step),
+                    "step_assert_denied",
+                    project_id=project.id,
+                    step=step.value,
+                    reason="invalid_status_for_parse_product",
+                    status=project.status,
+                    allowed=sorted(_PARSE_PRODUCT_ALLOWED),
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Invalid status for step {step.value}: have {project.status}, "
+                        f"need one of {sorted(_PARSE_PRODUCT_ALLOWED)}"
                     ),
                 )
             return

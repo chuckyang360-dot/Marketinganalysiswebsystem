@@ -17,7 +17,7 @@ from ..services.project_state_service import (
 )
 from ..services.read_models import latest_product_context, next_product_context_version
 from ..services.workflow_orchestrator import orchestrator
-from ..utils.enums import WorkflowStep
+from ..utils.enums import ProjectStatus, WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,10 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
         if had_existing_context:
             propagate_downstream_stale(project, STEP_1)
         update_last_active_step(project, STEP_1)
-        orchestrator.advance_on_success(db, project, WorkflowStep.PARSE_PRODUCT)
+        # First parse keeps linear bootstrap behavior; re-parse in later stages should
+        # not forcibly rewind project.status and only mark downstream steps stale.
+        if project.status == ProjectStatus.CREATED.value:
+            orchestrator.advance_on_success(db, project, WorkflowStep.PARSE_PRODUCT)
         db.commit()
         db.refresh(record)
 

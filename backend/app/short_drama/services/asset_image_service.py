@@ -286,8 +286,6 @@ class AssetImageService:
     ) -> str:
         project = orchestrator.get_project(db, project_id)
         self._prepare_project_for_asset_image_batch(db, project)
-        orchestrator.begin_asset_image_render(db, project)
-        db.commit()
         t = (asset_type or "").strip().lower()
         if t == "character":
             row = db.query(CharacterAsset).filter(CharacterAsset.project_id == project_id, CharacterAsset.id == asset_id).first()
@@ -297,7 +295,6 @@ class AssetImageService:
             if errs or ok <= 0:
                 raise RuntimeError(errs[0].get("error") if errs else "character regenerate failed")
             db.add(row)
-            orchestrator.complete_asset_image_render(db, project, had_attempts=n > 0, any_success=ok > 0)
             db.commit()
             return str(row.image_url or "")
         if t == "scene":
@@ -307,7 +304,6 @@ class AssetImageService:
             n, ok, errs = self._apply_scene_results(db, project_id, [row])
             if errs or ok <= 0:
                 raise RuntimeError(errs[0].get("error") if errs else "scene regenerate failed")
-            orchestrator.complete_asset_image_render(db, project, had_attempts=n > 0, any_success=ok > 0)
             db.commit()
             return str(row.image_url or "")
         if t == "product":
@@ -317,7 +313,6 @@ class AssetImageService:
             n, ok, errs = self._apply_product_results(db, project_id, [row])
             if errs or ok <= 0:
                 raise RuntimeError(errs[0].get("error") if errs else "product regenerate failed")
-            orchestrator.complete_asset_image_render(db, project, had_attempts=n > 0, any_success=ok > 0)
             db.commit()
             return str(row.image_url or "")
         raise ValueError("invalid asset_type")

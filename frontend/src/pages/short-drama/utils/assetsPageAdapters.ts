@@ -25,11 +25,29 @@ function isLikelyRenderableUrl(input: string): boolean {
   return true;
 }
 
+function maybeRewriteLocalStaticAbsoluteUrl(input: string): string {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return trimmed;
+  try {
+    const u = new URL(trimmed);
+    const isLocalHost = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+    const isShortDramaStatic = u.pathname.startsWith('/static/short-drama-');
+    const base = API_BASE_URL.replace(/\/$/, '');
+    if (!isLocalHost || !isShortDramaStatic || !base) return trimmed;
+    return `${base}${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return trimmed;
+  }
+}
+
 export function resolveAssetImageUrl(imageUrl: string | null | undefined): { src: string | null; hasRealImage: boolean } {
   const u = imageUrl?.trim();
   if (!u || !isLikelyRenderableUrl(u)) return { src: null, hasRealImage: false };
   if (u.startsWith('data:') || u.startsWith('blob:')) return { src: isLikelyRenderableUrl(u) ? u : null, hasRealImage: true };
-  if (u.startsWith('http://') || u.startsWith('https://')) return { src: isLikelyRenderableUrl(u) ? u : null, hasRealImage: true };
+  if (u.startsWith('http://') || u.startsWith('https://')) {
+    const rewritten = maybeRewriteLocalStaticAbsoluteUrl(u);
+    return { src: isLikelyRenderableUrl(rewritten) ? rewritten : null, hasRealImage: true };
+  }
   if (u.startsWith('/')) {
     const base = API_BASE_URL.replace(/\/$/, '');
     const resolved = base ? `${base}${u}` : u;
