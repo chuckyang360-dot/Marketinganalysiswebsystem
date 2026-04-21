@@ -258,6 +258,8 @@ export type UpdateAssetBody = {
   reference_image_data_url?: string;
   reference_image_name?: string;
   product_usage?: string;
+  /** 产品资产类型标签，写入 meta.product_type */
+  product_type?: string;
 };
 
 export type UpdateAssetResponseDto = {

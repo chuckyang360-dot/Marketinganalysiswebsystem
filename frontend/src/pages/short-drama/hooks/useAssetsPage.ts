@@ -235,9 +235,7 @@ export function useAssetsPage() {
     void runInitialFlow();
   }, [runInitialFlow]);
 
-  const retryLoad = useCallback(() => {
-    void runInitialFlow();
-  }, [runInitialFlow]);
+  const retryLoad = useCallback(() => runInitialFlow(), [runInitialFlow]);
 
   const handleNextStep = useCallback(async (): Promise<{ shouldNavigate: boolean; statusAfter?: string }> => {
     setNextStepError(null);

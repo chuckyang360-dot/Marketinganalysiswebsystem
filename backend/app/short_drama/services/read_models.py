@@ -100,17 +100,23 @@ def list_asset_rows(db: Session, project_id: int) -> tuple[list[CharacterAsset],
 
 
 def latest_final_video_url(db: Session, project_id: int) -> str | None:
+    # Use the latest final job attempt only, so old completed rows
+    # cannot pollute current pipeline state after retries.
     row = (
         db.query(RenderJob)
         .filter(
             RenderJob.project_id == project_id,
             RenderJob.target_type == RenderTargetType.FINAL.value,
-            RenderJob.status == RenderJobStatus.COMPLETED.value,
         )
         .order_by(RenderJob.id.desc())
         .first()
     )
-    return row.output_url if row else None
+    if not row:
+        return None
+    if (row.status or "").lower() != RenderJobStatus.COMPLETED.value:
+        return None
+    output_url = (row.output_url or "").strip()
+    return output_url or None
 
 
 def latest_final_render_job(db: Session, project_id: int) -> RenderJob | None:

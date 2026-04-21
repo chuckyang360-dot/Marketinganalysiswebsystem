@@ -1,27 +1,30 @@
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useOverviewExport } from './hooks/useOverviewExport';
 import { useOverviewPage } from './hooks/useOverviewPage';
 import { SHORT_DRAMA_UI } from './utils/shortDramaUiCopy';
 import { withProjectQuery } from './utils/shortDramaRoutes';
 
 export function ShortDramaOverviewPage() {
   const navigate = useNavigate();
-  const [downloading, setDownloading] = useState<string | null>(null);
   const {
     projectId,
     headerProjectName,
     phase,
     error,
     viewModel,
+    pipeline,
     reload,
     goCreate,
     isMockTestPatternVideo,
   } = useOverviewPage();
 
-  const handleDownload = (type: string) => {
-    setDownloading(type);
-    setTimeout(() => setDownloading(null), 1800);
-  };
+  const { busy, downloadFinalVideo, exportScript, exportStoryboard, exportVideoPack, exportAll } = useOverviewExport(
+    projectId,
+    pipeline,
+    viewModel.project.name,
+  );
+
+  const exportBusy = busy !== null;
 
   const { project: PROJECT, plotSummary, characters: CHARS, scenes: SCENES, products: PRODUCTS, segments: SEGMENTS, finalVideoUrl, finalVideoPoster, finalMetaChip } =
     viewModel;
@@ -146,18 +149,29 @@ export function ShortDramaOverviewPage() {
           </button>
           <button
             type="button"
-            onClick={() => handleDownload('all')}
-            className="flex items-center gap-1.5 px-5 py-1.5 rounded-lg text-[12.5px] font-semibold cursor-pointer whitespace-nowrap transition-all duration-200"
+            disabled={exportBusy}
+            onClick={() => void exportAll()}
+            className="flex items-center gap-1.5 px-5 py-1.5 rounded-lg text-[12.5px] font-semibold whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: '#1D1D1F', color: '#ffffff' }}
             onMouseEnter={(e) => {
+              if (exportBusy) return;
               (e.currentTarget as HTMLElement).style.background = '#374151';
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
             }}
           >
-            <i className="ri-download-cloud-line text-[12px]" />
-            一键全部导出
+            {busy === 'all' ? (
+              <>
+                <i className="ri-loader-4-line animate-spin text-[12px]" />
+                正在打包...
+              </>
+            ) : (
+              <>
+                <i className="ri-download-cloud-line text-[12px]" />
+                一键全部导出
+              </>
+            )}
           </button>
         </div>
       </header>
@@ -407,17 +421,19 @@ export function ShortDramaOverviewPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleDownload('video')}
-                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-semibold cursor-pointer transition-all duration-200 whitespace-nowrap"
+                        disabled={exportBusy}
+                        onClick={() => void downloadFinalVideo()}
+                        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-[13px] font-semibold transition-all duration-200 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
                         style={{ background: '#1D1D1F', color: '#ffffff' }}
                         onMouseEnter={(e) => {
+                          if (exportBusy) return;
                           (e.currentTarget as HTMLElement).style.background = '#374151';
                         }}
                         onMouseLeave={(e) => {
                           (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
                         }}
                       >
-                        {downloading === 'video' ? (
+                        {busy === 'video' ? (
                           <>
                             <i className="ri-loader-4-line animate-spin text-[12px]" />
                             下载中...
@@ -465,14 +481,41 @@ export function ShortDramaOverviewPage() {
                     { key: 'video_pack', label: '下载视频包', desc: '所有片段 + 完整视频', icon: 'ri-film-line', color: '#B45309' },
                     { key: 'script', label: '导出脚本文档', desc: '完整剧本 + 分段台词', icon: 'ri-file-text-line', color: '#047857' },
                     { key: 'storyboard', label: '导出分镜文档', desc: '镜头描述 + 场景图', icon: 'ri-layout-grid-line', color: '#334155' },
-                  ].map((opt) => (
+                  ].map((opt) => {
+                    const loading =
+                      (opt.key === 'video_pack' && busy === 'video_pack') ||
+                      (opt.key === 'script' && busy === 'script') ||
+                      (opt.key === 'storyboard' && busy === 'storyboard');
+                    const labelText =
+                      opt.key === 'video_pack'
+                        ? loading
+                          ? '正在打包视频...'
+                          : opt.label
+                        : opt.key === 'script'
+                          ? loading
+                            ? '正在导出脚本...'
+                            : opt.label
+                          : opt.key === 'storyboard'
+                            ? loading
+                              ? '正在导出分镜...'
+                              : opt.label
+                            : opt.label;
+                    const onExport =
+                      opt.key === 'video_pack'
+                        ? () => void exportVideoPack()
+                        : opt.key === 'script'
+                          ? () => void exportScript()
+                          : () => void exportStoryboard();
+                    return (
                     <button
                       key={opt.key}
                       type="button"
-                      onClick={() => handleDownload(opt.key)}
-                      className="p-4 rounded-xl text-left cursor-pointer transition-all duration-200"
+                      disabled={exportBusy}
+                      onClick={onExport}
+                      className="p-4 rounded-xl text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: '#F7F8FA', border: '1px solid #EAEAEA' }}
                       onMouseEnter={(e) => {
+                        if (exportBusy) return;
                         (e.currentTarget as HTMLElement).style.background = '#F5F5F7';
                         (e.currentTarget as HTMLElement).style.borderColor = `${opt.color}35`;
                       }}
@@ -482,20 +525,21 @@ export function ShortDramaOverviewPage() {
                       }}
                     >
                       <div className="w-8 h-8 flex items-center justify-center rounded-lg mb-3" style={{ background: `${opt.color}10` }}>
-                        {downloading === opt.key ? (
+                        {loading ? (
                           <i className="ri-loader-4-line animate-spin text-[14px]" style={{ color: opt.color }} />
                         ) : (
                           <i className={`${opt.icon} text-[14px]`} style={{ color: opt.color }} />
                         )}
                       </div>
                       <p className="text-[13px] font-semibold mb-1" style={{ color: '#1D1D1F' }}>
-                        {opt.label}
+                        {labelText}
                       </p>
                       <p className="text-[11px]" style={{ color: '#8E8E93' }}>
                         {opt.desc}
                       </p>
                     </button>
-                  ))}
+                  );
+                  })}
                 </div>
               </div>
             </div>

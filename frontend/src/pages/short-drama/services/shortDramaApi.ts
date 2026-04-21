@@ -240,3 +240,17 @@ export async function mergeShortDramaProjectVideo(projectId: number): Promise<Me
     body: JSON.stringify({ project_id: projectId }),
   });
 }
+
+/** GET zip（视频包 / 一键全部导出），返回 Blob；失败抛 ShortDramaApiError */
+export async function fetchShortDramaExportZip(projectId: number, kind: 'videos' | 'all'): Promise<Blob> {
+  const path =
+    kind === 'videos'
+      ? `/api/short-drama/project/${projectId}/export/videos`
+      : `/api/short-drama/project/${projectId}/export/all`;
+  const res = await fetch(joinUrl(path), { method: 'GET' });
+  if (!res.ok) {
+    const msg = await parseErrorMessage(res);
+    throw new ShortDramaApiError(msg, res.status);
+  }
+  return res.blob();
+}

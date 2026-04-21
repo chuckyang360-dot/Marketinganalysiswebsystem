@@ -65,6 +65,7 @@ export function useOverviewPage() {
     phase,
     error,
     viewModel,
+    pipeline,
     reload: load,
     goCreate,
     isMockTestPatternVideo,

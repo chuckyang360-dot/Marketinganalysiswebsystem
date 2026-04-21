@@ -204,6 +204,24 @@ class RenderExecutorService:
                 segment_id,
                 plan.selected_reference_image_urls,
             )
+            if existing_job_id is not None:
+                job = db.query(RenderJob).filter(RenderJob.id == existing_job_id).first()
+                if not job:
+                    raise ShortDramaVideoInputError(f"Render job {existing_job_id} not found")
+                job.provider = self._provider_label()
+                job.model = effective_xai_video_model()
+                self._set_job_status(
+                    db,
+                    job,
+                    status=RenderJobStatus.RUNNING.value,
+                    progress=10,
+                )
+                logger.info(
+                    "[RENDER_JOB_STARTED] project_id=%s segment_id=%s render_job_id=%s",
+                    project_id,
+                    segment_id,
+                    job.id,
+                )
             abs_refs = [absolutize_media_url_for_provider(u) for u in plan.selected_reference_image_urls]
             ref_for_api: list[str] = []
             for src_abs in abs_refs:
@@ -288,19 +306,9 @@ class RenderExecutorService:
                 "resolution": plan.resolution,
             }
             if existing_job_id is not None:
-                job = db.query(RenderJob).filter(RenderJob.id == existing_job_id).first()
-                if not job:
-                    raise ShortDramaVideoInputError(f"Render job {existing_job_id} not found")
+                assert job is not None
                 job.input_payload_json = payload
-                job.provider = self._provider_label()
-                job.model = effective_xai_video_model()
                 self._set_job_status(db, job, status=RenderJobStatus.RUNNING.value, progress=20)
-                logger.info(
-                    "[RENDER_JOB_STARTED] project_id=%s segment_id=%s render_job_id=%s",
-                    project_id,
-                    segment_id,
-                    job.id,
-                )
             else:
                 job = RenderJob(
                     project_id=project_id,
@@ -612,6 +620,25 @@ class RenderExecutorService:
             else:
                 final_status = RenderJobStatus.FAILED.value
                 final_error = result.error_message or "segment render failed"
+                job_failed = db.query(RenderJob).filter(RenderJob.id == render_job_id).first()
+                if job_failed and str(job_failed.status or "").lower() not in (
+                    RenderJobStatus.FAILED.value,
+                    RenderJobStatus.COMPLETED.value,
+                ):
+                    self._set_job_status(
+                        db,
+                        job_failed,
+                        status=RenderJobStatus.FAILED.value,
+                        progress=100,
+                        error=final_error,
+                    )
+                    logger.error(
+                        "[RENDER_JOB_FAILED] project_id=%s segment_id=%s render_job_id=%s error=%s",
+                        project_id,
+                        segment_id,
+                        render_job_id,
+                        final_error,
+                    )
         except Exception as e:
             final_error = str(e)
             try:

@@ -74,6 +74,7 @@ class UpdateAssetRequest(BaseModel):
     reference_image_data_url: Optional[str] = None
     reference_image_name: Optional[str] = None
     product_usage: Optional[str] = None
+    product_type: Optional[str] = None
 
 
 class UpdateAssetResponse(BaseModel):

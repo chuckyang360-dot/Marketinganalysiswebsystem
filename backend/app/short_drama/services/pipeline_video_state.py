@@ -25,6 +25,10 @@ def build_pipeline_video_state(db: Session, project_id: int, project_status: str
         final_render_status = "none"
     elif final_job.status == RenderJobStatus.COMPLETED.value and has_final_video:
         final_render_status = "completed"
+    elif final_job.status == RenderJobStatus.COMPLETED.value and not has_final_video:
+        # Data inconsistency guard: completed final job must carry output_url.
+        final_render_status = "failed"
+        final_render_error = final_render_error or "final render completed without output_url"
     elif final_job.status == RenderJobStatus.FAILED.value:
         final_render_status = "failed"
     elif final_job.status in (RenderJobStatus.RUNNING.value, RenderJobStatus.QUEUED.value):

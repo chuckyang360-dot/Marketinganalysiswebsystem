@@ -71,6 +71,8 @@ async def update_one_asset(
         meta["reference_image_name"] = body.reference_image_name
     if body.product_usage is not None:
         meta["product_usage"] = body.product_usage
+    if m is ProductAsset and body.product_type is not None:
+        meta["product_type"] = body.product_type
     row.meta_json = meta
     db.add(row)
 
