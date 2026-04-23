@@ -5,18 +5,6 @@ type Props = {
   preview: ProductPreviewSummary;
 };
 
-const blocks: {
-  key: keyof Pick<ProductPreviewSummary, 'sellingPoints' | 'sceneKeywords' | 'styleKeywords'>;
-  label: string;
-  color: string;
-  bg: string;
-  border: string;
-}[] = [
-  { key: 'sellingPoints', label: '卖点提炼', color: '#B45309', bg: 'rgba(180,83,9,0.06)', border: 'rgba(180,83,9,0.15)' },
-  { key: 'sceneKeywords', label: '场景关键词', color: '#047857', bg: 'rgba(4,120,87,0.06)', border: 'rgba(4,120,87,0.15)' },
-  { key: 'styleKeywords', label: '风格关键词', color: '#334155', bg: 'rgba(51,65,85,0.06)', border: 'rgba(51,65,85,0.15)' },
-];
-
 export function InfoPreviewPanel({ preview }: Props) {
   const statusLabel =
     preview.status === 'idle'
@@ -36,7 +24,7 @@ export function InfoPreviewPanel({ preview }: Props) {
         ? 'AI 正在理解产品信息，提炼卖点、场景与风格关键词…'
         : preview.status === 'error'
           ? preview.errorMessage || '解析失败，请稍后重试。'
-          : preview.summary;
+          : preview.productSummary;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-[#EAEAEA] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.04)]">
@@ -107,39 +95,17 @@ export function InfoPreviewPanel({ preview }: Props) {
               </p>
             </div>
 
-            <div className="flex flex-col gap-4">
-              {blocks.map((b) => (
-                <div
-                  key={b.key}
-                  className="rounded-xl p-4"
-                  style={{ background: b.bg, border: `1px solid ${b.border}` }}
-                >
-                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: b.color }}>
-                    {b.label}
-                  </p>
-                  {preview.status === 'ready' && preview[b.key].length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {preview[b.key].map((item) => (
-                        <span
-                          key={item}
-                          className="rounded-full border px-2.5 py-1 text-[11.5px] font-medium"
-                          style={{
-                            background: 'rgba(255,255,255,0.75)',
-                            color: b.color,
-                            borderColor: b.border,
-                          }}
-                        >
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                  ) : preview.status === 'error' ? (
-                    <p className="text-[12px] text-[#AEAEB2]">—</p>
-                  ) : (
-                    <p className="text-[12px] text-[#AEAEB2]">解析完成后将在此展示标签</p>
-                  )}
-                </div>
-              ))}
+            <div className="rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] p-4">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#6E6E73]">核心卖点</p>
+              <p className="text-[12px] text-[#444444]">{preview.coreSellingPoints.join(' / ') || '—'}</p>
+            </div>
+            <div className="rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] p-4">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#6E6E73]">视觉特征</p>
+              <p className="text-[12px] text-[#444444]">{preview.visualFeatures.join(' / ') || '—'}</p>
+            </div>
+            <div className="rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] p-4">
+              <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#6E6E73]">故事角度</p>
+              <p className="text-[12px] text-[#444444]">{preview.suitableStoryAngles.join(' / ') || '—'}</p>
             </div>
           </>
         ) : null}

@@ -18,12 +18,21 @@ export type SDWorkflowNavProps = {
   projectId?: number | null;
   isDirty?: boolean;
   onSaveDraft?: (intent: 'save_draft' | 'before_exit') => Promise<boolean>;
+  /** S0 创建页可关闭保存/离开动作，防止链路串线 */
+  allowSaveAndLeave?: boolean;
 };
 
 /**
  * Framer `SDSharedNav.tsx` 映射：布局 / 步骤展示 / 项目名称 / 右侧按钮位置一致。
  */
-export function SDWorkflowNav({ currentStep, projectName, projectId, isDirty = false, onSaveDraft }: SDWorkflowNavProps) {
+export function SDWorkflowNav({
+  currentStep,
+  projectName,
+  projectId,
+  isDirty = false,
+  onSaveDraft,
+  allowSaveAndLeave = true,
+}: SDWorkflowNavProps) {
   const navigate = useNavigate();
   const [dialog, setDialog] = useState<null | 'leave' | 'save'>(null);
 
@@ -50,6 +59,7 @@ export function SDWorkflowNav({ currentStep, projectName, projectId, isDirty = f
     const ok = await onSaveDraft(intent);
     if (!ok) return;
     if (intent === 'before_exit') {
+      console.info('[S0_SAVE_AND_LEAVE_SUCCESS]', { project_id: projectId ?? null, step: currentStep ?? null });
       console.info('[FRONT_SAVE_AND_EXIT_HOME]', { project_id: projectId ?? null, step: currentStep ?? null });
       window.alert('已保存并返回官网');
       navigate('/');
@@ -147,6 +157,7 @@ export function SDWorkflowNav({ currentStep, projectName, projectId, isDirty = f
           <button
             type="button"
             onClick={handleLeaveHomeClick}
+            disabled={!allowSaveAndLeave}
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[12.5px] transition-all duration-200"
             style={{ color: '#8E8E93', background: 'transparent' }}
             onMouseEnter={(e) => {
@@ -164,6 +175,7 @@ export function SDWorkflowNav({ currentStep, projectName, projectId, isDirty = f
           <button
             type="button"
             onClick={handleSaveDraftClick}
+            disabled={!allowSaveAndLeave}
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-4 py-1.5 text-[12.5px] font-medium text-[#444444] transition-all duration-200"
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.background = '#EAEAEA';
@@ -202,6 +214,7 @@ export function SDWorkflowNav({ currentStep, projectName, projectId, isDirty = f
                   <button
                     type="button"
                     onClick={() => {
+                      console.info('[S0_SAVE_AND_LEAVE_CLICK]', { project_id: projectId ?? null, step: currentStep ?? null });
                       setDialog(null);
                       void confirmSaveDraft('before_exit');
                     }}

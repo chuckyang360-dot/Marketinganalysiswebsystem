@@ -14,14 +14,13 @@ from .xai_client import XAIClient, effective_xai_text_model, extract_assistant_t
 logger = logging.getLogger(__name__)
 
 
-def _build_user_content_parts(user_text: str, image_urls: list[str] | None) -> str | list[dict[str, Any]]:
-    if not image_urls:
-        return user_text
-    parts: list[dict[str, Any]] = [{"type": "input_text", "text": user_text}]
-    for u in image_urls:
+def _build_user_content_parts(user_text: str, image_urls: list[str] | None) -> list[dict[str, Any]]:
+    parts: list[dict[str, Any]] = []
+    for u in image_urls or []:
         if not u or not str(u).strip():
             continue
-        parts.append({"type": "input_image", "image_url": {"url": str(u).strip()}})
+        parts.append({"type": "input_image", "image_url": str(u).strip()})
+    parts.append({"type": "input_text", "text": user_text})
     return parts
 
 
@@ -125,10 +124,11 @@ class XAITextProvider:
         current = text
         for repair_attempt in (1, 2):
             repair_user = _truncate_for_repair(current)
+            repair_content = [{"type": "input_text", "text": repair_user}]
             raw2, req2, _ = self._client.post_responses(
                 model=model,
                 system_prompt=JSON_REPAIR_SYSTEM_PROMPT,
-                user_content=repair_user,
+                user_content=repair_content,
                 store=False,
                 max_output_tokens=4096,
                 log_context={

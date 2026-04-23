@@ -2,999 +2,636 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { AssetLightbox, type LightboxItem } from './components/AssetLightbox';
-import {
-  AssetInteractionModal,
-  type AssetEditorPayload,
-  type AssetInteractionEntity,
-  type AssetKind,
-  type AssetNormalFieldKey,
-} from './components/AssetInteractionModal';
-import { useAssetsPage } from './hooks/useAssetsPage';
-import type { AssetsPageProductVm, AssetsPageViewModel } from './types/shortDrama';
-import type { PipelineSummaryDto, UpdateAssetBody } from './types/shortDramaApi';
-import {
-  ASSETS_PAGE_MESSAGES,
-  assetsPageViewModelEmpty,
-  pipelineAssetsToAssetsPageViewModel,
-} from './utils/assetsPageAdapters';
-import { SHORT_DRAMA_UI } from './utils/shortDramaUiCopy';
+import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEntity, type AssetKind, type AssetNormalFieldKey } from './components/AssetInteractionModal';
+import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
+import { appendShortDramaAssetUploadedImages, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
+import type { AssetLibraryItemDto } from './types/shortDramaApi';
 import { withProjectQuery } from './utils/shortDramaRoutes';
-import { getShortDramaPipeline, regenerateShortDramaOneAssetImage, touchShortDramaProjectStep, updateShortDramaAsset } from './services/shortDramaApi';
-
-/** Step4 需已具备参考图批次结果（或后续阶段） */
-const CAN_LEAVE_ASSETS_STATUSES = new Set([
-  'assets_ready',
-  'segments_generated',
-  'video_rendering',
-  'completed',
-]);
+import { buildRawStructureSnapshot, buildStructureSummary, resolveAssetRoleLabel, resolveAssetSourceLabel, resolveNarrativeFunctionLabel, resolveTypeFields, resolveVisualAnchorImageId, resolveVisualAnchorImageUrl } from './utils/assetSpecDisplay';
 
 type TabType = 'characters' | 'scenes' | 'assets';
+type Step3AutoPhase = 'idle' | 'checking' | 'generating_specs' | 'generating_images' | 'ready' | 'error';
+type AddMode = 'text' | 'upload';
+type AddDraft = { name: string; prompt: string };
 
-function asMeta(m: unknown): Record<string, unknown> {
-  return m && typeof m === 'object' && !Array.isArray(m) ? (m as Record<string, unknown>) : {};
+const toKind = (assetType: string): AssetKind => (assetType === 'scene' ? 'scene' : assetType === 'product' ? 'product' : 'character');
+const tabToKind = (tab: TabType): AssetKind => (tab === 'scenes' ? 'scene' : tab === 'assets' ? 'product' : 'character');
+const fallbackNameByTab: Record<TabType, string> = {
+  characters: 'Character Asset',
+  scenes: 'Scene Asset',
+  assets: 'Product Asset',
+};
+
+function sanitizeAssetName(input: string): string {
+  const blocked = new Set(['新增角色', '添加角色', '新增场景', '添加场景', '新增产品', '添加产品']);
+  const trimmed = input.trim();
+  return blocked.has(trimmed) ? '' : trimmed;
 }
 
-function buildInteractionEntity(
-  kind: AssetKind,
-  id: number,
-  pipeline: PipelineSummaryDto | null,
-  vm: AssetsPageViewModel,
-): AssetInteractionEntity | null {
-  if (!pipeline?.assets) return null;
-  if (kind === 'character') {
-    const row = pipeline.assets.characters.find((x) => x.id === id);
-    const vmRow = vm.characters.find((x) => x.id === id);
-    if (!row || !vmRow) return null;
-    const meta = asMeta(row.meta);
-    return {
-      id,
-      kind: 'character',
-      name: row.name?.trim() || vmRow.name,
-      typeLabel: row.role_type?.trim() || vmRow.role,
-      description: (row.description ?? '').trim() || vmRow.desc,
-      prompt: (row.visual_prompt ?? '').trim() || vmRow.visualPrompt,
-      imageUrl: vmRow.img,
-      sourceLabel: meta.reference_image_data_url ? '用户参考图' : '系统生成',
-      voiceStyle: typeof meta.voice_style === 'string' ? meta.voice_style : vmRow.voice,
-    };
+function toPositiveInt(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const n = Number(value);
+    if (Number.isInteger(n) && n > 0) return n;
   }
-  if (kind === 'scene') {
-    const row = pipeline.assets.scenes.find((x) => x.id === id);
-    const vmRow = vm.scenes.find((x) => x.id === id);
-    if (!row || !vmRow) return null;
-    const meta = asMeta(row.meta);
-    return {
-      id,
-      kind: 'scene',
-      name: row.name?.trim() || vmRow.name,
-      typeLabel: row.scene_type?.trim() || vmRow.type,
-      description: (row.description ?? '').trim() || vmRow.desc,
-      prompt: (row.visual_prompt ?? '').trim() || vmRow.visualPrompt,
-      imageUrl: vmRow.img,
-      sourceLabel: meta.reference_image_data_url ? '用户参考图' : '系统生成',
-    };
+  return null;
+}
+
+function normalizeLibraryItem(row: AssetLibraryItemDto): AssetLibraryItemDto | null {
+  const id = toPositiveInt((row as unknown as { id?: unknown }).id);
+  if (id == null) {
+    console.error('[S3_ASSET_INVALID_ROW_ID]', { row });
+    return null;
   }
-  const row = pipeline.assets.products.find((x) => x.id === id);
-  const vmRow = vm.products.find((x) => x.id === id);
-  if (!row || !vmRow) return null;
-  const meta = asMeta(row.meta);
-  const typeLabel =
-    typeof meta.product_type === 'string' && meta.product_type.trim() ? meta.product_type.trim() : '产品';
   return {
+    ...row,
     id,
-    kind: 'product',
-    name: row.name?.trim() || vmRow.name,
-    typeLabel,
-    description: (row.description ?? '').trim() || vmRow.desc,
-    prompt: (row.visual_prompt ?? '').trim() || vmRow.cameraHint,
-    imageUrl: vmRow.img,
-    sourceLabel: meta.reference_image_data_url ? '用户参考图' : '系统生成',
-    productUsage: typeof meta.product_usage === 'string' ? meta.product_usage : vmRow.placement,
+    cover_image_id: toPositiveInt((row as unknown as { cover_image_id?: unknown }).cover_image_id) ?? null,
+    image_count: toPositiveInt((row as unknown as { image_count?: unknown }).image_count) ?? 0,
+    tags: Array.isArray(row.tags) ? row.tags.filter((x): x is string => typeof x === 'string') : [],
+    extra: (row.extra && typeof row.extra === 'object') ? row.extra : {},
+    images: (row.images ?? [])
+      .map((img) => {
+        const imageId = toPositiveInt((img as unknown as { id?: unknown }).id);
+        if (imageId == null) return null;
+        return { ...img, id: imageId };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null),
+    reference_images: (row.reference_images ?? [])
+      .map((img) => {
+        const imageId = toPositiveInt((img as unknown as { id?: unknown }).id);
+        if (imageId == null) return null;
+        return { ...img, id: imageId };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null),
   };
+}
+
+function appendS3Debug(event: string, payload: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  const w = window as Window & { __S3_DEBUG__?: Array<{ event: string; payload: Record<string, unknown> }> };
+  if (!w.__S3_DEBUG__) w.__S3_DEBUG__ = [];
+  w.__S3_DEBUG__.push({ event, payload });
+}
+
+function toDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = () => reject(new Error('文件读取失败'));
+    r.onload = () => resolve(typeof r.result === 'string' ? r.result : '');
+    r.readAsDataURL(file);
+  });
+}
+
+function extractSemanticTokens(text: string): string[] {
+  if (!text) return [];
+  const zh = (text.match(/[\u4e00-\u9fff]{2,}/g) ?? []).map((x) => x.toLowerCase());
+  const en = (text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []).map((x) => x.toLowerCase());
+  return Array.from(new Set([...zh, ...en]));
+}
+
+function warnAssetDetailMismatch(row: AssetLibraryItemDto): void {
+  const textCorpus = `${row.name || ''} ${row.description || ''} ${row.base_prompt || ''}`.trim();
+  const imageCorpus = [
+    ...(row.images ?? []).flatMap((img) => [img.image_url || '', img.prompt_snapshot || '']),
+    ...(row.reference_images ?? []).flatMap((img) => [img.file_url || '', img.file_name || '']),
+  ]
+    .join(' ')
+    .toLowerCase();
+  const textTokens = extractSemanticTokens(textCorpus);
+  if (!textTokens.length) return;
+  const overlap = textTokens.filter((t) => imageCorpus.includes(t));
+  if (!overlap.length) {
+    console.warn('[ASSET_DETAIL_MISMATCH_WARNING]', {
+      asset_id: row.id,
+      project_id: row.project_id,
+      asset_type: row.asset_type,
+      name: row.name,
+      description: row.description,
+      text_tokens: textTokens.slice(0, 20),
+      image_sample: imageCorpus.slice(0, 280),
+    });
+  }
 }
 
 export function ShortDramaAssetsPage() {
   const navigate = useNavigate();
-  const {
-    effectiveProjectId,
-    projectName,
-    phase,
-    error,
-    emptyHint,
-    viewModel,
-    retryLoad,
-    retryGenerateSpecs,
-    pipeline,
-    handleNextStep,
-    nextStepBusy,
-    nextStepError,
-    canClickNext,
-  } = useAssetsPage();
-
+  const { effectiveProjectId, projectName } = useEffectiveShortDramaProjectId();
   const [activeTab, setActiveTab] = useState<TabType>('characters');
+  const [data, setData] = useState<Record<TabType, AssetLibraryItemDto[]>>({ characters: [], scenes: [], assets: [] });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<AssetInteractionEntity | null>(null);
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
-  const [capabilityNotice, setCapabilityNotice] = useState<string | null>(null);
-  const [isDirty] = useState(false);
-  const [invalidCharacterIds, setInvalidCharacterIds] = useState<Set<number>>(new Set());
-  const [invalidSceneIds, setInvalidSceneIds] = useState<Set<number>>(new Set());
-  const [invalidProductIds, setInvalidProductIds] = useState<Set<number>>(new Set());
-  const [interactionAsset, setInteractionAsset] = useState<AssetInteractionEntity | null>(null);
-  const [editorSaving, setEditorSaving] = useState(false);
-  const [editorRegenerating, setEditorRegenerating] = useState(false);
-  const referenceUploadRef = useRef<HTMLInputElement>(null);
-  const referenceUploadTargetRef = useRef<{ kind: AssetKind; id: number } | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>('text');
+  const [draft, setDraft] = useState<AddDraft>({ name: '', prompt: '' });
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [addPending, setAddPending] = useState<{ tab: TabType; mode: AddMode } | null>(null);
+  const [working, setWorking] = useState(false);
+  const [autoPhase, setAutoPhase] = useState<Step3AutoPhase>('idle');
+  const [autoHint, setAutoHint] = useState<string | null>(null);
+  const refUploadInput = useRef<HTMLInputElement>(null);
+  const refTargetAssetId = useRef<number | null>(null);
+  const uploadPickerRef = useRef<HTMLInputElement>(null);
+  const autoRunProjectRef = useRef<number | null>(null);
 
-  // TODO(points): future paywall hook. Generation actions (asset regen / batch image generation / video generation)
-  // should call a centralized credit precheck here before executing.
-  const canRunGenerationAction = useCallback((_action: 'asset_regenerate' | 'asset_initial_generate') => true, []);
-
-  const flashNotice = useCallback((msg: string) => {
-    setCapabilityNotice(msg);
-    window.setTimeout(() => setCapabilityNotice(null), 4200);
-  }, []);
-
-  const canProceedToStep4 =
-    effectiveProjectId != null &&
-    pipeline?.project?.status != null &&
-    CAN_LEAVE_ASSETS_STATUSES.has(pipeline.project.status);
-  const step3Stale = pipeline?.project?.step_status?.step_3 === 'stale';
-  const isGeneratingAssets = phase === 'generating_specs' || phase === 'generating_images';
-  const skeletonCount = useMemo(() => {
-    if (activeTab === 'characters') return Math.max(4, viewModel.characters.length || 0);
-    if (activeTab === 'scenes') return Math.max(4, viewModel.scenes.length || 0);
-    return Math.max(4, viewModel.products.length || 0);
-  }, [activeTab, viewModel.characters.length, viewModel.scenes.length, viewModel.products.length]);
-
-  useEffect(() => {
-    const c = pipeline?.assets?.characters?.length ?? 0;
-    const s = pipeline?.assets?.scenes?.length ?? 0;
-    const p = pipeline?.assets?.products?.length ?? 0;
-    console.info(
-      `[FE_STEP3_ENTER] projectId=${effectiveProjectId ?? 'null'} projectStatus=${pipeline?.project?.status ?? 'n/a'} hasCharacters=${c > 0} hasScenes=${s > 0} hasProducts=${p > 0} characterCount=${c} sceneCount=${s} productCount=${p}`,
-    );
-  }, [effectiveProjectId, pipeline]);
-
-  useEffect(() => {
-    if (!pipeline || effectiveProjectId == null) return;
-    console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: effectiveProjectId, page: 'step_3' });
-  }, [pipeline, effectiveProjectId]);
-
-  useEffect(() => {
-    if (!step3Stale || effectiveProjectId == null) return;
-    console.info('[FRONT_STEP_STALE_BANNER_SHOWN]', { project_id: effectiveProjectId, step: 'step_3' });
-  }, [step3Stale, effectiveProjectId]);
-
-  useEffect(() => {
-    if (!isGeneratingAssets) return;
-    console.info('[FRONT_STEP3_LOADING_VIEW_SHOWN]', { project_id: effectiveProjectId ?? null, phase, tab: activeTab });
-  }, [isGeneratingAssets, effectiveProjectId, phase, activeTab]);
-
-  useEffect(() => {
-    if (isGeneratingAssets || phase !== 'ready') return;
-    const blocked =
-      viewModel.characters.some((c) => !c.hasRealImage || !c.img) ||
-      viewModel.scenes.some((s) => !s.hasRealImage || !s.img) ||
-      viewModel.products.some((p) => !p.hasRealImage || !p.img);
-    if (blocked) {
-      console.info('[FRONT_STEP3_MOCK_DATA_BLOCKED]', { project_id: effectiveProjectId ?? null });
-    }
-  }, [isGeneratingAssets, phase, viewModel, effectiveProjectId]);
-
-  useEffect(() => {
-    console.info('[FRONT_DIRTY_STATE_CHANGED]', { project_id: effectiveProjectId ?? null, step: 'step_3', dirty: isDirty });
-  }, [isDirty, effectiveProjectId]);
-
-  const saveDraft = async (intent: 'save_draft' | 'before_exit'): Promise<boolean> => {
-    if (effectiveProjectId == null) return false;
+  const reload = useCallback(async () => {
+    if (!effectiveProjectId) return;
+    setLoading(true);
+    setError(null);
     try {
-      await touchShortDramaProjectStep(effectiveProjectId, {
-        step: 'step_3',
-        save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft',
+      const [characters, scenes, products] = await Promise.all([
+        listShortDramaAssetLibrary(effectiveProjectId, 'character'),
+        listShortDramaAssetLibrary(effectiveProjectId, 'scene'),
+        listShortDramaAssetLibrary(effectiveProjectId, 'product'),
+      ]);
+      setData({
+        characters: characters.assets.map(normalizeLibraryItem).filter((x): x is AssetLibraryItemDto => x !== null),
+        scenes: scenes.assets.map(normalizeLibraryItem).filter((x): x is AssetLibraryItemDto => x !== null),
+        assets: products.assets.map(normalizeLibraryItem).filter((x): x is AssetLibraryItemDto => x !== null),
       });
-      return true;
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : '保存失败，请稍后重试');
-      return false;
+      setError(e instanceof Error ? e.message : '加载失败');
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [effectiveProjectId]);
 
-  const openAssetDetail = useCallback(
-    (kind: AssetKind, id: number) => {
-      const ent = buildInteractionEntity(kind, id, pipeline, viewModel);
-      if (!ent) return;
-      setInteractionAsset(ent);
-      console.info('FRONT_ASSET_DETAIL_OPENED', { project_id: effectiveProjectId ?? null, asset_type: kind, asset_id: id });
-    },
-    [pipeline, viewModel, effectiveProjectId],
-  );
+  useEffect(() => {
+    const run = async () => {
+      const projectId = toPositiveInt(effectiveProjectId);
+      console.info('[S3_AUTO_EFFECT_ENTER]', JSON.stringify({
+        effective_project_id: effectiveProjectId,
+        effective_project_id_type: typeof effectiveProjectId,
+        normalized_project_id: projectId,
+      }));
+      if (!projectId) return;
+      if (autoRunProjectRef.current === projectId) return;
+      autoRunProjectRef.current = projectId;
+      setAutoPhase('checking');
+      setAutoHint('正在检查资产生成状态…');
+      try {
+        console.info('[S3_AUTO_PIPELINE_REQUEST]', JSON.stringify({ project_id: projectId }));
+        const pipeline = await getShortDramaPipeline(projectId);
+        console.info('[S3_AUTO_FLOW_CHECK]', JSON.stringify({
+          project_id: projectId,
+          project_status: pipeline.project.status,
+          assets_rows_total: pipeline.asset_rows_total ?? null,
+        }));
+        if (pipeline.project.status === 'story_generated') {
+          setAutoPhase('generating_specs');
+          setAutoHint('正在自动生成角色/场景/产品资产规范…');
+          console.info('[S3_AUTO_TRIGGER_SPECS]', JSON.stringify({ project_id: projectId, trigger: 'assets_page_auto' }));
+          await generateShortDramaAssetSpecs(projectId, { trigger: 'auto' });
+        }
 
-  const refreshEntityAfterMutation = useCallback(
-    async (kind: AssetKind, id: number) => {
-      if (effectiveProjectId == null) return;
-      const p = await getShortDramaPipeline(effectiveProjectId);
-      const vm = pipelineAssetsToAssetsPageViewModel(p.assets);
-      const ent = buildInteractionEntity(kind, id, p, vm);
-      if (ent) setInteractionAsset(ent);
-    },
-    [effectiveProjectId],
-  );
+        let pipelineAfterSpecs = await getShortDramaPipeline(projectId);
+        if (pipelineAfterSpecs.project.status === 'asset_specs_generated') {
+          setAutoPhase('generating_images');
+          setAutoHint('正在生成资产图片，请稍候…');
+          console.info('[S3_AUTO_TRIGGER_IMAGES]', JSON.stringify({ project_id: projectId }));
+          await generateShortDramaAssetImages(projectId);
+          pipelineAfterSpecs = await getShortDramaPipeline(projectId);
+        }
 
-  const triggerReferenceUpload = useCallback((kind: AssetKind, id: number) => {
-    referenceUploadTargetRef.current = { kind, id };
-    referenceUploadRef.current?.click();
-  }, []);
+        if (pipelineAfterSpecs.project.status === 'assets_rendering') {
+          setAutoPhase('generating_images');
+          setAutoHint('资产图片生成中，正在同步进度…');
+        }
 
-  const onReferenceFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>): void => {
-      const file = e.target.files?.[0];
-      e.target.value = '';
-      const ctx = referenceUploadTargetRef.current;
-      referenceUploadTargetRef.current = null;
-      if (!file || !ctx || effectiveProjectId == null) return;
-      console.info('FRONT_ASSET_REFERENCE_UPLOAD_SELECTED', {
-        project_id: effectiveProjectId,
-        asset_type: ctx.kind,
-        asset_id: ctx.id,
-        file_name: file.name,
+        await reload();
+        setAutoPhase('ready');
+        setAutoHint(null);
+      } catch (e) {
+        console.error('[S3_AUTO_FLOW_FAILED]', {
+          project_id: projectId,
+          error: e,
+        });
+        setAutoPhase('error');
+        setAutoHint('资产自动生成失败，请点击重试或刷新页面。');
+        await reload();
+      } finally {
+        if (autoRunProjectRef.current === projectId) autoRunProjectRef.current = null;
+      }
+    };
+    void run();
+  }, [effectiveProjectId, reload]);
+
+  const openDetail = useCallback(async (rawAssetId: unknown, cardRow?: AssetLibraryItemDto) => {
+    const projectId = toPositiveInt(effectiveProjectId);
+    const assetId = toPositiveInt(rawAssetId);
+    const openCtx = {
+      card_row: cardRow,
+      open_detail_arg: rawAssetId,
+      open_detail_arg_type: typeof rawAssetId,
+      normalized_asset_id: assetId,
+      normalized_asset_id_type: typeof assetId,
+      effective_project_id: effectiveProjectId,
+      effective_project_id_type: typeof effectiveProjectId,
+      normalized_project_id: projectId,
+      normalized_project_id_type: typeof projectId,
+    };
+    console.info('[S3_DETAIL_OPEN_CLICKED]', JSON.stringify(openCtx));
+    appendS3Debug('S3_DETAIL_OPEN_CLICKED', openCtx);
+    if (projectId == null || assetId == null) {
+      console.error('[S3_DETAIL_OPEN_INVALID_IDS]', { rawAssetId, effectiveProjectId, cardRow });
+      window.alert('资产详情加载失败，请重试');
+      return;
+    }
+    const requestUrl = `/api/short-drama/assets/specs/library/detail/${assetId}?project_id=${projectId}`;
+    console.info('[S3_DETAIL_REQUEST]', JSON.stringify({ url: requestUrl, asset_id: assetId, project_id: projectId }));
+    appendS3Debug('S3_DETAIL_REQUEST', { url: requestUrl, asset_id: assetId, project_id: projectId });
+    try {
+      const d = normalizeLibraryItem(await getShortDramaAssetLibraryDetail(projectId, assetId));
+      if (!d) {
+        console.error('[S3_DETAIL_INVALID_RESPONSE]', { projectId, assetId });
+        window.alert('资产详情加载失败，请重试');
+        return;
+      }
+      warnAssetDetailMismatch(d);
+      const tf = (d.extra?.type_fields ?? {}) as Record<string, unknown>;
+      const detailTypeLabel = resolveAssetRoleLabel(d);
+      const anchorImage = resolveVisualAnchorImageUrl(d);
+      const detailVm: AssetInteractionEntity = {
+        id: d.id,
+        kind: toKind(d.asset_type),
+        name: d.name,
+        typeLabel: detailTypeLabel,
+        narrativeFunctionLabel: resolveNarrativeFunctionLabel(d),
+        description: d.description ?? '',
+        prompt: d.base_prompt ?? '',
+        imageUrl: anchorImage,
+        sourceLabel: resolveAssetSourceLabel(d),
+        voiceStyle: typeof tf.personality === 'string' ? tf.personality : '',
+        productUsage: typeof (tf.product_usage || tf.usage_mode) === 'string' ? String(tf.product_usage || tf.usage_mode) : '',
+        imageCount: d.image_count,
+        imageLimit: 6,
+        images: d.images.map((x) => ({ id: x.id, imageUrl: x.image_url, isCover: x.is_cover, label: x.variant_label ?? undefined })),
+        selectedImageId: resolveVisualAnchorImageId(d) ?? null,
+        referenceImages: d.reference_images.map((x) => ({ id: x.id, fileUrl: x.file_url, fileName: x.file_name ?? undefined })),
+        tags: d.tags ?? [],
+        typeFields: resolveTypeFields(d),
+        rawSnapshot: buildRawStructureSnapshot(d),
+        structureSummary: buildStructureSummary(d),
+      };
+      console.info('[S3_DETAIL_MODAL_VM]', JSON.stringify(detailVm));
+      if (typeof window !== 'undefined') {
+        (window as Window & { __S3_LAST_DETAIL_VM__?: AssetInteractionEntity }).__S3_LAST_DETAIL_VM__ = detailVm;
+      }
+      setDetail(detailVm);
+    } catch (e) {
+      console.error('[S3_DETAIL_REQUEST_FAILED]', {
+        rawAssetId,
+        normalizedAssetId: assetId,
+        projectId,
+        requestUrl,
+        error: e,
       });
-      const reader = new FileReader();
-      reader.onload = () => {
+      appendS3Debug('S3_DETAIL_REQUEST_FAILED', {
+        raw_asset_id: rawAssetId,
+        normalized_asset_id: assetId,
+        project_id: projectId,
+        request_url: requestUrl,
+        error_message: e instanceof Error ? e.message : String(e),
+      });
+      window.alert('资产详情加载失败，请重试');
+    }
+  }, [effectiveProjectId]);
+
+  const createLabel = activeTab === 'characters' ? '添加角色' : activeTab === 'scenes' ? '添加场景' : '添加产品';
+  const currentRows = data[activeTab];
+  const tabs = useMemo(() => ([
+    { key: 'characters' as const, label: '角色', count: data.characters.length, icon: 'ri-user-star-line' },
+    { key: 'scenes' as const, label: '场景', count: data.scenes.length, icon: 'ri-landscape-line' },
+    { key: 'assets' as const, label: '产品资产', count: data.assets.length, icon: 'ri-archive-line' },
+  ]), [data]);
+
+  const submitAdd = useCallback(async () => {
+    if (!effectiveProjectId) return;
+    try {
+      if (addMode === 'text') {
+        if (!draft.prompt.trim()) throw new Error('请输入描述/指令');
+        const k = tabToKind(activeTab);
+        setAddPending({ tab: activeTab, mode: addMode });
+        setShowCreate(false);
+        setDraft({ name: '', prompt: '' });
+        setUploadFiles([]);
         void (async () => {
-          const dataUrl = typeof reader.result === 'string' ? reader.result : '';
-          if (!dataUrl) return;
           try {
-            await updateShortDramaAsset(ctx.kind, ctx.id, {
+            await createShortDramaAssetLibrary({
               project_id: effectiveProjectId,
-              reference_image_data_url: dataUrl,
-              reference_image_name: file.name,
+              asset_type: k,
+              name: sanitizeAssetName(draft.name) || fallbackNameByTab[activeTab],
+              description: draft.prompt.trim(),
+              base_prompt: draft.prompt.trim(),
+              generate_count: 4,
+              variant_directions: [],
+              reference_images: [],
+              type_fields: {},
             });
-            console.info('FRONT_ASSET_REFERENCE_UPLOAD_SAVED', {
-              project_id: effectiveProjectId,
-              asset_type: ctx.kind,
-              asset_id: ctx.id,
-            });
-            console.info('FRONT_STEP3_STALE_MARKED_STEP4', { project_id: effectiveProjectId, reason: 'reference_upload' });
-            await retryLoad();
-          } catch (err) {
-            window.alert(err instanceof Error ? err.message : '上传失败，请稍后重试');
+            await reload();
+          } catch (e) {
+            window.alert(e instanceof Error ? e.message : '创建失败');
+          } finally {
+            setAddPending(null);
           }
         })();
-      };
-      reader.readAsDataURL(file);
-    },
-    [effectiveProjectId, retryLoad],
-  );
-
-  const TABS = useMemo(
-    () =>
-      [
-        { key: 'characters' as const, label: '角色', count: viewModel.characters.length, icon: 'ri-user-star-line' },
-        { key: 'scenes' as const, label: '场景', count: viewModel.scenes.length, icon: 'ri-landscape-line' },
-        { key: 'assets' as const, label: '产品资产', count: viewModel.products.length, icon: 'ri-archive-line' },
-      ] as const,
-    [viewModel],
-  );
-
-  const openAssetLightbox = useCallback(
-    (kind: AssetKind, id: number) => {
-      let target: { img: string | null; name: string } | AssetsPageProductVm | undefined;
-      if (kind === 'character') {
-        target = viewModel.characters.find((x) => x.id === id);
-      } else if (kind === 'scene') {
-        target = viewModel.scenes.find((x) => x.id === id);
       } else {
-        target = viewModel.products.find((x) => x.id === id);
+        if (!uploadFiles.length) throw new Error('请先上传图片');
+        const urls = await Promise.all(uploadFiles.map((f) => toDataUrl(f)));
+        const k = tabToKind(activeTab);
+        setAddPending({ tab: activeTab, mode: addMode });
+        setShowCreate(false);
+        setDraft({ name: '', prompt: '' });
+        setUploadFiles([]);
+        void (async () => {
+          try {
+            await createShortDramaAssetLibrary({
+              project_id: effectiveProjectId,
+              asset_type: k,
+              name: sanitizeAssetName(draft.name) || fallbackNameByTab[activeTab],
+              description: '用户上传图片（当前阶段仅展示原图）',
+              base_prompt: '',
+              generate_count: 0,
+              variant_directions: [],
+              reference_images: [],
+              uploaded_images: uploadFiles.map((f, idx) => ({ file_name: f.name, file_url: urls[idx] })),
+              type_fields: {},
+              source: 'user_created',
+            });
+            await reload();
+          } catch (e) {
+            window.alert(e instanceof Error ? e.message : '创建失败');
+          } finally {
+            setAddPending(null);
+          }
+        })();
       }
-      if (!target?.img) return;
-      setLightbox({
-        img: target.img,
-        name: target.name,
-      });
-      console.info('FRONT_ASSET_LIGHTBOX_OPENED', { project_id: effectiveProjectId ?? null, asset_type: kind, asset_id: id });
-    },
-    [viewModel, effectiveProjectId],
-  );
-
-  const saveNormalField = useCallback(
-    async (field: AssetNormalFieldKey, payload: AssetEditorPayload) => {
-      if (!interactionAsset || effectiveProjectId == null) return;
-      setEditorSaving(true);
-      try {
-        const body: UpdateAssetBody = { project_id: effectiveProjectId };
-        if (field === 'name') body.name = payload.name;
-        if (field === 'typeLabel') {
-          if (interactionAsset.kind === 'character') body.role_type = payload.typeLabel;
-          else if (interactionAsset.kind === 'scene') body.scene_type = payload.typeLabel;
-          else if (interactionAsset.kind === 'product') body.product_type = payload.typeLabel;
-        }
-        if (field === 'description') body.description = payload.description;
-        if (field === 'voiceStyle' && interactionAsset.kind === 'character') body.voice_style = payload.voiceStyle;
-        if (field === 'productUsage' && interactionAsset.kind === 'product') body.product_usage = payload.productUsage;
-        await updateShortDramaAsset(interactionAsset.kind, interactionAsset.id, body);
-        console.info('FRONT_STEP3_STALE_MARKED_STEP4', { project_id: effectiveProjectId, reason: 'asset_field_saved' });
-        await retryLoad();
-        await refreshEntityAfterMutation(interactionAsset.kind, interactionAsset.id);
-      } catch (err) {
-        window.alert(err instanceof Error ? err.message : '保存失败，请稍后重试');
-        throw err;
-      } finally {
-        setEditorSaving(false);
-      }
-    },
-    [interactionAsset, effectiveProjectId, retryLoad, refreshEntityAfterMutation],
-  );
-
-  const saveAllNormalFields = useCallback(
-    async (payload: AssetEditorPayload) => {
-      if (!interactionAsset || effectiveProjectId == null) return;
-      setEditorSaving(true);
-      try {
-        await updateShortDramaAsset(interactionAsset.kind, interactionAsset.id, {
-          project_id: effectiveProjectId,
-          name: payload.name,
-          role_type: interactionAsset.kind === 'character' ? payload.typeLabel : undefined,
-          scene_type: interactionAsset.kind === 'scene' ? payload.typeLabel : undefined,
-          product_type: interactionAsset.kind === 'product' ? payload.typeLabel : undefined,
-          description: payload.description,
-          voice_style: interactionAsset.kind === 'character' ? payload.voiceStyle : undefined,
-          product_usage: interactionAsset.kind === 'product' ? payload.productUsage : undefined,
-        });
-        console.info('FRONT_STEP3_STALE_MARKED_STEP4', { project_id: effectiveProjectId, reason: 'asset_save_all' });
-        await retryLoad();
-        await refreshEntityAfterMutation(interactionAsset.kind, interactionAsset.id);
-      } catch (err) {
-        window.alert(err instanceof Error ? err.message : '保存失败，请稍后重试');
-        throw err;
-      } finally {
-        setEditorSaving(false);
-      }
-    },
-    [interactionAsset, effectiveProjectId, retryLoad, refreshEntityAfterMutation],
-  );
-
-  const regeneratePromptOnly = useCallback(
-    async (payload: AssetEditorPayload) => {
-      if (!interactionAsset || effectiveProjectId == null) return;
-      setEditorRegenerating(true);
-      try {
-        if (!canRunGenerationAction('asset_regenerate')) {
-          return;
-        }
-        await updateShortDramaAsset(interactionAsset.kind, interactionAsset.id, {
-          project_id: effectiveProjectId,
-          visual_prompt: payload.prompt,
-        });
-        await regenerateShortDramaOneAssetImage({
-          project_id: effectiveProjectId,
-          asset_type: interactionAsset.kind,
-          asset_id: interactionAsset.id,
-        });
-        console.info('FRONT_STEP3_STALE_MARKED_STEP4', { project_id: effectiveProjectId, reason: 'prompt_regenerate' });
-        await retryLoad();
-        await refreshEntityAfterMutation(interactionAsset.kind, interactionAsset.id);
-      } catch (e) {
-        window.alert(e instanceof Error ? e.message : '重新生成失败，请稍后重试');
-        throw e;
-      } finally {
-        setEditorRegenerating(false);
-      }
-    },
-    [interactionAsset, effectiveProjectId, retryLoad, refreshEntityAfterMutation, canRunGenerationAction],
-  );
-
-  const showDataGrids = phase === 'ready';
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : '创建失败');
+    }
+  }, [effectiveProjectId, activeTab, addMode, draft, uploadFiles, createLabel, reload]);
 
   return (
-    <div className="min-h-screen" style={{ background: '#ffffff', fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav
-        currentStep={3}
-        projectName={projectName}
-        projectId={effectiveProjectId}
-        isDirty={isDirty}
-        onSaveDraft={saveDraft}
-      />
-
+    <div className="min-h-screen" style={{ background: '#fff', fontFamily: "'Inter', sans-serif" }}>
+      <SDWorkflowNav currentStep={3} projectName={projectName ?? undefined} projectId={effectiveProjectId} isDirty={false} onSaveDraft={async (intent) => {
+        if (!effectiveProjectId) return false;
+        try { await touchShortDramaProjectStep(effectiveProjectId, { step: 'step_3', save_intent: intent }); return true; } catch { return false; }
+      }} />
       <div className="pt-14">
-        <div
-          className="px-6 lg:px-10 py-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
-          style={{ borderBottom: '1px solid #EAEAEA', background: '#ffffff' }}
-        >
+        <div className="px-6 lg:px-10 py-6 flex items-start justify-between" style={{ borderBottom: '1px solid #EAEAEA' }}>
           <div>
-            <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: '#8E8E93' }}>
-              STEP 03
-            </span>
-            <h1 className="text-2xl font-black mt-0.5" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
-              角色与场景资产
-            </h1>
-            <p className="text-[13px] mt-1" style={{ color: '#8E8E93' }}>
-              构建可复用的视觉资产库，统一整部短剧的视觉风格
-            </p>
+            <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: '#8E8E93' }}>STEP 03</span>
+            <h1 className="text-2xl font-black mt-0.5" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>角色与场景资产</h1>
+            <p className="text-[13px] mt-1" style={{ color: '#8E8E93' }}>构建可复用的视觉资产库，统一整部短剧的视觉风格</p>
           </div>
-          <button
-            type="button"
-            title={ASSETS_PAGE_MESSAGES.batchRegen}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-[12.5px] cursor-pointer transition-all duration-200 whitespace-nowrap"
-            style={{ background: '#F7F8FA', color: '#444444', border: '1px solid #EAEAEA' }}
-            onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.batchRegen)}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background = '#EAEAEA';
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
-            }}
-          >
-            <i className="ri-refresh-line text-[12px]" />
-            全部重新生成
-          </button>
         </div>
-
-        {capabilityNotice ? (
-          <div
-            className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950 lg:mx-10"
-            role="status"
-          >
-            {capabilityNotice}
-          </div>
-        ) : null}
-
-        {step3Stale ? (
-          <div
-            className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 lg:mx-10"
-            role="status"
-          >
-            你已修改上游设定/剧本，当前资产基于旧内容生成，请重新生成或手动调整。
-          </div>
-        ) : null}
-
-        {phase === 'no_project' ? (
-          <div className="mx-6 mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-[13px] text-amber-950 lg:mx-10">
-            <p className="font-semibold">{SHORT_DRAMA_UI.noProject.title}</p>
-            <p className="mt-1">{SHORT_DRAMA_UI.noProject.body}</p>
-            <button
-              type="button"
-              onClick={() => navigate('/short-drama/create')}
-              className="mt-3 rounded-lg bg-amber-900 px-4 py-2 text-[12px] font-medium text-white"
-            >
-              {SHORT_DRAMA_UI.noProject.cta}
-            </button>
-          </div>
-        ) : null}
-
-        {phase === 'loading' ? (
-          <div className="mx-6 mt-4 flex items-center gap-2 text-[13px] text-[#8E8E93] lg:mx-10">
-            <i className="ri-loader-4-line animate-spin text-[16px] text-[#1D1D1F]" aria-hidden />
-            {SHORT_DRAMA_UI.loading.pipeline}
-          </div>
-        ) : null}
-
-        {phase === 'generating_specs' ? (
-          <div className="mx-6 mt-4 flex items-center gap-2 text-[13px] text-[#8E8E93] lg:mx-10">
-            <i className="ri-loader-4-line animate-spin text-[16px] text-[#B45309]" aria-hidden />
-            正在生成角色/场景/产品参考图...
-          </div>
-        ) : null}
-
-        {phase === 'generating_images' ? (
-          <div className="mx-6 mt-4 flex items-center gap-2 text-[13px] text-[#8E8E93] lg:mx-10">
-            <i className="ri-loader-4-line animate-spin text-[16px] text-[#047857]" aria-hidden />
-            正在生成角色/场景/产品参考图...
-          </div>
-        ) : null}
-
-        {phase === 'blocked_prereq' ? (
-          <div className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950 lg:mx-10">
-            {emptyHint ?? SHORT_DRAMA_UI.assets.blockedFallback}
-            <button
-              type="button"
-              onClick={() => navigate(withProjectQuery('/short-drama/story-blueprint', effectiveProjectId))}
-              className="mt-3 block rounded-lg bg-amber-900 px-4 py-2 text-[12px] font-medium text-white"
-            >
-              {SHORT_DRAMA_UI.assets.backToStory}
-            </button>
-          </div>
-        ) : null}
-
-        {phase === 'error' ? (
-          <div className="mx-6 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800 lg:mx-10">
-            <p>{error}</p>
-            <button
-              type="button"
-              onClick={() => retryLoad()}
-              className="mt-3 rounded-lg bg-red-900 px-4 py-2 text-[12px] font-medium text-white"
-            >
-              {SHORT_DRAMA_UI.actions.retryLoad}
-            </button>
-          </div>
-        ) : null}
-
-        {phase === 'ready' && emptyHint ? (
-          <div className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-950 lg:mx-10">
-            {emptyHint}
-            {pipeline?.project?.status === 'story_generated' && assetsPageViewModelEmpty(viewModel) ? (
-              <button
-                type="button"
-                onClick={() => void retryGenerateSpecs()}
-                className="mt-3 block rounded-lg border border-amber-900 px-4 py-2 text-[12px] font-medium text-amber-950"
-              >
-                {SHORT_DRAMA_UI.assets.retrySpecs}
+        <div className="px-6 lg:px-10 pt-5">
+          <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: '#F5F5F7', border: '1px solid #EAEAEA' }}>
+            {tabs.map((tab) => (
+              <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium" style={{ background: activeTab === tab.key ? '#fff' : 'transparent', color: activeTab === tab.key ? '#1D1D1F' : '#8E8E93' }}>
+                <i className={`${tab.icon} text-[13px]`} />{tab.label}<span className="text-[11px] px-1.5 py-0.5 rounded-full" style={{ background: '#EAEAEA' }}>{tab.count}</span>
               </button>
-            ) : null}
+            ))}
           </div>
-        ) : null}
-
-        {showDataGrids ? (
-          <>
-            <div className="px-6 lg:px-10 pt-5 pb-0">
-              <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: '#F5F5F7', border: '1px solid #EAEAEA' }}>
-                {TABS.map((tab) => (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => setActiveTab(tab.key)}
-                    className="flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium cursor-pointer transition-all duration-200 whitespace-nowrap"
-                    style={{
-                      background: activeTab === tab.key ? '#ffffff' : 'transparent',
-                      color: activeTab === tab.key ? '#1D1D1F' : '#8E8E93',
-                      border: activeTab === tab.key ? '1px solid #EAEAEA' : '1px solid transparent',
-                      boxShadow: activeTab === tab.key ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
-                    }}
-                  >
-                    <i className={`${tab.icon} text-[13px]`} />
-                    {tab.label}
-                    <span
-                      className="text-[11px] px-1.5 py-0.5 rounded-full"
-                      style={{
-                        background: activeTab === tab.key ? '#F5F5F7' : '#EAEAEA',
-                        color: activeTab === tab.key ? '#444444' : '#8E8E93',
-                      }}
-                    >
-                      {tab.count}
-                    </span>
-                  </button>
-                ))}
-              </div>
+        </div>
+        <div className="px-6 lg:px-10 py-7">
+          {autoHint ? (
+            <div className="mb-4 rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] px-4 py-3 text-[13px] text-[#444444]">
+              <span className="mr-2 inline-block rounded-full bg-white px-2 py-0.5 text-[11px] text-[#8E8E93]">{autoPhase}</span>
+              {autoHint}
             </div>
-
-            <div className="px-6 lg:px-10 py-7">
-              {activeTab === 'characters' && (
-                <div className="grid grid-cols-1 items-stretch md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                  {viewModel.characters.map((char) => (
-                    <div
-                      key={char.id}
-                      className="flex h-full flex-col overflow-hidden rounded-2xl transition-all duration-200"
-                      style={{ background: '#ffffff', border: '1px solid #EAEAEA' }}
-                    >
-                      <div
-                        className="relative flex h-52 w-full shrink-0 items-center justify-center overflow-hidden group"
-                        style={{ background: '#F5F5F7', cursor: 'pointer' }}
-                        onClick={() => openAssetLightbox('character', char.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') openAssetLightbox('character', char.id);
-                        }}
-                        role="button"
-                        tabIndex={0}
-                      >
-                        {char.img && !invalidCharacterIds.has(char.id) ? (
-                          <img
-                            src={char.img}
-                            alt={char.name}
-                            className="h-full w-full object-contain"
-                            onError={() => {
-                              setInvalidCharacterIds((prev) => new Set(prev).add(char.id));
-                              console.info('[FRONT_STEP3_ASSET_RENDER_SKIPPED_INVALID_URL]', { project_id: effectiveProjectId ?? null, tab: 'characters', asset_id: char.id });
-                            }}
-                          />
-                        ) : (
-                          <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />
-                        )}
-                        <div className="absolute top-2.5 left-2.5">
-                          <span
-                            className="text-[10px] font-semibold px-2 py-1 rounded-full"
-                            style={{
-                              background: 'rgba(255,255,255,0.92)',
-                              color: '#444444',
-                              border: '1px solid rgba(0,0,0,0.06)',
-                            }}
-                          >
-                            {char.role}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex min-h-0 flex-1 flex-col p-4">
-                        <div className="flex min-h-0 flex-1 flex-col gap-3">
-                          <h3
-                            className="text-[15px] font-bold"
-                            style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}
-                          >
-                            {char.name}
-                          </h3>
-                          <p className="text-[12px] leading-relaxed" style={{ color: '#6E6E73' }}>
-                            {char.desc}
-                          </p>
-                          <div className="flex flex-wrap gap-1">
-                            {char.tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="text-[10px] px-2 py-1 rounded-full"
-                                style={{ background: '#F5F5F7', color: '#6E6E73' }}
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="mt-auto flex shrink-0 flex-col gap-3 pt-3">
-                          <div
-                            className="flex items-center gap-2 rounded-lg p-2"
-                            style={{ background: '#F7F8FA', border: '1px solid #EAEAEA' }}
-                          >
-                            <i className="ri-mic-line text-[12px]" style={{ color: '#8E8E93' }} />
-                            <span className="text-[11.5px]" style={{ color: '#6E6E73' }}>
-                              音色：{char.voice}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3">
-                            <button
-                              type="button"
-                              onClick={() => openAssetDetail('character', char.id)}
-                              className="flex min-h-10 items-center justify-center rounded-lg px-2 text-[11.5px] font-medium transition-all duration-200"
-                              style={{ background: '#1D1D1F', color: '#ffffff' }}
-                              onMouseEnter={(e) => {
-                                (e.currentTarget as HTMLElement).style.background = '#374151';
-                              }}
-                              onMouseLeave={(e) => {
-                                (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
-                              }}
-                            >
-                              <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                                <i className="ri-information-line text-[11px]" />
-                                查看详情
-                              </span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => triggerReferenceUpload('character', char.id)}
-                              className="flex min-h-10 items-center justify-center rounded-lg border border-dashed border-[#D1D1D6] bg-[#F7F8FA] px-2 text-[11.5px] font-medium text-[#444444] transition-all duration-200"
-                            >
-                              <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                                <i className="ri-upload-2-line text-[11px]" />
-                                上传参考图
-                              </span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    title={ASSETS_PAGE_MESSAGES.addCharacter}
-                    className="rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-200 min-h-[320px]"
-                    style={{ border: '1.5px dashed #D1D1D6', background: '#F7F8FA' }}
-                    onClick={() => flashNotice(ASSETS_PAGE_MESSAGES.addCharacter)}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLElement).style.borderColor = '#1D1D1F';
-                      (e.currentTarget as HTMLElement).style.background = '#F5F5F7';
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLElement).style.borderColor = '#D1D1D6';
-                      (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
-                    }}
+          ) : null}
+          {loading ? <div className="text-[13px] text-[#8E8E93]">加载中…</div> : null}
+          {error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</div> : null}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+            {currentRows.map((row) => {
+              const visualAnchor = resolveVisualAnchorImageUrl(row);
+              const roleLabel = resolveAssetRoleLabel(row);
+              return (
+                <div key={row.id} className="flex h-full flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
+                  <div
+                    className="relative h-48 shrink-0 overflow-hidden"
+                    style={{ background: '#F7F8FA', cursor: 'pointer' }}
+                    onClick={() => visualAnchor && setLightbox({ img: visualAnchor, name: row.name })}
+                    role="button"
+                    tabIndex={0}
                   >
-                    <div className="w-12 h-12 flex items-center justify-center rounded-2xl" style={{ background: '#EAEAEA' }}>
-                      <i className="ri-user-add-line text-[20px]" style={{ color: '#8E8E93' }} />
-                    </div>
-                    <span className="text-[13px]" style={{ color: '#8E8E93' }}>
-                      添加角色
-                    </span>
-                  </button>
-                </div>
-              )}
-
-              {activeTab === 'scenes' && (
-                <div className="grid grid-cols-1 items-stretch md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {viewModel.scenes.map((scene) => (
-                    <div
-                      key={scene.id}
-                      className="flex h-full flex-col overflow-hidden rounded-2xl"
-                      style={{ background: '#ffffff', border: '1px solid #EAEAEA' }}
-                    >
-                      <div
-                        className="relative h-48 w-full shrink-0 overflow-hidden group"
-                        style={{ background: '#F7F8FA', cursor: 'pointer' }}
-                        onClick={() => openAssetLightbox('scene', scene.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') openAssetLightbox('scene', scene.id);
-                        }}
-                        role="button"
-                        tabIndex={0}
-                      >
-                        {scene.img && !invalidSceneIds.has(scene.id) ? (
-                          <img
-                            src={scene.img}
-                            alt={scene.name}
-                            className="h-full w-full object-cover object-center"
-                            onError={() => {
-                              setInvalidSceneIds((prev) => new Set(prev).add(scene.id));
-                              console.info('[FRONT_STEP3_ASSET_RENDER_SKIPPED_INVALID_URL]', { project_id: effectiveProjectId ?? null, tab: 'scenes', asset_id: scene.id });
-                            }}
-                          />
-                        ) : (
-                          <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />
-                        )}
-                        <span
-                          className="absolute top-3 left-3 text-[10px] font-medium px-2 py-1 rounded-full"
+                    {visualAnchor ? <img src={visualAnchor} alt={row.name} className="h-full w-full object-cover" /> : <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />}
+                  </div>
+                  <div className="flex flex-1 flex-col p-4">
+                    <div className="flex-1">
+                      <div className="min-h-[42px]">
+                        <h3
+                          className="text-[14px] font-bold leading-[1.35]"
                           style={{
-                            background: 'rgba(255,255,255,0.9)',
-                            color: '#444444',
-                            border: '1px solid rgba(0,0,0,0.06)',
+                            color: '#1D1D1F',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
                           }}
                         >
-                          {scene.type}
-                        </span>
+                          {row.name}
+                        </h3>
                       </div>
-                      <div className="flex min-h-0 flex-1 flex-col p-4">
-                        <div className="flex min-h-0 flex-1 flex-col gap-2">
-                          <h3
-                            className="text-[14px] font-bold"
-                            style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}
-                          >
-                            {scene.name}
-                          </h3>
-                          <p className="text-[12px] leading-relaxed" style={{ color: '#6E6E73' }}>
-                            {scene.desc}
-                          </p>
-                        </div>
-                        <div className="mt-auto grid shrink-0 grid-cols-2 gap-3 pt-3">
-                          <button
-                            type="button"
-                            onClick={() => openAssetDetail('scene', scene.id)}
-                            className="flex min-h-10 items-center justify-center rounded-lg px-2 text-[11.5px] font-medium transition-colors"
-                            style={{ background: '#1D1D1F', color: '#ffffff' }}
-                            onMouseEnter={(e) => {
-                              (e.currentTarget as HTMLElement).style.background = '#374151';
-                            }}
-                            onMouseLeave={(e) => {
-                              (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
-                            }}
-                          >
-                            <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                              <i className="ri-information-line text-[11px]" />
-                              查看详情
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => triggerReferenceUpload('scene', scene.id)}
-                            className="flex min-h-10 items-center justify-center rounded-lg border border-dashed border-[#D1D1D6] bg-[#F7F8FA] px-2 text-[11.5px] font-medium text-[#444444]"
-                          >
-                            <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                              <i className="ri-upload-2-line text-[11px]" />
-                              上传参考图
-                            </span>
-                          </button>
-                        </div>
+                      <div className="mt-1 h-[24px] flex items-center justify-between">
+                        <span className="text-[10px] rounded-full px-2 py-1" style={{ background: '#F5F5F7', color: '#6E6E73' }}>{roleLabel}</span>
+                        <span className="text-[11px]" style={{ color: '#8E8E93' }}>{row.image_count}/6</span>
+                      </div>
+                      <div className="mt-2 min-h-[40px]">
+                        <p
+                          className="text-[12px] leading-relaxed"
+                          style={{
+                            color: '#6E6E73',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {row.description || '—'}
+                        </p>
+                      </div>
+                      <div className="mt-2 h-[40px] flex items-center gap-1 overflow-hidden">
+                        {row.images.slice(0, 3).map((img) => (
+                          <img key={img.id} src={img.image_url} alt={img.variant_label ?? 'thumb'} className="h-9 w-9 shrink-0 rounded border border-[#EAEAEA] object-cover" />
+                        ))}
+                        {row.has_reference_images ? <span className="ml-1 text-[11px] text-[#0B8D5A]">有参考图</span> : <span className="ml-1 text-[11px] text-transparent">占位</span>}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {activeTab === 'assets' && (
-                <div className="grid grid-cols-1 items-stretch md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                  {viewModel.products.map((asset) => (
-                    <div
-                      key={asset.id}
-                      className="flex h-full flex-col overflow-hidden rounded-2xl"
-                      style={{ background: '#ffffff', border: '1px solid #EAEAEA' }}
-                    >
-                      <div
-                        className="relative h-44 w-full shrink-0 overflow-hidden group"
-                        style={{ background: '#F7F8FA', cursor: 'pointer' }}
-                        onClick={() => openAssetLightbox('product', asset.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') openAssetLightbox('product', asset.id);
-                        }}
-                        role="button"
-                        tabIndex={0}
+                    <div className="mt-auto pt-3 grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        className="h-9 rounded-lg px-2 text-[11.5px] font-medium text-white"
+                        style={{ background: '#1D1D1F' }}
+                        onClick={() => void openDetail(row.id, row)}
                       >
-                        {asset.img && !invalidProductIds.has(asset.id) ? (
-                          <img
-                            src={asset.img}
-                            alt={asset.name}
-                            className="h-full w-full object-cover object-center"
-                            onError={() => {
-                              setInvalidProductIds((prev) => new Set(prev).add(asset.id));
-                              console.info('[FRONT_STEP3_ASSET_RENDER_SKIPPED_INVALID_URL]', { project_id: effectiveProjectId ?? null, tab: 'products', asset_id: asset.id });
-                            }}
-                          />
-                        ) : (
-                          <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />
-                        )}
-                      </div>
-                      <div className="flex min-h-0 flex-1 flex-col p-4">
-                        <div className="flex min-h-0 flex-1 flex-col gap-3">
-                          <h3
-                            className="text-[14px] font-bold"
-                            style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}
-                          >
-                            {asset.name}
-                          </h3>
-                          <div className="space-y-2">
-                            <div className="flex items-start gap-2">
-                              <i className="ri-camera-line mt-0.5 text-[11px]" style={{ color: '#AEAEB2' }} />
-                              <div>
-                                <p className="mb-0.5 text-[10px]" style={{ color: '#AEAEB2' }}>
-                                  出镜方式
-                                </p>
-                                <p className="text-[12px]" style={{ color: '#444444' }}>
-                                  {asset.placement}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-start gap-2">
-                              <i className="ri-focus-3-line mt-0.5 text-[11px]" style={{ color: '#AEAEB2' }} />
-                              <div>
-                                <p className="mb-0.5 text-[10px]" style={{ color: '#AEAEB2' }}>
-                                  镜头定位
-                                </p>
-                                <p className="text-[12px]" style={{ color: '#444444' }}>
-                                  {asset.cameraHint}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="mt-auto grid shrink-0 grid-cols-2 gap-3 pt-3">
-                          <button
-                            type="button"
-                            onClick={() => openAssetDetail('product', asset.id)}
-                            className="flex min-h-10 items-center justify-center rounded-lg px-2 text-[11.5px] font-medium transition-colors"
-                            style={{ background: '#1D1D1F', color: '#ffffff' }}
-                            onMouseEnter={(e) => {
-                              (e.currentTarget as HTMLElement).style.background = '#374151';
-                            }}
-                            onMouseLeave={(e) => {
-                              (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
-                            }}
-                          >
-                            <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                              <i className="ri-information-line text-[11px]" />
-                              查看详情
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => triggerReferenceUpload('product', asset.id)}
-                            className="flex min-h-10 items-center justify-center rounded-lg border border-dashed border-[#D1D1D6] bg-[#F7F8FA] px-2 text-[11.5px] font-medium text-[#444444]"
-                          >
-                            <span className="inline-flex items-center justify-center gap-1 whitespace-nowrap">
-                              <i className="ri-upload-2-line text-[11px]" />
-                              上传参考图
-                            </span>
-                          </button>
-                        </div>
-                      </div>
+                        查看详情
+                      </button>
+                      <button
+                        type="button"
+                        className="h-9 rounded-lg border border-dashed border-[#D1D1D6] bg-[#F7F8FA] px-2 text-[11.5px] font-medium text-[#444]"
+                        onClick={() => { refTargetAssetId.current = row.id; refUploadInput.current?.click(); }}
+                      >
+                        上传参考图
+                      </button>
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {phase === 'ready' && assetsPageViewModelEmpty(viewModel) && !emptyHint ? (
-                <p className="py-12 text-center text-[13px] text-[#8E8E93]">暂无资产条目。若刚完成剧本，请稍候或点击上方重试。</p>
-              ) : null}
-
-              {nextStepError ? (
-                <div
-                  className="mt-8 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800"
-                  role="alert"
-                >
-                  {nextStepError}
-                </div>
-              ) : null}
-
-              <div className="flex items-center justify-between mt-10 pt-6" style={{ borderTop: '1px solid #EAEAEA' }}>
-                <button
-                  type="button"
-                  onClick={() => navigate(withProjectQuery('/short-drama/story-blueprint', effectiveProjectId))}
-                  className="flex items-center gap-2 px-5 py-3 rounded-xl text-[13.5px] cursor-pointer whitespace-nowrap transition-all duration-200"
-                  style={{ background: '#F7F8FA', color: '#444444', border: '1px solid #EAEAEA' }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = '#EAEAEA';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = '#F7F8FA';
-                  }}
-                >
-                  <i className="ri-arrow-left-line text-[13px]" />
-                  上一步
-                </button>
-                <button
-                  type="button"
-                  disabled={!canClickNext || nextStepBusy}
-                  title={
-                    canClickNext
-                      ? canProceedToStep4
-                        ? undefined
-                        : '将先补齐资产规范（如需要），再进入下一步'
-                      : '项目未就绪或缺少项目 ID'
-                  }
-                  onClick={() => {
-                    void (async () => {
-                      const r = await handleNextStep();
-                      if (r.shouldNavigate) {
-                        console.info(
-                          `[FE_STEP3_NEXT_NAVIGATE] projectId=${effectiveProjectId ?? 'null'} status=${r.statusAfter ?? 'n/a'} target=/short-drama/step4`,
-                        );
-                        navigate(withProjectQuery('/short-drama/step4', effectiveProjectId));
-                      }
-                    })();
-                  }}
-                  className="flex items-center gap-2 px-7 py-3 rounded-xl text-[14px] font-semibold transition-all duration-200 whitespace-nowrap disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer"
-                  style={{ background: '#1D1D1F', color: '#ffffff' }}
-                  onMouseEnter={(e) => {
-                    if (!canClickNext || nextStepBusy) return;
-                    (e.currentTarget as HTMLElement).style.background = '#374151';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
-                  }}
-                >
-                  {nextStepBusy ? (
-                    <>
-                      <i className="ri-loader-4-line animate-spin text-[15px]" aria-hidden />
-                      处理中…
-                    </>
-                  ) : (
-                    <>
-                      下一步：生成片段脚本
-                      <i className="ri-arrow-right-line text-[13px]" />
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </>
-        ) : null}
-
-        {isGeneratingAssets ? (
-          <div className="px-6 lg:px-10 py-7">
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {Array.from({ length: skeletonCount }).map((_, i) => (
-                <div key={`skeleton-${activeTab}-${i}`} className="overflow-hidden rounded-2xl border border-[#EAEAEA] bg-white">
-                  <div className="h-48 animate-pulse bg-[#ECEDEF]" />
-                  <div className="space-y-2 p-4">
-                    <div className="h-4 w-2/3 animate-pulse rounded bg-[#ECEDEF]" />
-                    <div className="h-3 w-full animate-pulse rounded bg-[#F1F2F4]" />
-                    <div className="h-3 w-5/6 animate-pulse rounded bg-[#F1F2F4]" />
                   </div>
                 </div>
+              );
+            })}
+            {addPending?.tab === activeTab ? (
+              <div className="flex h-full flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
+                <div className="h-48 animate-pulse bg-[#ECEDEF]" />
+                <div className="flex flex-1 flex-col p-4">
+                  <div className="flex-1">
+                    <div className="h-5 w-2/3 animate-pulse rounded bg-[#ECEDEF]" />
+                    <div className="mt-2 h-4 w-full animate-pulse rounded bg-[#F1F2F4]" />
+                    <div className="mt-1 h-4 w-4/5 animate-pulse rounded bg-[#F1F2F4]" />
+                  </div>
+                  <div className="mt-auto pt-3 text-[12px] text-[#6E6E73]">
+                    {addPending.mode === 'text' ? '正在生成资产图片，请稍候…' : '正在处理上传图片，请稍候…'}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="flex h-full min-h-[340px] flex-col items-center justify-center rounded-2xl border border-dashed border-[#D1D1D6] bg-[#FAFAFB] p-6 text-center"
+              onClick={() => setShowCreate(true)}
+            >
+              <i className="ri-add-circle-line text-[26px] text-[#6E6E73]" />
+              <div className="mt-2 text-[14px] font-semibold text-[#1D1D1F]">{createLabel}</div>
+              <div className="mt-1 text-[12px] text-[#8E8E93]">文字输入或图片上传（二选一）</div>
+            </button>
+          </div>
+          <div className="flex items-center justify-between mt-10 pt-6" style={{ borderTop: '1px solid #EAEAEA' }}>
+            <button type="button" onClick={() => navigate(withProjectQuery('/short-drama/story-blueprint', effectiveProjectId))} className="flex items-center gap-2 px-5 py-3 rounded-xl text-[13.5px]" style={{ background: '#F7F8FA', color: '#444', border: '1px solid #EAEAEA' }}><i className="ri-arrow-left-line text-[13px]" />上一步</button>
+            <button type="button" disabled={!effectiveProjectId} onClick={() => navigate(withProjectQuery('/short-drama/step4', effectiveProjectId))} className="flex items-center gap-2 px-7 py-3 rounded-xl text-[14px] font-semibold disabled:opacity-45" style={{ background: '#1D1D1F', color: '#fff' }}>下一步：生成片段脚本<i className="ri-arrow-right-line text-[13px]" /></button>
+          </div>
+        </div>
+      </div>
+      {autoPhase === 'generating_specs' || autoPhase === 'generating_images' ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-6">
+          <div className="w-full max-w-md rounded-2xl border border-[#EAEAEA] bg-white p-5 shadow-xl">
+            <div className="flex items-center gap-3">
+              <i className="ri-loader-4-line animate-spin text-[22px] text-[#1D1D1F]" />
+              <div>
+                <div className="text-[15px] font-semibold text-[#1D1D1F]">
+                  {autoPhase === 'generating_specs' ? '正在生成资产规范' : '正在生成资产图片'}
+                </div>
+                <div className="text-[12px] text-[#6E6E73]">{autoHint ?? '请稍候…'}</div>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-14 animate-pulse rounded-lg bg-[#F1F2F4]" />
               ))}
             </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
-      <input
-        ref={referenceUploadRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        aria-hidden
-        onChange={onReferenceFileChange}
-      />
+      <input ref={refUploadInput} type="file" accept="image/*" className="hidden" onChange={(e) => void (async () => {
+        const f = e.target.files?.[0]; e.target.value = ''; if (!f || !effectiveProjectId || refTargetAssetId.current == null) return;
+        const assetId = refTargetAssetId.current; refTargetAssetId.current = null;
+        await appendShortDramaAssetUploadedImages(assetId, {
+          project_id: effectiveProjectId,
+          uploaded_images: [{ file_name: f.name, file_url: await toDataUrl(f) }],
+        });
+        await reload(); if (detail?.id === assetId) await openDetail(assetId);
+      })()} />
+
       <AssetLightbox item={lightbox} onClose={() => setLightbox(null)} />
       <AssetInteractionModal
-        asset={interactionAsset}
-        saving={editorSaving}
-        regenerating={editorRegenerating}
-        onClose={() => setInteractionAsset(null)}
-        onSaveNormalField={saveNormalField}
-        onSaveAllNormal={saveAllNormalFields}
-        onRegeneratePrompt={regeneratePromptOnly}
+        asset={detail}
+        saving={working}
+        regenerating={false}
+        onClose={() => setDetail(null)}
+        onSaveNormalField={async (field: AssetNormalFieldKey, payload: AssetEditorPayload) => {
+          if (!effectiveProjectId || !detail) return;
+          const latest = await getShortDramaAssetLibraryDetail(effectiveProjectId, detail.id);
+          const tf = { ...((latest.extra?.type_fields ?? {}) as Record<string, unknown>) };
+          if (field === 'typeLabel') tf.label = payload.typeLabel;
+          if (field === 'voiceStyle') tf.personality = payload.voiceStyle ?? '';
+          if (field === 'productUsage') tf.usage_mode = payload.productUsage ?? '';
+          await updateShortDramaAssetLibrary(detail.id, {
+            project_id: effectiveProjectId,
+            ...(field === 'name' ? { name: payload.name } : {}),
+            ...(field === 'description' ? { description: payload.description } : {}),
+            ...(field === 'typeLabel' ? { tags: [payload.typeLabel] } : {}),
+            type_fields: tf,
+          });
+          await reload(); await openDetail(detail.id);
+        }}
+        onSaveAllNormal={async (payload: AssetEditorPayload) => {
+          if (!effectiveProjectId || !detail) return;
+          setWorking(true);
+          try {
+            const latest = await getShortDramaAssetLibraryDetail(effectiveProjectId, detail.id);
+            const tf = { ...((latest.extra?.type_fields ?? {}) as Record<string, unknown>) };
+            if (detail.kind === 'character') tf.personality = payload.voiceStyle ?? '';
+            if (detail.kind === 'product') tf.usage_mode = payload.productUsage ?? '';
+            tf.label = payload.typeLabel;
+            await updateShortDramaAssetLibrary(detail.id, {
+              project_id: effectiveProjectId,
+              name: payload.name,
+              description: payload.description,
+              tags: [payload.typeLabel],
+              type_fields: tf,
+            });
+            await reload();
+            await openDetail(detail.id);
+          } finally { setWorking(false); }
+        }}
+        onRegeneratePrompt={async (payload: AssetEditorPayload) => {
+          if (!effectiveProjectId || !detail) return;
+          await updateShortDramaAssetLibrary(detail.id, { project_id: effectiveProjectId, base_prompt: payload.prompt });
+          await regenerateShortDramaAssetLibrary({ project_id: effectiveProjectId, asset_id: detail.id, generate_count: 1, reuse_reference_images: true });
+          await reload(); await openDetail(detail.id);
+        }}
+        onSelectImage={(imageId) => setDetail((prev) => (prev ? { ...prev, selectedImageId: imageId, imageUrl: prev.images?.find((x) => x.id === imageId)?.imageUrl ?? prev.imageUrl } : prev))}
+        onAddImage={() => {
+          if (!detail) return;
+          refTargetAssetId.current = detail.id;
+          refUploadInput.current?.click();
+        }}
       />
+
+      {showCreate ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-xl rounded-2xl border border-[#EAEAEA] bg-white p-5">
+            <h3 className="text-[18px] font-black text-[#1D1D1F]">{createLabel}</h3>
+            <div className="mt-3 flex gap-2">
+              <button type="button" className={`rounded-lg px-3 py-1.5 text-[12px] ${addMode === 'text' ? 'bg-[#1D1D1F] text-white' : 'border border-[#EAEAEA] text-[#444]'}`} onClick={() => setAddMode('text')}>文字输入</button>
+              <button type="button" className={`rounded-lg px-3 py-1.5 text-[12px] ${addMode === 'upload' ? 'bg-[#1D1D1F] text-white' : 'border border-[#EAEAEA] text-[#444]'}`} onClick={() => setAddMode('upload')}>图片上传</button>
+            </div>
+            <div className="mt-3 grid gap-2">
+              <input className="rounded-lg border border-[#EAEAEA] px-3 py-2 text-[13px]" placeholder="名称（可选）" value={draft.name} onChange={(e) => setDraft((s) => ({ ...s, name: e.target.value }))} />
+              {addMode === 'text' ? (
+                <textarea className="rounded-lg border border-[#EAEAEA] px-3 py-2 text-[13px]" placeholder="输入描述/指令（必填）" rows={4} value={draft.prompt} onChange={(e) => setDraft((s) => ({ ...s, prompt: e.target.value }))} />
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {uploadFiles.map((f, idx) => <span key={`${f.name}-${idx}`} className="rounded bg-[#F5F5F7] px-2 py-1 text-[11px] text-[#444]">{f.name}</span>)}
+                    {uploadFiles.length < 6 ? (
+                      <button type="button" className="h-8 w-8 rounded border border-dashed border-[#B8BBC2] text-[18px] text-[#6E6E73]" onClick={() => uploadPickerRef.current?.click()}>+</button>
+                    ) : null}
+                  </div>
+                  <input ref={uploadPickerRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => setUploadFiles((prev) => [...prev, ...Array.from(e.target.files || [])].slice(0, 6))} />
+                  <p className="text-[11px] text-[#8E8E93]">当前阶段：上传后先直接展示用户原图，不做图片识别生成。</p>
+                </>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded-lg border border-[#EAEAEA] px-3 py-1.5 text-[13px]" onClick={() => setShowCreate(false)}>取消</button>
+              <button type="button" disabled={working} className="rounded-lg bg-[#1D1D1F] px-3 py-1.5 text-[13px] font-semibold text-white disabled:opacity-50" onClick={() => void submitAdd()}>{working ? '处理中…' : '创建'}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

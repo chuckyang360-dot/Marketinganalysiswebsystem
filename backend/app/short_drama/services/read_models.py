@@ -1,12 +1,17 @@
 """Read helpers for latest pipeline artifacts (keeps route handlers thin)."""
 
+import hashlib
+import json
 import re
+from dataclasses import dataclass
 from typing import Optional
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..models import (
+    AssetEntity,
+    AssetImage,
     CharacterAsset,
     ProductAsset,
     ProductContextRecord,
@@ -96,6 +101,246 @@ def list_asset_rows(db: Session, project_id: int) -> tuple[list[CharacterAsset],
         .order_by(ProductAsset.id)
         .all()
     )
+    return chars, scenes, products
+
+
+@dataclass
+class PipelineCharacterAssetRow:
+    id: int
+    name: str
+    role_type: str
+    description: str | None
+    visual_prompt: str | None
+    image_url: str | None
+    visual_anchor_image_id: int | None
+    source_asset_version: str
+    exposure_priority: str
+    narrative_function: str | None
+    purpose: str | None
+    meta_json: dict
+
+
+@dataclass
+class PipelineSceneAssetRow:
+    id: int
+    name: str
+    scene_type: str | None
+    scene_form: str | None
+    description: str | None
+    visual_prompt: str | None
+    image_url: str | None
+    visual_anchor_image_id: int | None
+    source_asset_version: str
+    exposure_priority: str
+    narrative_function: str | None
+    purpose: str | None
+    meta_json: dict
+
+
+@dataclass
+class PipelineProductAssetRow:
+    id: int
+    name: str
+    product_role: str | None
+    description: str | None
+    visual_prompt: str | None
+    image_url: str | None
+    visual_anchor_image_id: int | None
+    source_asset_version: str
+    exposure_priority: str
+    narrative_function: str | None
+    purpose: str | None
+    meta_json: dict
+
+
+def list_pipeline_asset_rows(
+    db: Session, project_id: int
+) -> tuple[list[PipelineCharacterAssetRow], list[PipelineSceneAssetRow], list[PipelineProductAssetRow]]:
+    assets = (
+        db.query(AssetEntity)
+        .filter(AssetEntity.project_id == project_id, AssetEntity.status == "active")
+        .order_by(AssetEntity.sort_order.asc(), AssetEntity.id.asc())
+        .all()
+    )
+    if not assets:
+        return [], [], []
+    asset_ids = [a.id for a in assets]
+    images = (
+        db.query(AssetImage)
+        .filter(AssetImage.asset_id.in_(asset_ids), AssetImage.status == "active")
+        .order_by(AssetImage.id.asc())
+        .all()
+    )
+    image_by_asset: dict[int, list[AssetImage]] = {}
+    image_by_id: dict[int, AssetImage] = {}
+    for img in images:
+        image_by_asset.setdefault(img.asset_id, []).append(img)
+        image_by_id[img.id] = img
+
+    def _normalize_role_type(raw: object) -> str:
+        v = str(raw or "").strip().lower()
+        if v in {"main", "protagonist", "lead", "hero"}:
+            return "main"
+        if v in {"supporting", "support"}:
+            return "supporting"
+        if v in {"antagonist", "villain"}:
+            return "antagonist"
+        if v in {"extra", "background", "passerby", "crowd"}:
+            return "extra"
+        return "main"
+
+    def _normalize_scene_type(raw: object) -> str | None:
+        v = str(raw or "").strip().lower()
+        if v in {"hook", "opening", "intro", "start"}:
+            return "hook"
+        if v in {"conflict", "build"}:
+            return "conflict"
+        if v in {"turn", "twist"}:
+            return "turn"
+        if v in {"resolution", "ending", "close"}:
+            return "resolution"
+        return None
+
+    def _normalize_scene_form(raw: object) -> str | None:
+        v = str(raw or "").strip().lower()
+        if v in {"interior", "indoor", "室内", "bedroom_interior", "interior office", "indoor_home"}:
+            return "interior"
+        if v in {"exterior", "outdoor", "室外", "exterior_day", "exterior urban", "outdoor urban"}:
+            return "exterior"
+        if v in {"montage", "montage_dynamic", "mixed interior exterior", "室内到室外"}:
+            return "montage"
+        return None
+
+    def _normalize_product_role(raw: object) -> str:
+        v = str(raw or "").strip().lower()
+        if v in {"hero", "main", "primary"}:
+            return "hero"
+        if v in {"contrast", "compare", "comparison", "secondary"}:
+            return "contrast"
+        if v in {"prop", "tool"}:
+            return "prop"
+        if v in {"solution", "resolver"}:
+            return "solution"
+        return "hero"
+
+    def _source_asset_version(asset: AssetEntity, tf: dict, cover_url: str | None) -> str:
+        # Deterministic version fingerprint for Step4 stale/rebuild checks.
+        payload = {
+            "asset_id": asset.id,
+            "asset_type": asset.asset_type,
+            "name": asset.name or "",
+            "description": asset.description or "",
+            "base_prompt": asset.base_prompt or "",
+            "cover_image_id": asset.cover_image_id,
+            "cover_url": cover_url or "",
+            "narrative_function": str(tf.get("narrative_function") or ""),
+            "exposure_priority": str(tf.get("exposure_priority") or ""),
+            "purpose": str(tf.get("purpose") or ""),
+            "visual_anchor_image_id": tf.get("visual_anchor_image_id"),
+        }
+        raw = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+    def _pick_visual_anchor_id(asset: AssetEntity, tf: dict) -> int | None:
+        raw = tf.get("visual_anchor_image_id")
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str) and raw.strip().isdigit():
+            return int(raw.strip())
+        if asset.cover_image_id:
+            return int(asset.cover_image_id)
+        imgs = image_by_asset.get(asset.id) or []
+        return int(imgs[0].id) if imgs else None
+
+    def _normalize_priority(tf: dict) -> str:
+        p = str(tf.get("exposure_priority") or "secondary").strip().lower()
+        if p in {"primary", "secondary", "background"}:
+            return p
+        return "secondary"
+
+    def _cover_url(asset: AssetEntity) -> str | None:
+        if asset.cover_image_id and asset.cover_image_id in image_by_id:
+            return image_by_id[asset.cover_image_id].image_url
+        imgs = image_by_asset.get(asset.id) or []
+        return imgs[0].image_url if imgs else None
+
+    chars: list[PipelineCharacterAssetRow] = []
+    scenes: list[PipelineSceneAssetRow] = []
+    products: list[PipelineProductAssetRow] = []
+    for asset in assets:
+        tf = ((asset.extra_json or {}).get("type_fields") or {}) if isinstance(asset.extra_json, dict) else {}
+        tf = tf if isinstance(tf, dict) else {}
+        prompt = asset.base_prompt
+        cover_url = _cover_url(asset)
+        visual_anchor_image_id = _pick_visual_anchor_id(asset, tf)
+        exposure_priority = _normalize_priority(tf)
+        narrative_function = str(tf.get("narrative_function")).strip() if tf.get("narrative_function") else None
+        purpose = str(tf.get("purpose")).strip() if tf.get("purpose") else None
+        source_asset_version = _source_asset_version(asset, tf, cover_url)
+        meta_json = dict(tf)
+        meta_json.setdefault("source_asset_version", source_asset_version)
+        if asset.asset_type == "character":
+            role_type = _normalize_role_type(tf.get("role_type"))
+            meta_json["role_type"] = role_type
+            chars.append(
+                PipelineCharacterAssetRow(
+                    id=asset.id,
+                    name=asset.name,
+                    role_type=role_type,
+                    description=asset.description,
+                    visual_prompt=prompt,
+                    image_url=cover_url,
+                    visual_anchor_image_id=visual_anchor_image_id,
+                    source_asset_version=source_asset_version,
+                    exposure_priority=exposure_priority,
+                    narrative_function=narrative_function,
+                    purpose=purpose,
+                    meta_json=meta_json,
+                )
+            )
+        elif asset.asset_type == "scene":
+            scene_type = _normalize_scene_type(tf.get("scene_type"))
+            scene_form = _normalize_scene_form(tf.get("scene_form") or tf.get("scene_type"))
+            if scene_type:
+                meta_json["scene_type"] = scene_type
+            if scene_form:
+                meta_json["scene_form"] = scene_form
+            scenes.append(
+                PipelineSceneAssetRow(
+                    id=asset.id,
+                    name=asset.name,
+                    scene_type=scene_type,
+                    scene_form=scene_form,
+                    description=asset.description,
+                    visual_prompt=prompt,
+                    image_url=cover_url,
+                    visual_anchor_image_id=visual_anchor_image_id,
+                    source_asset_version=source_asset_version,
+                    exposure_priority=exposure_priority,
+                    narrative_function=narrative_function,
+                    purpose=purpose,
+                    meta_json=meta_json,
+                )
+            )
+        elif asset.asset_type == "product":
+            product_role = _normalize_product_role(tf.get("product_role"))
+            meta_json["product_role"] = product_role
+            products.append(
+                PipelineProductAssetRow(
+                    id=asset.id,
+                    name=asset.name,
+                    product_role=product_role,
+                    description=asset.description,
+                    visual_prompt=prompt,
+                    image_url=cover_url,
+                    visual_anchor_image_id=visual_anchor_image_id,
+                    source_asset_version=source_asset_version,
+                    exposure_priority=exposure_priority,
+                    narrative_function=narrative_function,
+                    purpose=purpose,
+                    meta_json=meta_json,
+                )
+            )
     return chars, scenes, products
 
 

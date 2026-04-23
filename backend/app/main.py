@@ -22,6 +22,9 @@ from .services.ceo_agent import ceo_agent
 # This must be done before calling init_db()
 from .models import user, x_analysis
 from .short_drama.models import (  # Short Drama Engine tables
+    AssetEntity,
+    AssetImage,
+    AssetReferenceImage,
     CharacterAsset,
     ProductAsset,
     ProductContextRecord,

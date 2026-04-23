@@ -33,15 +33,19 @@ class MockStoryPlannerProvider:
         style = project_config.get("style") or "生活流"
         duration = project_config.get("duration") or "45s"
         fmt = project_config.get("format") or "single_ad"
+        summary = (product.product_summary or "").strip()
+        users = "、".join([u for u in product.target_users if u][:2]) or "泛用户"
+        angle = (product.suitable_story_angles[0] if product.suitable_story_angles else "场景代入型")
+        emotion = (product.emotional_value[0] if product.emotional_value else "获得感")
         return StoryBlueprintSchema(
             title=f"{pname} · 都市轻喜剧短片",
             format=fmt,
             style=style,
-            premise=f"主角在真实日常压力中遇到与 {pname} 相关的选择。",
+            premise=f"{summary or f'主角在真实日常压力中遇到与 {pname} 相关的选择。'}（目标用户：{users}）",
             hook="强共鸣开场：尴尬/赶时间/社交压力",
-            core_conflict="信任与试错成本",
+            core_conflict=f"信任与试错成本（叙事角度：{angle}）",
             twist="产品以自然方式破局",
-            resolution="情绪落地 + 品牌正向记忆点",
+            resolution=f"情绪落地（{emotion}） + 品牌正向记忆点",
             segment_plan=[
                 SegmentPlanItemSchema(
                     segment_id="seg_1",
@@ -95,6 +99,15 @@ class XAIStoryPlannerProvider:
                     "project_id": project_id,
                     "project_config": project_config,
                     "product_context": product.model_dump(),
+                    "s1_context_for_story": {
+                        "product_name": product.product_name,
+                        "product_summary": product.product_summary,
+                        "core_selling_points": product.core_selling_points,
+                        "target_users": product.target_users,
+                        "usage_scenarios": product.usage_scenarios,
+                        "emotional_value": product.emotional_value,
+                        "suitable_story_angles": product.suitable_story_angles,
+                    },
                 },
                 image_urls=None,
                 expected_schema_name="StoryBlueprint",

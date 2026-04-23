@@ -36,3 +36,12 @@ env/
 .railway/
 *.png
 backend/generated/
+docs/step3-evidence/
+*.log
+*.json
+*.png
+*.jpg
+*.jpeg
+*.webp
+backend/examples/
+frontend/scripts/

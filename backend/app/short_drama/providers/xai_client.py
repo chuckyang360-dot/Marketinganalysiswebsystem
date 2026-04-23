@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -37,6 +38,34 @@ def _truncate(s: str, max_len: int = 500) -> str:
     if len(s) <= max_len:
         return s
     return s[:max_len] + "…"
+
+
+def _summarize_input_payload_for_log(input_items: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: list[dict[str, Any]] = []
+    for item in input_items:
+        role = str(item.get("role") or "")
+        content = item.get("content")
+        row: dict[str, Any] = {"role": role, "content_type": type(content).__name__}
+        if isinstance(content, list):
+            type_counts: dict[str, int] = {}
+            image_preview: list[str] = []
+            text_lengths: list[int] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = str(part.get("type") or "")
+                type_counts[ptype] = type_counts.get(ptype, 0) + 1
+                if ptype == "input_image":
+                    raw = str(part.get("image_url") or "")
+                    image_preview.append(_truncate(raw, 120))
+                elif ptype == "input_text":
+                    text_lengths.append(len(str(part.get("text") or "")))
+            row["content_len"] = len(content)
+            row["content_type_counts"] = type_counts
+            row["image_url_preview"] = image_preview
+            row["input_text_lengths"] = text_lengths
+        summary.append(row)
+    return {"input": summary}
 
 
 def extract_assistant_text(response_json: dict[str, Any]) -> str:
@@ -101,7 +130,7 @@ class XAIClient:
         *,
         model: str,
         system_prompt: str,
-        user_content: str | list[dict[str, Any]],
+        user_content: list[dict[str, Any]],
         store: bool = False,
         max_output_tokens: int = 8192,
         log_context: dict[str, Any],
@@ -118,30 +147,28 @@ class XAIClient:
             "Content-Type": "application/json",
         }
 
-        user_message: dict[str, Any]
-        if isinstance(user_content, list):
-            user_message = {"role": "user", "content": user_content}
-        else:
-            user_message = {"role": "user", "content": user_content}
+        user_message: dict[str, Any] = {"role": "user", "content": user_content}
+        input_items: list[dict[str, Any]] = [user_message]
 
         body: dict[str, Any] = {
             "model": model,
-            "input": [
-                {"role": "system", "content": system_prompt},
-                user_message,
-            ],
+            "input": input_items,
+            "instructions": system_prompt,
             "store": store,
             "max_output_tokens": max_output_tokens,
         }
 
         prov = str(log_context.get("provider") or "grok")
-        ukind = "parts" if isinstance(user_content, list) else "text"
-        ulen = (
-            sum(len(str(p)) for p in user_content)
-            if isinstance(user_content, list)
-            else len(user_content)
-        )
+        ukind = "parts"
+        ulen = len(json.dumps(user_content, ensure_ascii=False))
         extra_ctx = ai_log_extra_from_context(log_context)
+        input_summary = _summarize_input_payload_for_log(input_items)
+        logger.info(
+            "[XAI_PAYLOAD_SHAPE] provider=%s model=%s summary=%s",
+            prov,
+            model,
+            json.dumps(input_summary, ensure_ascii=False),
+        )
         log_ai_request(
             logger,
             provider=prov,
@@ -185,6 +212,7 @@ class XAIClient:
                         **extra_ctx,
                         attempt=attempt,
                         body_snippet=snippet[:400],
+                        payload_shape=input_summary,
                     )
                     raise ShortDramaProviderError(
                         f"xAI Responses API HTTP {resp.status_code}: {_truncate(resp.text, 400)}"

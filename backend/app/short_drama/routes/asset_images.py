@@ -18,6 +18,7 @@ from ..schemas.asset import (
 )
 from ..services.project_state_service import STEP_3, mark_step_completed, propagate_downstream_stale, update_last_active_step
 from ..services.asset_image_service import asset_image_service
+from ..services.asset_library_service import asset_library_service
 from ..services.workflow_orchestrator import ASSET_IMAGE_RENDER_ALLOWED_STATUSES, orchestrator
 from ..utils.enums import ProjectStatus
 
@@ -118,6 +119,10 @@ async def generate_all_asset_images(
 
     try:
         result = asset_image_service.generate_all_asset_images(db, pid)
+        # Legacy image generation updates Character/Scene/ProductAsset.image_url;
+        # sync them to unified asset library as Step3 data source.
+        asset_library_service.sync_legacy_assets_for_project(db, pid)
+        db.commit()
         return _to_response(result)
     except HTTPException as he:
         if he.status_code == status.HTTP_409_CONFLICT:

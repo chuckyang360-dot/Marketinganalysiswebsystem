@@ -6,10 +6,6 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...models import User
 from ..models import (
-    CharacterAsset,
-    ProductAsset,
-    SceneAsset,
-    SegmentScriptRecord,
     ShortDramaProject,
 )
 from ..schemas.project import (
@@ -35,9 +31,9 @@ from ..services.project_state_service import (
 from ..services.pipeline_video_state import build_pipeline_video_state, segment_row_video_fields
 from ..services.read_models import (
     latest_final_video_url,
+    list_pipeline_asset_rows,
     latest_product_context,
     latest_story_blueprint,
-    list_asset_rows,
     list_segment_scripts,
 )
 from ..services.workflow_orchestrator import orchestrator
@@ -235,10 +231,10 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
 
         pc = latest_product_context(db, project_id)
         sb = latest_story_blueprint(db, project_id)
-        chars, scenes, products = list_asset_rows(db, project_id)
+        chars, scenes, products = list_pipeline_asset_rows(db, project_id)
         segs = list_segment_scripts(db, project_id)
 
-        def char_row(c: CharacterAsset) -> dict:
+        def char_row(c) -> dict:
             return {
                 "id": c.id,
                 "name": c.name,
@@ -246,27 +242,44 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
                 "description": c.description,
                 "visual_prompt": c.visual_prompt,
                 "image_url": _public_media_url(c.image_url),
+                "visual_anchor_image_id": c.visual_anchor_image_id,
+                "source_asset_version": c.source_asset_version,
+                "exposure_priority": c.exposure_priority,
+                "narrative_function": c.narrative_function,
+                "purpose": c.purpose,
                 "meta": c.meta_json or {},
             }
 
-        def scene_row(s: SceneAsset) -> dict:
+        def scene_row(s) -> dict:
             return {
                 "id": s.id,
                 "name": s.name,
                 "scene_type": s.scene_type,
+                "scene_form": s.scene_form,
                 "description": s.description,
                 "visual_prompt": s.visual_prompt,
                 "image_url": _public_media_url(s.image_url),
+                "visual_anchor_image_id": s.visual_anchor_image_id,
+                "source_asset_version": s.source_asset_version,
+                "exposure_priority": s.exposure_priority,
+                "narrative_function": s.narrative_function,
+                "purpose": s.purpose,
                 "meta": s.meta_json or {},
             }
 
-        def prod_row(p: ProductAsset) -> dict:
+        def prod_row(p) -> dict:
             return {
                 "id": p.id,
                 "name": p.name,
+                "product_role": p.product_role,
                 "description": p.description,
                 "visual_prompt": p.visual_prompt,
                 "image_url": _public_media_url(p.image_url),
+                "visual_anchor_image_id": p.visual_anchor_image_id,
+                "source_asset_version": p.source_asset_version,
+                "exposure_priority": p.exposure_priority,
+                "narrative_function": p.narrative_function,
+                "purpose": p.purpose,
                 "meta": p.meta_json or {},
             }
 
@@ -353,7 +366,9 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
                     "id": pc.id,
                     "version": pc.version,
                     "raw_inputs": pc.raw_inputs_json,
+                    "image_understanding": pc.image_understanding_json,
                     "normalized": pc.normalized_context_json,
+                    "parse_status": pc.parse_status,
                     "created_at": pc.created_at.isoformat() if pc.created_at else None,
                 }
                 if pc

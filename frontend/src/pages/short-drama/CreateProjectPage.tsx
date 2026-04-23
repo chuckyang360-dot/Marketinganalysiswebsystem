@@ -28,25 +28,38 @@ export function ShortDramaCreateProjectPage() {
   const canSubmit = Boolean(draft.projectName.trim() && user && !submitting);
 
   const handleNext = async () => {
+    console.info('[S0_CREATE_CLICK]', { has_user: Boolean(user), project_name_len: draft.projectName.trim().length });
     if (!user) {
       setSubmitError('请先登录后再创建项目。');
       return;
     }
+    const requestBody = {
+      user_id: user.id,
+      project_name: draft.projectName.trim(),
+      duration: draft.duration,
+      format: draft.format,
+      style: draft.plotStyles.length ? draft.plotStyles.join(',') : null,
+      visual_style: draft.visualStyle,
+      aspect_ratio: draft.aspectRatio,
+    };
+    console.info('[S0_CREATE_REQUEST]', {
+      user_id: requestBody.user_id,
+      has_project_name: Boolean(requestBody.project_name),
+      duration: requestBody.duration,
+      format: requestBody.format,
+      visual_style: requestBody.visual_style,
+      aspect_ratio: requestBody.aspect_ratio,
+    });
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const res = await createShortDramaProject({
-        user_id: user.id,
-        project_name: draft.projectName.trim(),
-        duration: draft.duration,
-        format: draft.format,
-        style: draft.plotStyles.length ? draft.plotStyles.join(',') : null,
-        visual_style: draft.visualStyle,
-        aspect_ratio: draft.aspectRatio,
-      });
+      const res = await createShortDramaProject(requestBody);
       const p = res.project;
+      console.info('[S0_CREATE_SUCCESS]', { project_id: p.id, project_name: p.project_name });
       setSession(p.id, p.project_name);
-      navigate(withProjectQuery('/short-drama/product-input', p.id));
+      const nextPath = withProjectQuery('/short-drama/product-input', p.id);
+      console.info('[S0_CREATE_NAVIGATE]', { project_id: p.id, to: nextPath });
+      navigate(nextPath);
     } catch (e) {
       const msg = e instanceof ShortDramaApiError ? e.message : e instanceof Error ? e.message : '创建失败';
       setSubmitError(msg);
@@ -57,7 +70,7 @@ export function ShortDramaCreateProjectPage() {
 
   return (
     <div className="min-h-screen bg-white" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav />
+      <SDWorkflowNav allowSaveAndLeave={false} />
       <div className="flex min-h-screen pt-14">
         <aside
           className="hidden w-72 shrink-0 flex-col border-r border-[#EAEAEA] bg-[#F7F8FA] p-8 pt-10 lg:flex"

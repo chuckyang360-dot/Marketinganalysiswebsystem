@@ -9,100 +9,63 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 export function pipelineRawInputsToDraft(raw: unknown): ProductInputDraft | null {
   const o = asRecord(raw);
   if (!o) return null;
-  const extra = asRecord(o.extra) ?? {};
-
-  const title = typeof o.title === 'string' ? o.title : '';
-  const brand = typeof o.brand === 'string' ? o.brand : '';
-  const description = typeof o.description === 'string' ? o.description : '';
-
-  let category = typeof extra.category === 'string' ? extra.category : '';
-  let useScene = '';
-  if (description.includes(' · ')) {
-    const parts = description.split(' · ');
-    if (!category) category = parts[0]?.trim() ?? '';
-    useScene = parts.slice(1).join(' · ').trim();
-  } else {
-    useScene = description.trim();
-  }
-
-  const bulletsRaw = o.bullet_points ?? o.selling_points;
-  const sellingPoints = Array.isArray(bulletsRaw)
-    ? bulletsRaw.map((x) => String(x)).filter((x) => x.length > 0)
+  const productImages = Array.isArray(o.product_images)
+    ? o.product_images
+        .map((row, idx) => {
+          const r = asRecord(row);
+          if (!r || typeof r.image_url !== 'string' || !r.image_url.trim()) return null;
+          return {
+            imageUrl: r.image_url.trim(),
+            imageOrder: typeof r.image_order === 'number' ? r.image_order : idx,
+            isMainImage: Boolean(r.is_main_image),
+            imageCaptionRaw: typeof r.image_caption_raw === 'string' ? r.image_caption_raw : '',
+          };
+        })
+        .filter((x): x is ProductInputDraft['productImages'][number] => Boolean(x))
     : [];
-
-  const audience = typeof o.audience === 'string' ? o.audience : '';
-  let targetMarkets: string[] = [];
-  let targetUser = '';
-  if (audience.includes(' | ')) {
-    const [m, ...rest] = audience.split(' | ');
-    const u = rest.join(' | ');
-    if (m?.startsWith('市场：')) {
-      targetMarkets = m
-        .replace(/^市场：/, '')
-        .split('、')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    targetUser = u.trim();
-  } else {
-    targetUser = audience.trim();
-  }
-
-  const tmExtra = extra.target_markets ?? extra.targetMarkets;
-  if (Array.isArray(tmExtra) && tmExtra.length) {
-    targetMarkets = tmExtra.map((x) => String(x)).filter(Boolean);
-  }
-
-  const brandTone = typeof extra.brand_tone === 'string' ? extra.brand_tone : '';
-  const extraNotes = typeof extra.extra_notes === 'string' ? extra.extra_notes : '';
-
   const hasAnything =
-    title.trim() ||
-    brand.trim() ||
-    category.trim() ||
-    useScene.trim() ||
-    sellingPoints.length ||
-    targetMarkets.length ||
-    targetUser.trim() ||
-    brandTone.trim() ||
-    extraNotes.trim();
+    (typeof o.product_name_raw === 'string' && o.product_name_raw.trim()) ||
+    (typeof o.product_category_raw === 'string' && o.product_category_raw.trim()) ||
+    (typeof o.brand_raw === 'string' && o.brand_raw.trim()) ||
+    (typeof o.price_raw === 'string' && o.price_raw.trim()) ||
+    (typeof o.target_users_raw === 'string' && o.target_users_raw.trim()) ||
+    (Array.isArray(o.selling_points_raw) && o.selling_points_raw.length > 0) ||
+    (Array.isArray(o.usage_scenarios_raw) && o.usage_scenarios_raw.length > 0) ||
+    (typeof o.extra_notes_raw === 'string' && o.extra_notes_raw.trim()) ||
+    productImages.length > 0;
 
   if (!hasAnything) return null;
 
   return {
-    productName: title,
-    category,
-    brandName: brand,
-    targetMarkets,
-    targetUser,
-    sellingPoints,
-    useScene,
-    brandTone,
-    extraNotes,
+    productNameRaw: typeof o.product_name_raw === 'string' ? o.product_name_raw : '',
+    productCategoryRaw: typeof o.product_category_raw === 'string' ? o.product_category_raw : '',
+    brandRaw: typeof o.brand_raw === 'string' ? o.brand_raw : '',
+    priceRaw: typeof o.price_raw === 'string' ? o.price_raw : '',
+    targetUsersRaw: typeof o.target_users_raw === 'string' ? o.target_users_raw : '',
+    sellingPointsRaw: Array.isArray(o.selling_points_raw) ? o.selling_points_raw.map((x) => String(x)) : [],
+    usageScenariosRaw: Array.isArray(o.usage_scenarios_raw) ? o.usage_scenarios_raw.map((x) => String(x)) : [],
+    extraNotesRaw: typeof o.extra_notes_raw === 'string' ? o.extra_notes_raw : '',
+    productImages,
   };
 }
 
 /** Map create-project form → POST /project body fields (duration/format/style/visual/aspect already strings on backend). */
 export function mapDraftToProductInputPayload(draft: ProductInputDraft): ProductInputPayload {
-  const descParts = [draft.category?.trim(), draft.useScene?.trim()].filter(Boolean);
-  const audienceParts = [
-    draft.targetMarkets.length ? `市场：${draft.targetMarkets.join('、')}` : '',
-    draft.targetUser?.trim() || '',
-  ].filter(Boolean);
-
   return {
-    title: draft.productName.trim() || undefined,
-    brand: draft.brandName.trim() || undefined,
-    description: descParts.length ? descParts.join(' · ') : undefined,
-    bullet_points: draft.sellingPoints.length ? draft.sellingPoints : undefined,
-    audience: audienceParts.length ? audienceParts.join(' | ') : undefined,
-    selling_points: draft.sellingPoints.length ? draft.sellingPoints : undefined,
-    image_urls: [],
-    extra: {
-      category: draft.category,
-      brand_tone: draft.brandTone,
-      extra_notes: draft.extraNotes,
-    },
+    product_name_raw: draft.productNameRaw.trim() || undefined,
+    product_category_raw: draft.productCategoryRaw.trim() || undefined,
+    brand_raw: draft.brandRaw.trim() || undefined,
+    price_raw: draft.priceRaw.trim() || undefined,
+    target_users_raw: draft.targetUsersRaw.trim() || undefined,
+    selling_points_raw: draft.sellingPointsRaw.length ? draft.sellingPointsRaw : undefined,
+    usage_scenarios_raw: draft.usageScenariosRaw.length ? draft.usageScenariosRaw : undefined,
+    extra_notes_raw: draft.extraNotesRaw.trim() || undefined,
+    product_images: draft.productImages.map((img, idx) => ({
+      image_url: img.imageUrl,
+      image_order: img.imageOrder ?? idx,
+      is_main_image: Boolean(img.isMainImage),
+      image_caption_raw: img.imageCaptionRaw || '',
+    })),
   };
 }
 
@@ -111,33 +74,24 @@ export function mapDraftToProductInputPayload(draft: ProductInputDraft): Product
  * Graceful degradation when arrays empty.
  */
 export function productContextToPreview(ctx: ProductContextDto): ProductPreviewSummary {
-  const summaryParts = [
-    ctx.product_name,
-    ctx.category,
-    ctx.brand_name,
-    ctx.target_users,
-    ctx.brand_tone,
-    ctx.notes_for_story,
-  ].filter(Boolean);
-  const summary =
-    summaryParts.length > 0
-      ? summaryParts.join(' · ')
-      : '解析完成，但摘要字段较少；可在左侧补充产品描述后重试解析。';
-
-  const sellingPoints = [...(ctx.selling_points ?? []), ...(ctx.core_features ?? [])].filter(Boolean);
-  const sceneKeywords = [...(ctx.usage_scenarios ?? []), ...(ctx.visual_features ?? [])].filter(Boolean);
-  const styleKeywords: string[] = [];
-  if (ctx.brand_tone) styleKeywords.push(ctx.brand_tone);
-  if (ctx.constraints?.length) styleKeywords.push(...ctx.constraints);
-  if (ctx.meta && typeof ctx.meta.style_tags === 'object' && Array.isArray(ctx.meta.style_tags)) {
-    styleKeywords.push(...(ctx.meta.style_tags as string[]).filter((x) => typeof x === 'string'));
-  }
-
   return {
-    summary,
-    sellingPoints: sellingPoints.length ? sellingPoints : ctx.core_features?.length ? ctx.core_features : ['—'],
-    sceneKeywords: sceneKeywords.length ? sceneKeywords : ['—'],
-    styleKeywords: styleKeywords.length ? styleKeywords : ['—'],
+    productName: ctx.product_name || '',
+    productCategory: ctx.product_category || '',
+    productSummary: ctx.product_summary || '',
+    coreSellingPoints: ctx.core_selling_points ?? [],
+    targetUsers: ctx.target_users ?? [],
+    usageScenarios: ctx.usage_scenarios ?? [],
+    visualFeatures: ctx.visual_features ?? [],
+    productForm: ctx.product_form || '',
+    keyFunctions: ctx.key_functions ?? [],
+    emotionalValue: ctx.emotional_value ?? [],
+    suitableStoryAngles: ctx.suitable_story_angles ?? [],
+    visualRiskNotes: ctx.visual_risk_notes ?? [],
+    consistencyNotes: ctx.consistency_notes ?? [],
+    extractedFromImages: ctx.extracted_from_images ?? [],
+    parseConfidence: typeof ctx.parse_confidence === 'number' ? ctx.parse_confidence : 0,
+    sourceTrace: (ctx.source_trace ?? {}) as Record<string, string>,
+    fieldMeta: (ctx.field_meta ?? {}) as Record<string, { edited_by_user?: boolean; edited_at?: string }>,
     status: 'ready',
   };
 }
@@ -147,6 +101,28 @@ export function normalizedJsonToProductPreview(norm: unknown): ProductPreviewSum
   const o = norm as Record<string, unknown>;
   if (typeof o.product_name !== 'string' || !o.product_name.trim()) return null;
   return productContextToPreview(o as ProductContextDto);
+}
+
+export function previewToProductContextPayload(preview: ProductPreviewSummary): Record<string, unknown> {
+  return {
+    product_name: preview.productName,
+    product_category: preview.productCategory,
+    product_summary: preview.productSummary,
+    core_selling_points: preview.coreSellingPoints,
+    target_users: preview.targetUsers,
+    usage_scenarios: preview.usageScenarios,
+    visual_features: preview.visualFeatures,
+    product_form: preview.productForm,
+    key_functions: preview.keyFunctions,
+    emotional_value: preview.emotionalValue,
+    suitable_story_angles: preview.suitableStoryAngles,
+    visual_risk_notes: preview.visualRiskNotes,
+    consistency_notes: preview.consistencyNotes,
+    extracted_from_images: preview.extractedFromImages,
+    parse_confidence: preview.parseConfidence,
+    source_trace: preview.sourceTrace,
+    field_meta: preview.fieldMeta,
+  };
 }
 
 const SEGMENT_COLORS = ['#B45309', '#DC2626', '#047857', '#334155', '#9333EA', '#0F766E'];

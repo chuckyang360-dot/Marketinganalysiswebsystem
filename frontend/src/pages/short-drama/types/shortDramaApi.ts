@@ -38,37 +38,84 @@ export type TouchProjectStepBody = {
 };
 
 export type ProductInputPayload = {
-  title?: string | null;
-  brand?: string | null;
-  description?: string | null;
-  bullet_points?: string[] | null;
-  price_hint?: string | null;
-  audience?: string | null;
-  selling_points?: string[] | null;
-  image_urls?: string[] | null;
-  extra?: Record<string, unknown> | null;
+  product_name_raw?: string | null;
+  product_category_raw?: string | null;
+  brand_raw?: string | null;
+  price_raw?: string | null;
+  target_users_raw?: string | null;
+  selling_points_raw?: string[] | null;
+  usage_scenarios_raw?: string[] | null;
+  extra_notes_raw?: string | null;
+  product_images?: {
+    image_url: string;
+    image_order?: number;
+    is_main_image?: boolean;
+    image_caption_raw?: string;
+  }[] | null;
 };
 
 export type ProductContextDto = {
   product_name: string;
   category?: string;
   brand_name?: string;
-  visual_features?: string[];
   core_features?: string[];
   selling_points?: string[];
-  target_users?: string;
-  usage_scenarios?: string[];
   brand_tone?: string;
   constraints?: string[];
   notes_for_story?: string;
   meta?: Record<string, unknown>;
+  product_category?: string;
+  product_summary?: string;
+  core_selling_points?: string[];
+  target_users?: string[];
+  usage_scenarios?: string[];
+  visual_features?: string[];
+  product_form?: string;
+  key_functions?: string[];
+  emotional_value?: string[];
+  suitable_story_angles?: string[];
+  visual_risk_notes?: string[];
+  consistency_notes?: string[];
+  extracted_from_images?: string[];
+  parse_confidence?: number;
+  source_trace?: Record<string, string>;
+  field_meta?: Record<string, { edited_by_user?: boolean; edited_at?: string }>;
+};
+
+export type ProductImageUnderstandingDto = {
+  detected_product_type?: string;
+  detected_visual_features?: string[];
+  detected_materials?: string[];
+  detected_colors?: string[];
+  detected_usage_context?: string[];
+  detected_people_type?: string[];
+  detected_pose_or_usage?: string[];
+  detected_packaging?: string[];
+  detected_brand_clues?: string[];
+  detected_quality_risks?: string[];
+  image_conflicts?: string[];
+  per_image_notes?: Record<string, unknown>[];
 };
 
 export type ParseProductResponseDto = {
   record_id: number;
   project_id: number;
   version: number;
+  parse_status?: string;
   raw_inputs: Record<string, unknown>;
+  image_understanding?: ProductImageUnderstandingDto;
+  product_context: ProductContextDto;
+  from_version?: number | null;
+  updated_fields?: string[];
+  preserved_fields?: string[];
+  created_at?: string | null;
+};
+
+export type UpdateProductContextResponseDto = {
+  record_id: number;
+  project_id: number;
+  version: number;
+  parse_status?: string;
   product_context: ProductContextDto;
   created_at?: string | null;
 };
@@ -120,25 +167,42 @@ export type PipelineCharacterAssetDto = {
   description: string;
   visual_prompt: string;
   image_url: string | null;
+  visual_anchor_image_id?: number | null;
+  source_asset_version?: string;
+  exposure_priority?: 'primary' | 'secondary' | 'background' | string;
+  narrative_function?: string | null;
+  purpose?: string | null;
   meta: Record<string, unknown>;
 };
 
 export type PipelineSceneAssetDto = {
   id: number;
   name: string;
-  scene_type: string;
+  scene_type?: string | null;
+  scene_form?: string | null;
   description: string;
   visual_prompt: string;
   image_url: string | null;
+  visual_anchor_image_id?: number | null;
+  source_asset_version?: string;
+  exposure_priority?: 'primary' | 'secondary' | 'background' | string;
+  narrative_function?: string | null;
+  purpose?: string | null;
   meta: Record<string, unknown>;
 };
 
 export type PipelineProductAssetDto = {
   id: number;
   name: string;
+  product_role?: string | null;
   description: string;
   visual_prompt: string;
   image_url: string | null;
+  visual_anchor_image_id?: number | null;
+  source_asset_version?: string;
+  exposure_priority?: 'primary' | 'secondary' | 'background' | string;
+  narrative_function?: string | null;
+  purpose?: string | null;
   meta: Record<string, unknown>;
 };
 
@@ -152,7 +216,9 @@ export type PipelineAssetsBundleDto = {
 export type PipelineProductContextBlockDto = {
   id?: number;
   version?: number;
+  parse_status?: string;
   raw_inputs?: Record<string, unknown> | null;
+  image_understanding?: ProductImageUnderstandingDto | Record<string, unknown> | null;
   normalized?: ProductContextDto | Record<string, unknown> | null;
   created_at?: string | null;
 };
@@ -281,4 +347,71 @@ export type RegenerateOneAssetImageResponseDto = {
   asset_id: number;
   image_url?: string | null;
   stale_marked_step_4: boolean;
+};
+
+export type AssetImageDto = {
+  id: number;
+  image_url: string;
+  image_type: 'generated' | 'uploaded' | 'derived' | string;
+  variant_label?: string | null;
+  variant_meta: Record<string, unknown>;
+  prompt_snapshot?: string | null;
+  provider?: string | null;
+  provider_params: Record<string, unknown>;
+  is_cover: boolean;
+  status: string;
+  created_at?: string | null;
+};
+
+export type AssetReferenceImageDto = {
+  id: number;
+  file_url: string;
+  file_name?: string | null;
+  sort_order: number;
+  is_primary: boolean;
+  status: string;
+  created_at?: string | null;
+};
+
+export type AssetLibraryItemDto = {
+  id: number;
+  project_id: number;
+  asset_type: 'character' | 'scene' | 'product' | string;
+  name: string;
+  description?: string | null;
+  tags: string[];
+  base_prompt?: string | null;
+  source: string;
+  cover_image_id?: number | null;
+  cover_image?: AssetImageDto | null;
+  image_count: number;
+  has_reference_images: boolean;
+  sort_order: number;
+  status: string;
+  extra: Record<string, unknown>;
+  images: AssetImageDto[];
+  reference_images: AssetReferenceImageDto[];
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type AssetLibraryListResponseDto = {
+  project_id: number;
+  asset_type: string;
+  assets: AssetLibraryItemDto[];
+};
+
+export type CreateAssetLibraryBody = {
+  project_id: number;
+  asset_type: 'character' | 'scene' | 'product';
+  name: string;
+  description?: string;
+  tags?: string[];
+  base_prompt?: string;
+  source?: 'system_generated' | 'user_created' | 'mixed';
+  type_fields?: Record<string, unknown>;
+  reference_images?: { file_url: string; file_name?: string }[];
+  uploaded_images?: { file_url: string; file_name?: string }[];
+  generate_count?: number;
+  variant_directions?: string[];
 };

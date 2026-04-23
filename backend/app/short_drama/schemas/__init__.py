@@ -4,7 +4,15 @@ from .project import (
     PipelineSummaryResponse,
     ShortDramaProjectResponse,
 )
-from .product import ParseProductRequest, ParseProductResponse, ProductContextSchema, ProductInputSchema
+from .product import (
+    ParseProductRequest,
+    ParseProductResponse,
+    ProductContextSchema,
+    ProductImageUnderstandingSchema,
+    ProductRawInputSchema,
+    UpdateProductContextRequest,
+    UpdateProductContextResponse,
+)
 from .story import GenerateStoryRequest, GenerateStoryResponse, SegmentPlanItemSchema, StoryBlueprintSchema
 from .asset import (
     AssetImageBatchResponse,
@@ -24,10 +32,13 @@ __all__ = [
     "CreateShortDramaProjectResponse",
     "PipelineSummaryResponse",
     "ShortDramaProjectResponse",
-    "ProductInputSchema",
+    "ProductRawInputSchema",
+    "ProductImageUnderstandingSchema",
     "ProductContextSchema",
     "ParseProductRequest",
     "ParseProductResponse",
+    "UpdateProductContextRequest",
+    "UpdateProductContextResponse",
     "StoryBlueprintSchema",
     "SegmentPlanItemSchema",
     "GenerateStoryRequest",

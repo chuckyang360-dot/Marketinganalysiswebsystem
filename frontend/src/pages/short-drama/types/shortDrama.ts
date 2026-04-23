@@ -20,26 +20,46 @@ export interface ShortDramaProjectDraft {
 }
 
 export interface ProductInputDraft {
-  productName: string;
-  category: string;
-  brandName: string;
-  targetMarkets: string[];
-  targetUser: string;
-  sellingPoints: string[];
-  useScene: string;
-  brandTone: string;
-  extraNotes: string;
+  productNameRaw: string;
+  productCategoryRaw: string;
+  brandRaw: string;
+  priceRaw: string;
+  targetUsersRaw: string;
+  sellingPointsRaw: string[];
+  usageScenariosRaw: string[];
+  extraNotesRaw: string;
+  productImages: {
+    imageUrl: string;
+    imageOrder: number;
+    isMainImage: boolean;
+    imageCaptionRaw: string;
+  }[];
 }
 
 export type ParseStatus = 'idle' | 'parsing' | 'ready' | 'error';
 
-export interface ProductPreviewSummary {
-  summary: string;
-  sellingPoints: string[];
-  sceneKeywords: string[];
-  styleKeywords: string[];
+export interface ParsedProductContextDraft {
+  productName: string;
+  productCategory: string;
+  productSummary: string;
+  coreSellingPoints: string[];
+  targetUsers: string[];
+  usageScenarios: string[];
+  visualFeatures: string[];
+  productForm: string;
+  keyFunctions: string[];
+  emotionalValue: string[];
+  suitableStoryAngles: string[];
+  visualRiskNotes: string[];
+  consistencyNotes: string[];
+  extractedFromImages: string[];
+  parseConfidence: number;
+  sourceTrace: Record<string, string>;
+  fieldMeta: Record<string, { edited_by_user?: boolean; edited_at?: string }>;
+}
+
+export interface ProductPreviewSummary extends ParsedProductContextDraft {
   status: ParseStatus;
-  /** 当 status === 'error' 时展示 */
   errorMessage?: string;
 }
 

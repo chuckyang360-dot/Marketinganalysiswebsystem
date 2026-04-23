@@ -90,8 +90,236 @@ def _ensure_short_drama_project_step_columns() -> None:
         logger.exception("Migration for short_drama_projects step columns failed")
 
 
+def _ensure_short_drama_asset_library_backfill() -> None:
+    """Idempotent backfill: legacy single-image rows -> asset + image v2."""
+    try:
+        from .short_drama.models import (
+            AssetEntity,
+            AssetImage,
+            CharacterAsset,
+            ProductAsset,
+            SceneAsset,
+        )
+
+        session = SessionLocal()
+        try:
+            def _normalize_role_type(raw):
+                v = str(raw or "").strip().lower()
+                if v in {"main", "protagonist", "lead", "hero"}:
+                    return "main"
+                if v in {"supporting", "support"}:
+                    return "supporting"
+                if v in {"antagonist", "villain"}:
+                    return "antagonist"
+                if v in {"extra", "background", "passerby", "crowd"}:
+                    return "extra"
+                return None
+
+            def _normalize_scene_type(raw):
+                v = str(raw or "").strip().lower()
+                if v in {"hook", "opening", "intro", "start"}:
+                    return "hook"
+                if v in {"conflict", "build"}:
+                    return "conflict"
+                if v in {"turn", "twist"}:
+                    return "turn"
+                if v in {"resolution", "ending", "close"}:
+                    return "resolution"
+                return None
+
+            def _normalize_scene_form(raw):
+                v = str(raw or "").strip().lower()
+                if v in {"interior", "indoor", "室内", "bedroom_interior", "interior office", "indoor_home"}:
+                    return "interior"
+                if v in {"exterior", "outdoor", "室外", "exterior_day", "exterior urban", "outdoor urban"}:
+                    return "exterior"
+                if v in {"montage", "montage_dynamic", "mixed interior exterior", "室内到室外"}:
+                    return "montage"
+                return None
+
+            def _normalize_product_role(raw):
+                v = str(raw or "").strip().lower()
+                if v in {"hero", "main", "primary"}:
+                    return "hero"
+                if v in {"contrast", "compare", "comparison", "secondary"}:
+                    return "contrast"
+                if v in {"prop", "tool"}:
+                    return "prop"
+                if v in {"solution", "resolver"}:
+                    return "solution"
+                return None
+
+            legacy_rows = []
+            legacy_rows.extend(
+                (
+                    "character",
+                    row.id,
+                    row.project_id,
+                    row.name,
+                    row.description,
+                    row.visual_prompt,
+                    row.image_url,
+                    row.meta_json or {},
+                    {"role_type": _normalize_role_type(row.role_type) or "main"},
+                )
+                for row in session.query(CharacterAsset).order_by(CharacterAsset.id).all()
+            )
+            legacy_rows.extend(
+                (
+                    "scene",
+                    row.id,
+                    row.project_id,
+                    row.name,
+                    row.description,
+                    row.visual_prompt,
+                    row.image_url,
+                    row.meta_json or {},
+                    {
+                        "scene_type": _normalize_scene_type(row.scene_type),
+                        "scene_form": _normalize_scene_form(row.scene_type),
+                    },
+                )
+                for row in session.query(SceneAsset).order_by(SceneAsset.id).all()
+            )
+            legacy_rows.extend(
+                (
+                    "product",
+                    row.id,
+                    row.project_id,
+                    row.name,
+                    row.description,
+                    row.visual_prompt,
+                    row.image_url,
+                    row.meta_json or {},
+                    {"product_role": _normalize_product_role((row.meta_json or {}).get("product_role")) or "hero"},
+                )
+                for row in session.query(ProductAsset).order_by(ProductAsset.id).all()
+            )
+            for asset_type, legacy_id, project_id, name, description, prompt, image_url, meta_json, base_fields in legacy_rows:
+                extra = dict(meta_json or {})
+                extra.setdefault("legacy_source", {"table_asset_id": legacy_id, "asset_type": asset_type})
+                tf = dict(base_fields or {})
+                tf.update(dict(meta_json or {}))
+                if asset_type == "product":
+                    tf["product_role"] = _normalize_product_role(tf.get("product_role")) or "hero"
+                if asset_type == "character":
+                    tf["role_type"] = _normalize_role_type(tf.get("role_type")) or "main"
+                if asset_type == "scene":
+                    normalized_scene_type = _normalize_scene_type(tf.get("scene_type"))
+                    normalized_scene_form = _normalize_scene_form(tf.get("scene_form") or tf.get("scene_type"))
+                    if normalized_scene_type:
+                        tf["scene_type"] = normalized_scene_type
+                    else:
+                        tf.pop("scene_type", None)
+                    if normalized_scene_form:
+                        tf["scene_form"] = normalized_scene_form
+                extra["type_fields"] = tf
+                candidates = (
+                    session.query(AssetEntity)
+                    .filter(
+                        AssetEntity.project_id == project_id,
+                        AssetEntity.asset_type == asset_type,
+                        AssetEntity.name == (name or ""),
+                    )
+                    .all()
+                )
+                exists = None
+                for c in candidates:
+                    c_extra = c.extra_json or {}
+                    legacy = c_extra.get("legacy_source") if isinstance(c_extra, dict) else None
+                    if isinstance(legacy, dict) and int(legacy.get("table_asset_id", -1)) == int(legacy_id):
+                        exists = c
+                        break
+                if exists:
+                    continue
+                asset = AssetEntity(
+                    project_id=project_id,
+                    asset_type=asset_type,
+                    name=name or f"{asset_type}-{legacy_id}",
+                    description=description,
+                    base_prompt=prompt,
+                    source="system_generated",
+                    tags_json=[],
+                    extra_json=extra,
+                )
+                session.add(asset)
+                session.flush()
+                if image_url and str(image_url).strip():
+                    image = AssetImage(
+                        asset_id=asset.id,
+                        image_url=str(image_url).strip(),
+                        image_type="generated",
+                        variant_label="legacy-import-1",
+                        variant_meta={},
+                        prompt_snapshot=prompt,
+                        provider="legacy",
+                        provider_params={},
+                        is_cover=True,
+                    )
+                    session.add(image)
+                    session.flush()
+                    asset.cover_image_id = image.id
+                    session.add(asset)
+                extra2 = dict(asset.extra_json or {})
+                tf2 = dict(extra2.get("type_fields") or {})
+                if asset.cover_image_id:
+                    tf2["visual_anchor_image_id"] = int(asset.cover_image_id)
+                extra2["type_fields"] = tf2
+                asset.extra_json = extra2
+                session.add(asset)
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("Migration for short drama asset library backfill failed")
+
+
+def _ensure_short_drama_product_context_columns() -> None:
+    """Add S1 parse-layer columns when table predates image-understanding refactor."""
+    try:
+        insp = inspect(engine)
+        if not insp.has_table("short_drama_product_contexts"):
+            return
+        cols = {c["name"] for c in insp.get_columns("short_drama_product_contexts")}
+        dialect = engine.dialect.name
+        alters: list[str] = []
+        if "image_understanding_json" not in cols:
+            if dialect == "postgresql":
+                alters.append(
+                    "ALTER TABLE short_drama_product_contexts ADD COLUMN IF NOT EXISTS image_understanding_json JSON"
+                )
+            else:
+                alters.append("ALTER TABLE short_drama_product_contexts ADD COLUMN image_understanding_json TEXT")
+        if "parse_status" not in cols:
+            if dialect == "postgresql":
+                alters.append(
+                    "ALTER TABLE short_drama_product_contexts ADD COLUMN IF NOT EXISTS parse_status VARCHAR DEFAULT 'success'"
+                )
+            else:
+                alters.append(
+                    "ALTER TABLE short_drama_product_contexts ADD COLUMN parse_status VARCHAR DEFAULT 'success'"
+                )
+        if "updated_at" not in cols:
+            if dialect == "postgresql":
+                alters.append(
+                    "ALTER TABLE short_drama_product_contexts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()"
+                )
+            else:
+                alters.append("ALTER TABLE short_drama_product_contexts ADD COLUMN updated_at TIMESTAMP")
+        if not alters:
+            return
+        with engine.begin() as conn:
+            for stmt in alters:
+                conn.execute(text(stmt))
+        logger.info("Migration: short_drama_product_contexts columns added (%s): %s", dialect, alters)
+    except Exception:
+        logger.exception("Migration for short_drama_product_contexts columns failed")
+
+
 def init_db():
     """Initialize database tables - models must be imported before calling this"""
     Base.metadata.create_all(bind=engine)
     _sqlite_ensure_render_job_columns()
     _ensure_short_drama_project_step_columns()
+    _ensure_short_drama_asset_library_backfill()
+    _ensure_short_drama_product_context_columns()

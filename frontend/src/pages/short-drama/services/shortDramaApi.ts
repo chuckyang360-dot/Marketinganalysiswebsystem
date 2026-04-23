@@ -13,9 +13,13 @@ import type {
   RenderJobStatusResponseDto,
   RegenerateOneAssetImageBody,
   RegenerateOneAssetImageResponseDto,
+  AssetLibraryItemDto,
+  AssetLibraryListResponseDto,
+  CreateAssetLibraryBody,
   ShortDramaProjectDto,
   ShortDramaProjectListResponseDto,
   SingleSegmentVideoResponseDto,
+  UpdateProductContextResponseDto,
   UpdateAssetBody,
   UpdateAssetResponseDto,
   VideoBatchSummaryResponseDto,
@@ -131,10 +135,21 @@ export async function getShortDramaPipeline(projectId: number): Promise<Pipeline
 export async function parseShortDramaProduct(
   projectId: number,
   input: ProductInputPayload,
+  reparseMode: 'replace_all' | 'preserve_user_edited' = 'replace_all',
 ): Promise<ParseProductResponseDto> {
   return sdFetchJson<ParseProductResponseDto>('/api/short-drama/product/parse', {
     method: 'POST',
-    body: JSON.stringify({ project_id: projectId, input }),
+    body: JSON.stringify({ project_id: projectId, input, reparse_mode: reparseMode }),
+  });
+}
+
+export async function updateShortDramaProductContext(
+  projectId: number,
+  productContext: Record<string, unknown>,
+): Promise<UpdateProductContextResponseDto> {
+  return sdFetchJson<UpdateProductContextResponseDto>('/api/short-drama/product/context', {
+    method: 'PATCH',
+    body: JSON.stringify({ project_id: projectId, product_context: productContext }),
   });
 }
 
@@ -201,6 +216,97 @@ export async function regenerateShortDramaOneAssetImage(
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function listShortDramaAssetLibrary(
+  projectId: number,
+  assetType: 'character' | 'scene' | 'product',
+): Promise<AssetLibraryListResponseDto> {
+  return sdFetchJson<AssetLibraryListResponseDto>(`/api/short-drama/assets/specs/library/${projectId}/${assetType}`);
+}
+
+export async function getShortDramaAssetLibraryDetail(projectId: number, assetId: number): Promise<AssetLibraryItemDto> {
+  const path = `/api/short-drama/assets/specs/library/detail/${assetId}?project_id=${encodeURIComponent(String(projectId))}`;
+  console.info('[S3_API_DETAIL_CALL]', JSON.stringify({
+    path,
+    asset_id: assetId,
+    asset_id_type: typeof assetId,
+    project_id: projectId,
+    project_id_type: typeof projectId,
+  }));
+  return sdFetchJson<AssetLibraryItemDto>(path);
+}
+
+export async function createShortDramaAssetLibrary(body: CreateAssetLibraryBody): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>('/api/short-drama/assets/specs/library', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function regenerateShortDramaAssetLibrary(body: {
+  project_id: number;
+  asset_id: number;
+  reuse_reference_images?: boolean;
+  reference_images?: { file_url: string; file_name?: string }[];
+  generate_count?: number;
+  variant_directions?: string[];
+}): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>('/api/short-drama/assets/specs/library/regenerate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function appendShortDramaAssetUploadedImages(
+  assetId: number,
+  body: { project_id: number; uploaded_images: { file_url: string; file_name?: string }[] },
+): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>(`/api/short-drama/assets/specs/library/${assetId}/uploaded-images`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateShortDramaAssetLibrary(
+  assetId: number,
+  body: {
+    project_id: number;
+    name?: string;
+    description?: string;
+    tags?: string[];
+    base_prompt?: string;
+    type_fields?: Record<string, unknown>;
+  },
+): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>(`/api/short-drama/assets/specs/library/${assetId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function setShortDramaAssetLibraryCover(
+  assetId: number,
+  body: { project_id: number; image_id: number },
+): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>(`/api/short-drama/assets/specs/library/${assetId}/cover`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteShortDramaAssetLibraryImage(projectId: number, imageId: number): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>(
+    `/api/short-drama/assets/specs/library/image/${imageId}?project_id=${encodeURIComponent(String(projectId))}`,
+    { method: 'DELETE' },
+  );
+}
+
+export async function deleteShortDramaAssetLibrary(projectId: number, assetId: number): Promise<{ ok: boolean; asset_id: number }> {
+  return sdFetchJson<{ ok: boolean; asset_id: number }>(
+    `/api/short-drama/assets/specs/library/${assetId}?project_id=${encodeURIComponent(String(projectId))}`,
+    { method: 'DELETE' },
+  );
 }
 
 export async function generateShortDramaSegmentScripts(projectId: number): Promise<GenerateSegmentScriptsResponseDto> {
