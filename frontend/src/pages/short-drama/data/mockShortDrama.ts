@@ -247,10 +247,23 @@ export const mockProductAssets: MockProductAsset[] = [
 ];
 
 export const mockProductPreview: ProductPreviewSummary = {
-  summary: '演示占位摘要。提交产品解析后，此处将显示真实提炼结果。',
-  sellingPoints: ['卖点一（示例）', '卖点二（示例）'],
-  sceneKeywords: ['场景关键词（示例）'],
-  styleKeywords: ['风格关键词（示例）'],
+  productName: '',
+  productCategory: '',
+  productSummary: '演示占位摘要。提交产品解析后，此处将显示真实提炼结果。',
+  coreSellingPoints: ['卖点一（示例）', '卖点二（示例）'],
+  targetUsers: [],
+  usageScenarios: ['场景关键词（示例）'],
+  visualFeatures: ['风格关键词（示例）'],
+  productForm: '',
+  keyFunctions: [],
+  emotionalValue: [],
+  suitableStoryAngles: [],
+  visualRiskNotes: [],
+  consistencyNotes: [],
+  extractedFromImages: [],
+  parseConfidence: 0,
+  sourceTrace: {},
+  fieldMeta: {},
   status: 'idle',
 };
 
