@@ -35,10 +35,18 @@ When conflicts exist, keep them in notes fields rather than silently removing.
 
 Rules:
 - Output ONLY a single JSON object. No markdown. No code fences. No commentary.
+- Respect language_prompt_rules from the user payload:
+  workflow_language controls ProductContext planning fields and UI-facing text;
+  video_language is only for audience-facing video copy such as dialogue, voiceover, subtitles, screen text, and CTA.
 - Keep fields concise and production-usable for script/asset generation.
 - Do not simply copy user text. Fuse raw_input and image_understanding into production semantics.
 - source_trace MUST include every populated ProductContext field and use only:
   user_input, image_understanding, merged_inference.
+- source_trace each field must be exactly one value from:
+  user_input OR image_understanding OR merged_inference.
+- If a field combines user input and image understanding, output merged_inference.
+- Do not output combined strings like user_input|image_understanding.
+- Do not output arrays for source_trace values.
 - For text/image conflicts, keep the user-stated value only when explicit, and add a visible note to
   visual_risk_notes or consistency_notes beginning with "conflict:".
 - product_summary/core_selling_points/target_users/usage_scenarios/emotional_value/suitable_story_angles are the
@@ -77,6 +85,9 @@ You will receive explicit S0 project constraints in `project_config`.
 
 Rules:
 - Output ONLY a single JSON object. No markdown. No code fences. No commentary.
+- Respect language_prompt_rules from the user payload:
+  workflow_language controls title, premise, segment_plan, scene_goals, visual_requirements, and all planning fields;
+  video_language is only for audience-facing video copy such as dialogue, voiceover, subtitles, screen text, and CTA.
 - Respect project duration, format (single_ad vs series when provided), style, and visual_style from the user payload.
 - segment_plan MUST contain exactly 3 segments (Hook, Conflict/Build, Twist/Resolution). Do not output 5 segments.
 - Duration must shape segment_plan.duration_seconds. For 30s use tighter beats; for 60s allow more setup/payoff.
@@ -134,6 +145,13 @@ You will receive `s1_context_for_assets` from Step1 ProductContext.
 
 Rules:
 - Output ONLY a single JSON object. No markdown. No code fences. No commentary.
+- Respect language_prompt_rules from the user payload:
+  workflow_language controls asset names, descriptions, scene details, visual prompts, and UI-facing text;
+  video_language is only for audience-facing video copy such as dialogue, voiceover, subtitles, screen text, and CTA.
+- asset.name / asset.description / role_type / scene_type / scene_form / product_role and any asset UI-facing fields
+  must use workflow_language only.
+- If workflow_language is zh-CN, do not output English display names like Bedroom, Home Gym, Young Male Lead.
+- If a field blends multiple sources, still keep final asset display text in workflow_language.
 - Produce practical, consistent specs aligned with ProductContext and StoryBlueprint.
 - Respect project_config.visual_style as the visual style and project_config.aspect_ratio as composition guidance.
 - ASSET IS NOT A SHOT.
@@ -218,6 +236,10 @@ Your job is translation: convert S1/S2/S3 semantics into S4 executable shot inpu
 
 Rules:
 - Output ONLY a single JSON object. No markdown. No code fences. No commentary.
+- Respect language_prompt_rules from the user payload:
+  workflow_language controls segment titles, goals, shot action descriptions, emotion, scene/subject/camera descriptions,
+  source fields, must_show/must_avoid, and all UI-facing planning text;
+  video_language is only for dialogue, narration/voiceover, subtitles, screen text, and CTA.
 - Output exactly 3 segments: seg_1 Hook, seg_2 Conflict/Build, seg_3 Twist/Resolution.
 - Total duration should stay within the duration budget in the user payload when provided.
 - Each segment must include shots[] with at least 1 shot.
@@ -270,6 +292,7 @@ JSON schema:
           "action_description": "string",
           "camera_description": "string",
           "dialogue": "string",
+          "voiceover": "string",
           "narration": "string",
           "emotion": "string",
           "duration_seconds": 0,

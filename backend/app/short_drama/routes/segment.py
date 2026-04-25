@@ -30,6 +30,7 @@ from ..services.project_state_service import STEP_4, mark_step_completed, update
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
+from ..utils.language import build_language_policy, language_prompt_rules
 
 logger = logging.getLogger(__name__)
 
@@ -213,12 +214,26 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             }
         )
 
+        raw_inputs = pc_row.raw_inputs_json if pc_row else {}
+        language_policy = build_language_policy(
+            workflow_source={"product": product_ctx.model_dump(), "raw_inputs": raw_inputs, "blueprint": blueprint.model_dump()},
+            market_source={
+                "raw_inputs": raw_inputs,
+                "target_users": product_ctx.target_users,
+                "usage_scenarios": product_ctx.usage_scenarios,
+            },
+        )
+
         project_config = {
             "duration": project.duration,
             "format": project.format,
             "style": project.style,
             "visual_style": project.visual_style,
             "aspect_ratio": project.aspect_ratio,
+            "workflow_language": language_policy["workflow_language"],
+            "video_language": language_policy["video_language"],
+            "language_policy": language_policy,
+            "language_prompt_rules": language_prompt_rules(language_policy),
             "must_show_asset_ids": must_show_asset_ids,
             "s1_visual_constraints": {
                 "visual_features": product_ctx.visual_features,
@@ -257,6 +272,7 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             meta = dict(seg.meta or {})
             meta["must_show_asset_ids"] = must_show_asset_ids
             meta["asset_spec_versions"] = asset_versions
+            meta["language_policy"] = language_policy
             row = SegmentScriptRecord(
                 project_id=body.project_id,
                 segment_id=seg.segment_id,
@@ -345,7 +361,8 @@ async def update_segment_shot(
     shot = dict(shots[target_index]) if isinstance(shots[target_index], dict) else {}
     text_updates = {
         "action_description": body.action_description,
-        "dialogue": body.dialogue if body.dialogue is not None else body.voiceover,
+        "dialogue": body.dialogue,
+        "voiceover": body.voiceover,
         "emotion": body.emotion,
         "video_prompt": body.video_prompt,
         "manual_video_prompt": body.manual_video_prompt,

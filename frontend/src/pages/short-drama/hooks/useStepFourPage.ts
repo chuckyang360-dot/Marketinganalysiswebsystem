@@ -13,7 +13,7 @@ import {
 } from '../services/shortDramaApi';
 import type { Step4SegmentItem, Step4VideoStatus, Step4VideoStatusMap } from '../types/shortDrama';
 import type { PipelineSummaryDto, RenderJobStatusResponseDto, UpdateSegmentShotBody } from '../types/shortDramaApi';
-import { mergeVideoStatus, pipelineAssetsToStepFourLibraryVm, pipelineToStepFourViewModel, pipelineUsesMockTestPatternVideo, type StepFourAssetLibraryVm } from '../utils/stepFourAdapters';
+import { mergeVideoStatus, pipelineAssetsToStepFourLibraryVm, pipelineToStepFourViewModel, pipelineUsesMockTestPatternVideo, resolveStepFourVideoLanguage, type StepFourAssetLibraryVm } from '../utils/stepFourAdapters';
 import { resolvePublicMediaUrl } from '../utils/shortDramaMedia';
 import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
 import { withProjectQuery } from '../utils/shortDramaRoutes';
@@ -295,6 +295,7 @@ export function useStepFourPage() {
     () => pipelineAssetsToStepFourLibraryVm(pipeline?.assets),
     [pipeline?.assets],
   );
+  const stepFourVideoLanguage = useMemo(() => resolveStepFourVideoLanguage(pipeline), [pipeline]);
 
   const projectStatus = pipelineVm.projectStatus;
   const canGenerateVideos = VIDEO_ALLOWED_STATUSES.has(projectStatus);
@@ -615,6 +616,7 @@ export function useStepFourPage() {
     displayTotal,
     projectStatus,
     assetLibraryVm,
+    stepFourVideoLanguage,
     handleGenerateAll,
     handleGenerateVideo,
     handleRegenerate,

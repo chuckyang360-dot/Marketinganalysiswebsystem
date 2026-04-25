@@ -11,6 +11,21 @@ import type {
 
 const SEGMENT_COLORS = ['#B45309', '#DC2626', '#047857', '#334155', '#9333EA', '#0F766E'];
 
+function workflowDisplayName(name: string): string {
+  const raw = String(name || '').trim();
+  if (!raw) return raw;
+  const map: Record<string, string> = {
+    bedroom: '卧室',
+    'home gym': '家庭健身房',
+    kitchen: '厨房',
+    office: '办公室',
+    street: '街道',
+    park: '公园',
+    'young male lead': '年轻男主',
+  };
+  return map[raw.toLowerCase()] || raw;
+}
+
 export type StepFourAssetLibraryVm = {
   characters: {
     id: number;
@@ -58,6 +73,25 @@ function pickString(meta: Record<string, unknown>, keys: string[]): string {
   return '';
 }
 
+function stringifyLine(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) return value.map(stringifyLine).filter(Boolean).join('\n');
+  if (value && typeof value === 'object') {
+    const row = value as Record<string, unknown>;
+    const speaker = typeof row.speaker === 'string'
+      ? row.speaker.trim()
+      : typeof row.role === 'string'
+        ? row.role.trim()
+        : typeof row.character === 'string'
+          ? row.character.trim()
+          : '';
+    const text = stringifyLine(row.text ?? row.line ?? row.dialogue ?? row.content);
+    if (speaker && text) return `${speaker}：${text}`;
+    return text;
+  }
+  return '';
+}
+
 function imageSourceLabel(img: string | null, anchorId?: number | null): string {
   if (!img) return '未生成图片';
   return anchorId ? `视觉锚点 #${anchorId}` : '资产库图片';
@@ -72,7 +106,7 @@ export function pipelineAssetsToStepFourLibraryVm(
     const meta = metaRecord(c.meta);
     return {
       id: c.id,
-      name: c.name,
+      name: workflowDisplayName(c.name),
       role: c.role_type?.trim() || '角色',
       desc: (c.description ?? '').trim(),
       img: getAssetThumbnailUrl(c),
@@ -85,7 +119,7 @@ export function pipelineAssetsToStepFourLibraryVm(
 
   const scenes = assets.scenes.map((s) => ({
     id: s.id,
-    name: s.name,
+    name: workflowDisplayName(s.name),
     type: s.scene_type?.trim() || '场景',
     desc: (s.description ?? '').trim(),
     img: getAssetThumbnailUrl(s),
@@ -99,7 +133,7 @@ export function pipelineAssetsToStepFourLibraryVm(
     const meta = metaRecord(p.meta);
     return {
       id: p.id,
-      name: p.name,
+      name: workflowDisplayName(p.name),
       type: p.product_role?.trim() || pickString(meta, ['product_type', 'productType', 'type']) || '产品',
       desc: (p.description ?? '').trim(),
       img: getAssetThumbnailUrl(p),
@@ -110,6 +144,20 @@ export function pipelineAssetsToStepFourLibraryVm(
   });
 
   return { characters, scenes, products };
+}
+
+export function resolveStepFourVideoLanguage(pipeline: PipelineSummaryDto | null | undefined): string | null {
+  const rows = pipeline?.segment_scripts ?? [];
+  for (const row of rows) {
+    const script = row.script && typeof row.script === 'object' ? (row.script as Record<string, unknown>) : {};
+    const meta = script.meta && typeof script.meta === 'object' ? (script.meta as Record<string, unknown>) : {};
+    const lp = meta.language_policy && typeof meta.language_policy === 'object'
+      ? (meta.language_policy as Record<string, unknown>)
+      : {};
+    const v = lp.video_language;
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
 }
 
 function segmentRowVideoUrl(row: SegmentScriptPipelineRowDto): string | null {
@@ -179,6 +227,15 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       s.source_visual_constraints && typeof s.source_visual_constraints === 'object' && !Array.isArray(s.source_visual_constraints)
         ? (s.source_visual_constraints as Record<string, unknown>)
         : undefined;
+    const dialogue = stringifyLine(s.dialogue);
+    const voiceover = stringifyLine(s.voiceover) || stringifyLine(s.narration);
+    const legacyDialogue =
+      stringifyLine(s.spoken_line) ||
+      stringifyLine(s.caption) ||
+      stringifyLine(s.dialogue_lines) ||
+      stringifyLine(s.lines) ||
+      stringifyLine(s.script);
+    const displayDialogue = dialogue || voiceover || legacyDialogue;
 
     return {
       id: i + 1,
@@ -188,10 +245,9 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
         `shot_${i + 1}`,
       desc,
       action: typeof s.action_description === 'string' ? s.action_description : '',
-      dialogue:
-        (typeof s.dialogue === 'string' && s.dialogue) ||
-        (typeof s.narration === 'string' && s.narration) ||
-        '',
+      dialogue: displayDialogue,
+      voiceover,
+      dialogueSource: dialogue ? 'dialogue' : voiceover ? 'voiceover' : undefined,
       emotion: typeof s.emotion === 'string' ? s.emotion : '',
       duration: durationStr,
       durationSeconds:

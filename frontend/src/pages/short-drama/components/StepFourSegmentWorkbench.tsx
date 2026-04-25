@@ -8,6 +8,7 @@ type RefKind = "characters" | "scene" | "products";
 type ShotDraft = {
   action: string;
   dialogue: string;
+  dialogueSource?: "dialogue" | "voiceover";
   emotion: string;
   videoPrompt: string;
   manualVideoPrompt: string;
@@ -46,6 +47,7 @@ interface SegmentWorkbenchProps {
     body: Omit<UpdateSegmentShotBody, "project_id">,
   ) => Promise<unknown>;
   videoGenerateDisabled?: boolean;
+  videoLanguage?: string | null;
 }
 
 export function StepFourSegmentWorkbench({
@@ -58,6 +60,7 @@ export function StepFourSegmentWorkbench({
   onGenerateVideo,
   onSaveSegmentShot,
   videoGenerateDisabled = false,
+  videoLanguage = null,
 }: SegmentWorkbenchProps) {
   const [expandedShot, setExpandedShot] = useState<number | null>(null);
   const [expandedSegmentIds, setExpandedSegmentIds] = useState<Record<number, boolean>>({});
@@ -137,12 +140,16 @@ export function StepFourSegmentWorkbench({
     try {
       for (const shot of targets) {
         const sd = draft.shots[shot.id] ?? makeShotDraft(shot);
+        const dialoguePayload =
+          sd.dialogueSource === "voiceover"
+            ? { voiceover: sd.dialogue }
+            : { dialogue: sd.dialogue };
         await onSaveSegmentShot(seg.id, shot.backendShotId, {
           segment_title: draft.title,
           segment_goal: draft.goal,
           duration_limit: draft.durationLimit,
           action_description: sd.action,
-          dialogue: sd.dialogue,
+          ...dialoguePayload,
           emotion: sd.emotion,
           video_prompt: sd.videoPrompt,
           manual_video_prompt: sd.manualVideoPrompt,
@@ -255,6 +262,7 @@ export function StepFourSegmentWorkbench({
                                 shot={shot}
                                 draft={sd}
                                 editing={isEditing}
+                                videoLanguage={videoLanguage}
                                 assetLibrary={assetLibrary}
                                 onChange={(patch) => updateShotDraft(seg, shot.id, patch)}
                                 onSelect={(kind) => setSelector({ segId: seg.id, shotId: shot.id, kind })}
@@ -270,6 +278,7 @@ export function StepFourSegmentWorkbench({
                   <SegmentActions
                     seg={seg}
                     status={vStatus}
+                    hasVideoUrl={!!seg.videoUrl?.trim()}
                     progress={rProgress}
                     disabled={videoGenerateDisabled}
                     editing={isEditing}
@@ -324,6 +333,7 @@ function makeShotDraft(shot?: Step4Shot): ShotDraft {
   return {
     action: shot?.action ?? "",
     dialogue: shot?.dialogue ?? "",
+    dialogueSource: shot?.dialogueSource,
     emotion: shot?.emotion ?? "",
     videoPrompt: shot?.videoPrompt ?? "",
     manualVideoPrompt: shot?.manualVideoPrompt ?? "",
@@ -373,6 +383,7 @@ function NumberField({ label, value, editing, onChange }: { label: string; value
 function ShotFields({
   draft,
   editing,
+  videoLanguage,
   assetLibrary,
   onChange,
   onSelect,
@@ -381,15 +392,22 @@ function ShotFields({
   shot: Step4Shot;
   draft: ShotDraft;
   editing: boolean;
+  videoLanguage?: string | null;
   assetLibrary: StepFourAssetLibraryVm;
   onChange: (patch: Partial<ShotDraft>) => void;
   onSelect: (kind: RefKind) => void;
 }) {
+  const dialogueLabel =
+    videoLanguage === 'en-US'
+      ? '台词 / 旁白（视频语言：英语）'
+      : videoLanguage === 'zh-CN'
+        ? '台词 / 旁白（视频语言：中文）'
+        : '台词 / 旁白';
   return (
     <div className="space-y-4">
       <div className="rounded-xl p-3 space-y-3" style={{ background: "#fff", border: "1px solid #EAEAEA" }}>
         <Field label="画面动作" value={draft.action} editing={editing} multiline onChange={(v) => onChange({ action: v })} />
-        <Field label="台词 / 旁白" value={draft.dialogue} editing={editing} multiline onChange={(v) => onChange({ dialogue: v })} />
+        <Field label={dialogueLabel} value={draft.dialogue} editing={editing} multiline onChange={(v) => onChange({ dialogue: v })} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="情绪状态" value={draft.emotion} editing={editing} onChange={(v) => onChange({ emotion: v })} />
           <NumberField label="镜头时长" value={draft.durationSeconds} editing={editing} onChange={(v) => onChange({ durationSeconds: v })} />
@@ -555,6 +573,7 @@ function resolveAssetChips(values: string[], library: StepFourAssetLibraryVm, ki
 function SegmentActions({
   seg,
   status,
+  hasVideoUrl,
   progress,
   disabled,
   editing,
@@ -568,6 +587,7 @@ function SegmentActions({
 }: {
   seg: Step4SegmentItem;
   status: "idle" | "queued" | "running" | "completed" | "failed";
+  hasVideoUrl: boolean;
   progress: Step4RenderProgressMap[number] | null;
   disabled: boolean;
   editing: boolean;
@@ -580,7 +600,11 @@ function SegmentActions({
   onCancel: () => void;
   onGenerate: () => void;
 }) {
-  if (status === "queued" || status === "running") {
+  const isGenerating = status === "queued" || status === "running";
+  const hasFailed = status === "failed";
+  const generateLabel = isGenerating ? "生成中..." : hasFailed ? "重试生成" : hasVideoUrl ? "重新生成" : "生成视频";
+
+  if (isGenerating && !(editing || dirty)) {
     return (
       <div className="rounded-xl overflow-hidden" style={{ background: "#F7F8FA", border: `1px solid ${seg.color}25` }}>
         <div className="flex items-center gap-2.5 px-3 py-2.5">
@@ -592,7 +616,6 @@ function SegmentActions({
     );
   }
 
-  const generateLabel = status === "failed" ? "重试生成" : "重新生成";
   return (
     <div className="space-y-2">
       {error && <div className="text-[11px] px-3 py-2 rounded-lg" style={{ background: "rgba(220,38,38,0.06)", color: "#B91C1C", border: "1px solid rgba(220,38,38,0.2)" }}>{error}</div>}
@@ -611,8 +634,8 @@ function SegmentActions({
             <button type="button" onClick={onEdit} disabled={disabled || saving} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px]" style={{ background: "#F7F8FA", color: disabled ? "#AEAEB2" : "#444444", border: "1px solid #EAEAEA", cursor: disabled ? "not-allowed" : "pointer" }}>
               <i className="ri-edit-line text-[11px]" />编辑片段
             </button>
-            <button type="button" onClick={onGenerate} disabled={disabled || saving} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold" style={{ background: disabled ? "#EAEAEA" : "#1D1D1F", color: disabled ? "#AEAEB2" : "#ffffff", cursor: disabled ? "not-allowed" : "pointer" }}>
-              <i className="ri-refresh-line text-[11px]" />{generateLabel}
+            <button type="button" onClick={onGenerate} disabled={disabled || saving || isGenerating} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold" style={{ background: disabled || isGenerating ? "#EAEAEA" : "#1D1D1F", color: disabled || isGenerating ? "#AEAEB2" : "#ffffff", cursor: disabled || isGenerating ? "not-allowed" : "pointer" }}>
+              <i className={`${isGenerating ? "ri-loader-4-line animate-spin" : hasVideoUrl || hasFailed ? "ri-refresh-line" : "ri-play-circle-line"} text-[11px]`} />{generateLabel}
             </button>
           </>
         )}

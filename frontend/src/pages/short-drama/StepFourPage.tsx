@@ -38,6 +38,7 @@ export function ShortDramaStepFourPage() {
     displayTotal,
     projectStatus,
     assetLibraryVm,
+    stepFourVideoLanguage,
     handleGenerateAll,
     handleGenerateVideo,
     handleRegenerate,
@@ -318,6 +319,7 @@ export function ShortDramaStepFourPage() {
               activeSegment={activeSegment}
               videoStatus={videoStatus}
               renderProgressMap={{}}
+              videoLanguage={stepFourVideoLanguage}
               onSegmentChange={setActiveSegment}
               videoGenerateDisabled={videoActionsDisabled}
               assetLibrary={assetLibraryVm}

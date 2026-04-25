@@ -43,22 +43,22 @@ _PLOT_STATE_TERMS = (
     "情绪",
 )
 
-_LOCATION_RULES: tuple[tuple[str, str], ...] = (
-    ("home gym", "Home Gym"),
-    ("gym", "Home Gym"),
-    ("office desk", "Office Desk"),
-    ("office", "Office"),
-    ("kitchen", "Kitchen"),
-    ("park", "Outdoor Park"),
-    ("bedroom", "Bedroom"),
-    ("living room", "Living Room"),
-    ("suburban kitchen", "Suburban Kitchen"),
-    ("健身房", "Home Gym"),
-    ("办公室", "Office"),
-    ("厨房", "Kitchen"),
-    ("公园", "Outdoor Park"),
-    ("卧室", "Bedroom"),
-    ("客厅", "Living Room"),
+_LOCATION_RULES: tuple[tuple[str, str, str], ...] = (
+    ("home gym", "家庭健身房", "Home Gym"),
+    ("gym", "家庭健身房", "Home Gym"),
+    ("office desk", "办公桌区域", "Office Desk"),
+    ("office", "办公室", "Office"),
+    ("kitchen", "厨房", "Kitchen"),
+    ("park", "公园", "Outdoor Park"),
+    ("bedroom", "卧室", "Bedroom"),
+    ("living room", "客厅", "Living Room"),
+    ("suburban kitchen", "郊区厨房", "Suburban Kitchen"),
+    ("健身房", "家庭健身房", "Home Gym"),
+    ("办公室", "办公室", "Office"),
+    ("厨房", "厨房", "Kitchen"),
+    ("公园", "公园", "Outdoor Park"),
+    ("卧室", "卧室", "Bedroom"),
+    ("客厅", "客厅", "Living Room"),
 )
 
 _PRODUCT_SCENE_TERMS = (
@@ -106,11 +106,22 @@ def _strip_product_scene_terms(text: str | None) -> tuple[str, list[str]]:
     return _clean_ws(out), list(dict.fromkeys(warnings))
 
 
-def _scene_identity(name: str | None, description: str | None, visual_prompt: str | None) -> tuple[str, list[str]]:
+def _language_prefers_chinese(workflow_language: str | None) -> bool:
+    return str(workflow_language or "").lower().startswith("zh")
+
+
+def _scene_identity(
+    name: str | None,
+    description: str | None,
+    visual_prompt: str | None,
+    workflow_language: str | None,
+) -> tuple[str, list[str]]:
     corpus = f"{name or ''} {description or ''} {visual_prompt or ''}".lower()
     warnings: list[str] = []
-    for needle, label in _LOCATION_RULES:
+    prefers_zh = _language_prefers_chinese(workflow_language)
+    for needle, zh_label, en_label in _LOCATION_RULES:
         if needle in corpus:
+            label = zh_label if prefers_zh else en_label
             if _clean_ws(name) != label:
                 warnings.append(f"scene identity normalized to reusable location: {label}")
             return label, warnings
@@ -232,7 +243,10 @@ class MockAssetSpecProvider:
                 )
             ],
         )
-        return _normalize_asset_bundle(bundle)
+        return _normalize_asset_bundle(
+            bundle,
+            workflow_language=(project_config or {}).get("workflow_language"),
+        )
 
 
 class XAIAssetSpecProvider:
@@ -267,13 +281,19 @@ class XAIAssetSpecProvider:
                     },
                     "story_blueprint": blueprint.model_dump(),
                     "project_config": project_config or {},
+                    "language_policy": (project_config or {}).get("language_policy", {}),
+                    "language_prompt_rules": (project_config or {}).get("language_prompt_rules", ""),
                     "s2_visual_requirements": blueprint.visual_requirements,
                 },
                 image_urls=None,
                 expected_schema_name="AssetSpecsBundle",
                 stage="ASSET_SPEC_GENERATION",
             )
-            bundle = _normalize_asset_bundle(_validate_asset_bundle(data), product_name=product.product_name)
+            bundle = _normalize_asset_bundle(
+                _validate_asset_bundle(data),
+                product_name=product.product_name,
+                workflow_language=(project_config or {}).get("workflow_language"),
+            )
             logger.info(
                 "ASSET_SPEC_GENERATION_SUCCEEDED %s",
                 {"project_id": project_id, "stage": "ASSET_SPEC_GENERATION", "provider": "xai"},
@@ -391,8 +411,13 @@ def _normalize_character_asset(row: CharacterAssetSchema) -> CharacterAssetSchem
     )
 
 
-def _normalize_scene_asset(row: SceneAssetSchema) -> SceneAssetSchema:
-    identity, identity_warnings = _scene_identity(row.name, row.description, row.visual_prompt)
+def _normalize_scene_asset(row: SceneAssetSchema, workflow_language: str | None) -> SceneAssetSchema:
+    identity, identity_warnings = _scene_identity(
+        row.name,
+        row.description,
+        row.visual_prompt,
+        workflow_language,
+    )
     desc, desc_warnings = _strip_plot_terms(row.description)
     prompt, prompt_warnings = _strip_plot_terms(row.visual_prompt)
     prompt = ", ".join(x for x in [_asset_prompt_prefix("scene"), identity, prompt] if x)
@@ -439,12 +464,16 @@ def _normalize_product_asset(row: ProductAssetSchema, product_name: str | None =
     )
 
 
-def _normalize_asset_bundle(bundle: AssetSpecsBundleSchema, product_name: str | None = None) -> AssetSpecsBundleSchema:
+def _normalize_asset_bundle(
+    bundle: AssetSpecsBundleSchema,
+    product_name: str | None = None,
+    workflow_language: str | None = None,
+) -> AssetSpecsBundleSchema:
     chars = [_normalize_character_asset(c) for c in bundle.characters]
 
     scenes_by_identity: dict[str, SceneAssetSchema] = {}
     for scene in bundle.scenes:
-        normalized = _normalize_scene_asset(scene)
+        normalized = _normalize_scene_asset(scene, workflow_language)
         key = _clean_ws(normalized.asset_identity or normalized.name).casefold()
         if key in scenes_by_identity:
             prev = scenes_by_identity[key]

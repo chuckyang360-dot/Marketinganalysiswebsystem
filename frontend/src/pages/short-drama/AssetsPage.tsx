@@ -51,7 +51,7 @@ const SCENE_PLOT_STATE_TERMS = [
 ];
 
 function displayAssetName(row: AssetLibraryItemDto): string {
-  if (row.asset_type !== 'scene') return row.name;
+  if (row.asset_type !== 'scene') return normalizeSceneDisplayName(row.name);
   const identity = row.extra && typeof row.extra === 'object' ? (row.extra as Record<string, unknown>).location_identity || (row.extra as Record<string, unknown>).asset_identity : null;
   if (typeof identity === 'string' && identity.trim()) return identity.trim();
   let out = row.name || '';
@@ -59,8 +59,8 @@ function displayAssetName(row: AssetLibraryItemDto): string {
     out = out.replace(new RegExp(`\\b${term}\\b`, 'gi'), ' ').replace(new RegExp(term, 'g'), ' ');
   }
   out = out.replace(/\s+/g, ' ').trim();
-  if (/home\s+gym/i.test(`${row.name} ${row.description ?? ''}`) || `${row.name} ${row.description ?? ''}`.includes('健身房')) return 'Home Gym';
-  return out || 'Scene Location';
+  if (/home\s+gym/i.test(`${row.name} ${row.description ?? ''}`) || `${row.name} ${row.description ?? ''}`.includes('健身房')) return '家庭健身房';
+  return normalizeSceneDisplayName(out || '场景');
 }
 
 function assetCoverImageClass(row: AssetLibraryItemDto): string {
@@ -68,6 +68,21 @@ function assetCoverImageClass(row: AssetLibraryItemDto): string {
     return 'h-full w-full object-cover object-top';
   }
   return 'h-full w-full object-cover object-center';
+}
+
+function normalizeSceneDisplayName(name: string): string {
+  const raw = String(name || '').trim();
+  if (!raw) return '场景';
+  const key = raw.toLowerCase();
+  const fallbackMap: Record<string, string> = {
+    bedroom: '卧室',
+    'home gym': '家庭健身房',
+    kitchen: '厨房',
+    office: '办公室',
+    street: '街道',
+    park: '公园',
+  };
+  return fallbackMap[key] || raw;
 }
 
 function activeRenderableImages(row: AssetLibraryItemDto) {
@@ -192,6 +207,9 @@ export function ShortDramaAssetsPage() {
   const [working, setWorking] = useState(false);
   const [autoPhase, setAutoPhase] = useState<Step3AutoPhase>('idle');
   const [, setAutoHint] = useState<string | null>(null);
+  const [pipelineStatus, setPipelineStatus] = useState<string>('');
+  const [pipelineOverallStatus, setPipelineOverallStatus] = useState<string>('');
+  const [pipelineStepStatus, setPipelineStepStatus] = useState<Record<string, string>>({});
   const [imageLoadFailedIds, setImageLoadFailedIds] = useState<Set<number>>(() => new Set());
   const [imageGenerationFailedIds, setImageGenerationFailedIds] = useState<Set<number>>(() => new Set());
   const refUploadInput = useRef<HTMLInputElement>(null);
@@ -238,6 +256,9 @@ export function ShortDramaAssetsPage() {
       try {
         console.info('[S3_AUTO_PIPELINE_REQUEST]', JSON.stringify({ project_id: projectId }));
         const pipeline = await getShortDramaPipeline(projectId);
+        setPipelineStatus(String(pipeline.project?.status || ''));
+        setPipelineOverallStatus(String(pipeline.project?.overall_status || ''));
+        setPipelineStepStatus((pipeline.project?.step_status || {}) as Record<string, string>);
         console.info('[S3_AUTO_FLOW_CHECK]', JSON.stringify({
           project_id: projectId,
           project_status: pipeline.project.status,
@@ -251,6 +272,9 @@ export function ShortDramaAssetsPage() {
         }
 
         let pipelineAfterSpecs = await getShortDramaPipeline(projectId);
+        setPipelineStatus(String(pipelineAfterSpecs.project?.status || ''));
+        setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
+        setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
         if (pipelineAfterSpecs.project.status === 'asset_specs_generated') {
           setAutoPhase('generating_images');
           setAutoHint('正在生成资产图片，请稍候…');
@@ -258,6 +282,9 @@ export function ShortDramaAssetsPage() {
           const imageResult = await generateShortDramaAssetImages(projectId);
           setImageGenerationFailedIds(extractFailedAssetIds(imageResult.errors));
           pipelineAfterSpecs = await getShortDramaPipeline(projectId);
+          setPipelineStatus(String(pipelineAfterSpecs.project?.status || ''));
+          setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
+          setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
         }
 
         if (pipelineAfterSpecs.project.status === 'assets_rendering') {
@@ -266,7 +293,11 @@ export function ShortDramaAssetsPage() {
         }
 
         await reload();
-        setAutoPhase('ready');
+        if (pipelineAfterSpecs.project.status === 'assets_rendering') {
+          setAutoPhase('generating_images');
+        } else {
+          setAutoPhase('ready');
+        }
         setAutoHint(null);
       } catch (e) {
         console.error('[S3_AUTO_FLOW_FAILED]', {
@@ -366,12 +397,54 @@ export function ShortDramaAssetsPage() {
 
   const createLabel = activeTab === 'characters' ? '添加角色' : activeTab === 'scenes' ? '添加场景' : '添加产品';
   const currentRows = data[activeTab];
-  const showSpecSkeletonCards = autoPhase === 'generating_specs' && currentRows.length === 0;
+  const isAssetGenerationPending =
+    autoPhase === 'generating_specs'
+    || autoPhase === 'generating_images'
+    || pipelineStatus === 'story_generated'
+    || pipelineStatus === 'asset_specs_generated'
+    || pipelineStatus === 'assets_rendering'
+    || pipelineOverallStatus === 'generating'
+    || String(pipelineStepStatus.step_3 || '').toLowerCase() === 'generating'
+    || String(pipelineStepStatus.assets || '').toLowerCase() === 'generating';
+  const isAssetGenerationFailed =
+    autoPhase === 'error'
+    || pipelineOverallStatus === 'failed'
+    || String(pipelineStepStatus.step_3 || '').toLowerCase() === 'failed'
+    || String(pipelineStepStatus.assets || '').toLowerCase() === 'failed';
+  const showSpecSkeletonCards = isAssetGenerationPending && currentRows.length === 0;
+  const showFailureCard = isAssetGenerationFailed && currentRows.length === 0;
+  const showAddCard = !showSpecSkeletonCards && !showFailureCard;
   const tabs = useMemo(() => ([
     { key: 'characters' as const, label: '角色', count: data.characters.length, icon: 'ri-user-star-line' },
     { key: 'scenes' as const, label: '场景', count: data.scenes.length, icon: 'ri-landscape-line' },
     { key: 'assets' as const, label: '产品资产', count: data.assets.length, icon: 'ri-archive-line' },
   ]), [data]);
+
+  useEffect(() => {
+    const projectId = toPositiveInt(effectiveProjectId);
+    if (!projectId || !isAssetGenerationPending) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const p = await getShortDramaPipeline(projectId);
+          setPipelineStatus(String(p.project?.status || ''));
+          setPipelineOverallStatus(String(p.project?.overall_status || ''));
+          setPipelineStepStatus((p.project?.step_status || {}) as Record<string, string>);
+          await reload();
+          const done =
+            p.project?.status === 'assets_ready'
+            || p.project?.status === 'segments_generated'
+            || p.project?.status === 'completed';
+          if (done) {
+            setAutoPhase('ready');
+          }
+        } catch {
+          // keep current UI state; polling will retry
+        }
+      })();
+    }, 2200);
+    return () => window.clearInterval(timer);
+  }, [effectiveProjectId, isAssetGenerationPending, reload]);
 
   const submitAdd = useCallback(async () => {
     if (!effectiveProjectId) return;
@@ -470,7 +543,7 @@ export function ShortDramaAssetsPage() {
               const visualAnchor = getAssetThumbnailUrl(row);
               const roleLabel = resolveAssetRoleLabel(row);
               const imageLoadFailed = imageLoadFailedIds.has(row.id);
-              const isImageGenerating = autoPhase === 'generating_images' && !visualAnchor && !imageLoadFailed;
+              const isImageGenerating = isAssetGenerationPending && !visualAnchor && !imageLoadFailed;
               const hasFailedImage =
                 !visualAnchor &&
                 (imageGenerationFailedIds.has(row.id) || (row.images ?? []).some((img) => String(img.status || '').toLowerCase() === 'failed'));
@@ -494,7 +567,7 @@ export function ShortDramaAssetsPage() {
                       <div className="flex h-full w-full items-center justify-center bg-[#ECEDEF]">
                         <div className="text-center text-[12px] text-[#6E6E73]">
                           <i className="ri-loader-4-line mb-1 block animate-spin text-[18px]" aria-hidden />
-                          图片生成中…
+                          资产图片生成中...
                         </div>
                       </div>
                     ) : imageLoadFailed ? (
@@ -591,6 +664,19 @@ export function ShortDramaAssetsPage() {
                 </div>
               ))
             ) : null}
+            {showFailureCard ? (
+              <div className="flex h-full min-h-[340px] flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #FECACA' }}>
+                <div className="flex h-48 items-center justify-center bg-[#FEF2F2]">
+                  <div className="text-center text-[12px] text-[#B91C1C]">
+                    <i className="ri-error-warning-line mb-1 block text-[18px]" aria-hidden />
+                    资产生成失败，可重试
+                  </div>
+                </div>
+                <div className="flex flex-1 flex-col p-4">
+                  <p className="text-[12px] text-[#B91C1C]">请点击刷新或返回上一步重试生成。</p>
+                </div>
+              </div>
+            ) : null}
             {addPending?.tab === activeTab ? (
               <div className="flex h-full flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
                 <div className="h-48 animate-pulse bg-[#ECEDEF]" />
@@ -606,15 +692,17 @@ export function ShortDramaAssetsPage() {
                 </div>
               </div>
             ) : null}
-            <button
-              type="button"
-              className="flex h-full min-h-[340px] flex-col items-center justify-center rounded-2xl border border-dashed border-[#D1D1D6] bg-[#FAFAFB] p-6 text-center"
-              onClick={() => setShowCreate(true)}
-            >
-              <i className="ri-add-circle-line text-[26px] text-[#6E6E73]" />
-              <div className="mt-2 text-[14px] font-semibold text-[#1D1D1F]">{createLabel}</div>
-              <div className="mt-1 text-[12px] text-[#8E8E93]">文字输入或图片上传（二选一）</div>
-            </button>
+            {showAddCard ? (
+              <button
+                type="button"
+                className="flex h-full min-h-[340px] flex-col items-center justify-center rounded-2xl border border-dashed border-[#D1D1D6] bg-[#FAFAFB] p-6 text-center"
+                onClick={() => setShowCreate(true)}
+              >
+                <i className="ri-add-circle-line text-[26px] text-[#6E6E73]" />
+                <div className="mt-2 text-[14px] font-semibold text-[#1D1D1F]">{createLabel}</div>
+                <div className="mt-1 text-[12px] text-[#8E8E93]">文字输入或图片上传（二选一）</div>
+              </button>
+            ) : null}
           </div>
           <div className="flex items-center justify-between mt-10 pt-6" style={{ borderTop: '1px solid #EAEAEA' }}>
             <button type="button" onClick={() => navigate(withProjectQuery('/short-drama/story-blueprint', effectiveProjectId))} className="flex items-center gap-2 px-5 py-3 rounded-xl text-[13.5px]" style={{ background: '#F7F8FA', color: '#444', border: '1px solid #EAEAEA' }}><i className="ri-arrow-left-line text-[13px]" />上一步</button>
