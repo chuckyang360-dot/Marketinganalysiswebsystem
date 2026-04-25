@@ -178,8 +178,8 @@ export function ShortDramaProjectsPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {pagedProjects.map((p) => {
               const tone = overallStatusTone(p.overall_status);
-              const cover = p.cover_asset;
-              const coverUrl = resolveShortDramaMediaUrl(cover?.image_url);
+              const cover = p.cover_asset ?? null;
+              const coverUrl = resolveShortDramaMediaUrl(cover?.image_url ?? null);
               console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft', cover_asset_type: cover?.asset_type || null });
               return (
                 <div
@@ -190,9 +190,9 @@ export function ShortDramaProjectsPage() {
                     {coverUrl ? (
                       <img
                         src={coverUrl}
-                        alt={cover.name || p.project_name || `项目 ${p.id}`}
+                        alt={cover?.name || p.project_name || `项目 ${p.id}`}
                         className="h-full w-full object-cover"
-                        style={{ objectPosition: cover.asset_type === 'character' ? 'center top' : 'center center' }}
+                        style={{ objectPosition: cover?.asset_type === 'character' ? 'center top' : 'center center' }}
                       />
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
@@ -209,7 +209,7 @@ export function ShortDramaProjectsPage() {
                     >
                       {overallStatusLabel(p.overall_status)}
                     </span>
-                    {coverUrl && cover.asset_type !== 'character' ? (
+                    {coverUrl && cover?.asset_type !== 'character' ? (
                       <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-2.5 py-1 text-[10.5px] text-[#6E6E73]">
                         {coverFallbackText(p)}
                       </span>
