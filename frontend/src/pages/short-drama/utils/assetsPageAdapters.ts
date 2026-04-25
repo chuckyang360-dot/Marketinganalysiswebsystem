@@ -61,6 +61,7 @@ export function resolveAssetImageUrl(imageUrl: string | null | undefined): { src
 
 type ThumbnailLikeAsset = {
   image_url?: string | null;
+  imageUrl?: string | null;
   cover_image_id?: number | null;
   cover_image?: Partial<AssetImageDto> | null;
   images?: Partial<AssetImageDto>[];
@@ -102,7 +103,13 @@ export function getAssetThumbnailUrl(asset: ThumbnailLikeAsset | AssetLibraryIte
     if (src) return src;
   }
 
-  return resolveMaybeImageUrl(asset.image_url ?? null);
+  const legacyImageUrl =
+    'image_url' in asset && typeof asset.image_url === 'string'
+      ? asset.image_url
+      : 'imageUrl' in asset && typeof asset.imageUrl === 'string'
+        ? asset.imageUrl
+        : null;
+  return resolveMaybeImageUrl(legacyImageUrl);
 }
 
 function metaRecord(meta: unknown): Record<string, unknown> {

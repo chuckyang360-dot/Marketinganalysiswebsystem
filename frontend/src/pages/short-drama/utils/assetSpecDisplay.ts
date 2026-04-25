@@ -80,13 +80,6 @@ function readTopLevelField(row: AssetLibraryItemDto, key: string): unknown {
   return (row as unknown as Record<string, unknown>)[key];
 }
 
-function resolveCoverImageUrl(row: AssetLibraryItemDto): string {
-  const fromCoverObj = asText((row.cover_image as { image_url?: unknown } | null | undefined)?.image_url);
-  if (fromCoverObj) return fromCoverObj;
-  const fromTopLevel = asText(readTopLevelField(row, 'cover_image_url'));
-  return fromTopLevel;
-}
-
 function resolveSceneLabelWithSource(row: AssetLibraryItemDto): { label: SceneLabel; source: SceneLabelSource } {
   const tf = pickTypeFields(row);
   const sceneType = readTopLevelField(row, 'scene_type') ?? tf.scene_type;

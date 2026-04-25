@@ -8,7 +8,7 @@ import { appendShortDramaAssetUploadedImages, createShortDramaAssetLibrary, gene
 import type { AssetLibraryItemDto } from './types/shortDramaApi';
 import { getAssetThumbnailUrl, resolveAssetImageUrl } from './utils/assetsPageAdapters';
 import { withProjectQuery } from './utils/shortDramaRoutes';
-import { buildRawStructureSnapshot, buildStructureSummary, resolveAssetRoleLabel, resolveAssetSourceLabel, resolveNarrativeFunctionLabel, resolveTypeFields, resolveVisualAnchorImageId, resolveVisualAnchorImageUrl } from './utils/assetSpecDisplay';
+import { buildRawStructureSnapshot, buildStructureSummary, resolveAssetRoleLabel, resolveAssetSourceLabel, resolveNarrativeFunctionLabel, resolveTypeFields, resolveVisualAnchorImageId } from './utils/assetSpecDisplay';
 
 type TabType = 'characters' | 'scenes' | 'assets';
 type Step3AutoPhase = 'idle' | 'checking' | 'generating_specs' | 'generating_images' | 'ready' | 'error';
