@@ -4,6 +4,7 @@ import { getUser } from '../../services/api';
 import { ShortDramaLayout } from './components/ShortDramaLayout';
 import { listShortDramaProjects, ShortDramaApiError } from './services/shortDramaApi';
 import type { ShortDramaProjectDto } from './types/shortDramaApi';
+import { resolveShortDramaMediaUrl } from './utils/shortDramaMedia';
 
 const PAGE_SIZE = 6;
 
@@ -178,6 +179,7 @@ export function ShortDramaProjectsPage() {
             {pagedProjects.map((p) => {
               const tone = overallStatusTone(p.overall_status);
               const cover = p.cover_asset;
+              const coverUrl = resolveShortDramaMediaUrl(cover?.image_url);
               console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft', cover_asset_type: cover?.asset_type || null });
               return (
                 <div
@@ -185,9 +187,9 @@ export function ShortDramaProjectsPage() {
                   className="overflow-hidden rounded-2xl border border-[#EAEAEA] bg-white shadow-[0_8px_28px_rgba(15,23,42,0.04)] transition-transform duration-150 hover:-translate-y-0.5"
                 >
                   <div className="relative h-44 bg-[#F5F5F7]">
-                    {cover?.image_url ? (
+                    {coverUrl ? (
                       <img
-                        src={cover.image_url}
+                        src={coverUrl}
                         alt={cover.name || p.project_name || `项目 ${p.id}`}
                         className="h-full w-full object-cover"
                         style={{ objectPosition: cover.asset_type === 'character' ? 'center top' : 'center center' }}
@@ -207,7 +209,7 @@ export function ShortDramaProjectsPage() {
                     >
                       {overallStatusLabel(p.overall_status)}
                     </span>
-                    {cover?.image_url && cover.asset_type !== 'character' ? (
+                    {coverUrl && cover.asset_type !== 'character' ? (
                       <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-2.5 py-1 text-[10.5px] text-[#6E6E73]">
                         {coverFallbackText(p)}
                       </span>

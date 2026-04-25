@@ -16,6 +16,7 @@ import type {
   PipelineSummaryDto,
 } from '../types/shortDramaApi';
 import { SHORT_DRAMA_UI } from './shortDramaUiCopy';
+import { resolveShortDramaMediaUrl } from './shortDramaMedia';
 
 export const ASSETS_PAGE_MESSAGES = SHORT_DRAMA_UI.assets;
 
@@ -51,12 +52,8 @@ export function resolveAssetImageUrl(imageUrl: string | null | undefined): { src
     const rewritten = maybeRewriteLocalStaticAbsoluteUrl(u);
     return { src: isLikelyRenderableUrl(rewritten) ? rewritten : null, hasRealImage: true };
   }
-  if (u.startsWith('/')) {
-    const base = API_BASE_URL.replace(/\/$/, '');
-    const resolved = base ? `${base}${u}` : u;
-    return { src: isLikelyRenderableUrl(resolved) ? resolved : null, hasRealImage: true };
-  }
-  return { src: null, hasRealImage: false };
+  const resolved = resolveShortDramaMediaUrl(u);
+  return { src: resolved && isLikelyRenderableUrl(resolved) ? resolved : null, hasRealImage: true };
 }
 
 type ThumbnailLikeAsset = {
