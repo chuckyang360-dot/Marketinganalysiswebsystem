@@ -325,6 +325,27 @@ class RenderExecutorService:
                 db.add(job)
                 db.flush()
 
+            model_name = effective_xai_video_model()
+            final_prompt = plan.segment_video_prompt or ""
+            for shot in seg.shots:
+                dialogue_text = str(getattr(shot, "dialogue", "") or "").strip()
+                voiceover_text = str(getattr(shot, "voiceover", "") or getattr(shot, "narration", "") or "").strip()
+                if not dialogue_text and not voiceover_text:
+                    continue
+                logger.info(
+                    "[S4_XAI_VIDEO_PAYLOAD_SPOKEN_CHECK] project_id=%s segment_id=%s shot_id=%s contains_dialogue=%s dialogue_preview=%s contains_voiceover=%s voiceover_preview=%s prompt_chars=%s provider=%s model=%s",
+                    project_id,
+                    segment_id,
+                    str(getattr(shot, "shot_id", "") or ""),
+                    bool(dialogue_text and dialogue_text in final_prompt),
+                    dialogue_text[:40],
+                    bool(voiceover_text and voiceover_text in final_prompt),
+                    voiceover_text[:40],
+                    len(final_prompt),
+                    "xai_video",
+                    model_name,
+                )
+
             rid = self._provider.submit_reference_segment_video(
                 prompt=plan.segment_video_prompt,
                 reference_image_urls=ref_for_api,
