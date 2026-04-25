@@ -8,7 +8,7 @@ type RefKind = "characters" | "scene" | "products";
 type ShotDraft = {
   action: string;
   dialogue: string;
-  dialogueSource?: "dialogue" | "voiceover";
+  dialogueSource?: Step4Shot["dialogueSource"];
   emotion: string;
   videoPrompt: string;
   manualVideoPrompt: string;
@@ -19,6 +19,21 @@ type ShotDraft = {
   sceneRef: string;
   productRefs: string[];
 };
+
+function normalizeDialogueSourceForSave(
+  source?: Step4Shot["dialogueSource"],
+): "dialogue" | "voiceover" | undefined {
+  if (source === "voiceover" || source === "narration") return "voiceover";
+  if (
+    source === "dialogue" ||
+    source === "spoken_line" ||
+    source === "caption" ||
+    source === "dialogue_lines" ||
+    source === "lines" ||
+    source === "script"
+  ) return "dialogue";
+  return undefined;
+}
 
 type SegmentDraft = {
   title: string;
@@ -140,8 +155,9 @@ export function StepFourSegmentWorkbench({
     try {
       for (const shot of targets) {
         const sd = draft.shots[shot.id] ?? makeShotDraft(shot);
+        const normalizedSource = normalizeDialogueSourceForSave(sd.dialogueSource);
         const dialoguePayload =
-          sd.dialogueSource === "voiceover"
+          normalizedSource === "voiceover"
             ? { voiceover: sd.dialogue }
             : { dialogue: sd.dialogue };
         await onSaveSegmentShot(seg.id, shot.backendShotId, {

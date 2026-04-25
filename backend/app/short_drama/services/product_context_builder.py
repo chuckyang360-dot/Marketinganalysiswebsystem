@@ -54,6 +54,8 @@ class ProductContextBuilderService:
             "raw_input": raw_input.model_dump(),
             "image_understanding": image_understanding.model_dump(),
             "project_constraints": project_constraints or {},
+            "language_policy": (project_constraints or {}).get("language_policy", {}),
+            "language_prompt_rules": (project_constraints or {}).get("language_prompt_rules", ""),
         }
         data = self._text.generate_structured_json(
             project_id=project_id,
@@ -64,6 +66,7 @@ class ProductContextBuilderService:
             expected_schema_name="ProductContext",
             stage="PRODUCT_CONTEXT_BUILD",
         )
+        data = _normalize_source_trace(project_id, data)
         out = _normalize_product_context(ProductContextSchema.model_validate(data), raw_input, image_understanding)
         logger.info("[S1_CONTEXT_BUILDER_RESULT] project_id=%s result=%s", project_id, out.model_dump())
         return out
@@ -108,6 +111,65 @@ def _normalize_product_context(
         data["product_name"] = raw_input.product_name_raw
         trace["product_name"] = "user_input"
     return ProductContextSchema.model_validate(data)
+
+
+def _normalize_source_trace_value(value: Any) -> str:
+    allowed = {"user_input", "image_understanding", "merged_inference"}
+
+    if isinstance(value, list):
+        parts = {str(v).strip() for v in value if str(v).strip()}
+    else:
+        raw = str(value or "").strip()
+        parts = {p.strip() for p in raw.replace(",", "|").split("|") if p.strip()}
+
+    if not parts:
+        return "merged_inference"
+
+    if parts.issubset(allowed) and len(parts) == 1:
+        return next(iter(parts))
+
+    if "merged_inference" in parts:
+        return "merged_inference"
+
+    if "user_input" in parts and "image_understanding" in parts:
+        return "merged_inference"
+
+    if "user_input" in parts:
+        return "user_input"
+
+    if "image_understanding" in parts:
+        return "image_understanding"
+
+    return "merged_inference"
+
+
+def _normalize_source_trace(project_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    source_trace = data.get("source_trace")
+    if not isinstance(source_trace, dict):
+        data["source_trace"] = {}
+        return data
+
+    before_values: dict[str, Any] = {}
+    after_values: dict[str, str] = {}
+    normalized_fields: list[str] = []
+    normalized_trace: dict[str, str] = {}
+    for key, value in source_trace.items():
+        normalized = _normalize_source_trace_value(value)
+        normalized_trace[str(key)] = normalized
+        if value != normalized:
+            normalized_fields.append(str(key))
+            before_values[str(key)] = value
+            after_values[str(key)] = normalized
+    data["source_trace"] = normalized_trace
+    if normalized_fields:
+        logger.info(
+            "[S1_SOURCE_TRACE_NORMALIZED] project_id=%s normalized_fields=%s before_values=%s after_values=%s",
+            project_id,
+            normalized_fields,
+            before_values,
+            after_values,
+        )
+    return data
 
 
 product_context_builder_service = ProductContextBuilderService()
