@@ -55,7 +55,7 @@ function displayAssetName(row: AssetLibraryItemDto): string {
   if (typeof identity === 'string' && identity.trim()) return identity.trim();
   let out = row.name || '';
   for (const term of SCENE_PLOT_STATE_TERMS) {
-    out = out.replace(new RegExp(`\\b${term}\\b`, 'gi'), ' ').replaceAll(term, ' ');
+    out = out.replace(new RegExp(`\\b${term}\\b`, 'gi'), ' ').replace(new RegExp(term, 'g'), ' ');
   }
   out = out.replace(/\s+/g, ' ').trim();
   if (/home\s+gym/i.test(`${row.name} ${row.description ?? ''}`) || `${row.name} ${row.description ?? ''}`.includes('健身房')) return 'Home Gym';
