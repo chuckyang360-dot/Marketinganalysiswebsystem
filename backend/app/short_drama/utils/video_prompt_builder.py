@@ -23,6 +23,12 @@ _REPETITIVE_PROMPT_PHRASES = (
 logger = logging.getLogger(__name__)
 
 
+def _get_shot_value(shot, key: str, default=None):
+    if isinstance(shot, dict):
+        return shot.get(key, default)
+    return getattr(shot, key, default)
+
+
 @dataclass
 class SegmentVideoPlan:
     segment_id: str
@@ -88,29 +94,33 @@ def _dedupe_text_items(items: list[str], *, max_items: int) -> list[str]:
 
 
 def _effective_character_refs(shot) -> list[str]:
-    manual = _dedupe_text_items([str(x) for x in (shot.manual_character_refs or [])], max_items=8)
+    manual = _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "manual_character_refs", []) or [])], max_items=8)
     if manual:
         return manual
-    return _dedupe_text_items([str(x) for x in (shot.character_refs or [])], max_items=8)
+    return _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "character_refs", []) or [])], max_items=8)
 
 
 def _effective_scene_ref(shot) -> str:
-    manual = (shot.manual_scene_ref or "").strip()
+    manual = str(_get_shot_value(shot, "manual_scene_ref", "") or "").strip()
     if manual:
         return manual
-    return (shot.scene_ref or "").strip()
+    return str(_get_shot_value(shot, "scene_ref", "") or "").strip()
 
 
 def _effective_product_refs(shot) -> list[str]:
-    manual = _dedupe_text_items([str(x) for x in (shot.manual_product_refs or [])], max_items=5)
+    manual = _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "manual_product_refs", []) or [])], max_items=5)
     if manual:
         return manual
-    return _dedupe_text_items([str(x) for x in (shot.product_refs or [])], max_items=5)
+    return _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "product_refs", []) or [])], max_items=5)
 
 
 def _manual_refs_used(segment: SegmentScriptSchema) -> bool:
     return any(
-        bool(s.manual_character_refs or (s.manual_scene_ref or "").strip() or s.manual_product_refs)
+        bool(
+            _get_shot_value(s, "manual_character_refs", [])
+            or str(_get_shot_value(s, "manual_scene_ref", "") or "").strip()
+            or _get_shot_value(s, "manual_product_refs", [])
+        )
         for s in segment.shots
     )
 
@@ -118,7 +128,7 @@ def _manual_refs_used(segment: SegmentScriptSchema) -> bool:
 def _summarize_visual_constraints(segment: SegmentScriptSchema) -> list[str]:
     vals: list[str] = []
     for shot in segment.shots:
-        sc = shot.source_visual_constraints or {}
+        sc = _get_shot_value(shot, "source_visual_constraints", {}) or {}
         if not isinstance(sc, dict):
             continue
         for key in ("visual_style", "aspect_ratio"):
@@ -154,13 +164,19 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
         final_parts.append(compacted)
 
     for shot in segment.shots:
-        manual_vp = (shot.manual_video_prompt or "").strip()
-        vp = manual_vp or (shot.video_prompt or "").strip()
-        action = (shot.action_description or "").strip()
-        dialogue = (shot.dialogue or "").strip()
-        voiceover = (shot.voiceover or shot.narration or "").strip()
-        must_show = "; ".join(_dedupe_text_items([str(x) for x in (shot.must_show or [])], max_items=3))
-        must_avoid = "; ".join(_dedupe_text_items([str(x) for x in (shot.must_avoid or [])], max_items=3))
+        manual_vp = str(_get_shot_value(shot, "manual_video_prompt", "") or "").strip()
+        vp = manual_vp or str(_get_shot_value(shot, "video_prompt", "") or "").strip()
+        action = str(_get_shot_value(shot, "action_description", "") or "").strip()
+        dialogue = str(_get_shot_value(shot, "dialogue", "") or "").strip()
+        voiceover = str(
+            _get_shot_value(shot, "voiceover", None) or _get_shot_value(shot, "narration", "") or ""
+        ).strip()
+        must_show = "; ".join(
+            _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "must_show", []) or [])], max_items=3)
+        )
+        must_avoid = "; ".join(
+            _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "must_avoid", []) or [])], max_items=3)
+        )
         has_dialogue = bool(dialogue)
         has_voiceover = bool(voiceover)
         if has_dialogue and has_voiceover:
@@ -189,7 +205,7 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
         logger.info(
             "[S4_SPOKEN_CONTENT_POLICY] segment_id=%s shot_id=%s has_dialogue=%s has_voiceover=%s spoken_policy=%s dialogue_preview=%s voiceover_preview=%s",
             segment.segment_id,
-            shot.shot_id,
+            str(_get_shot_value(shot, "shot_id", "") or ""),
             has_dialogue,
             has_voiceover,
             spoken_policy,
@@ -209,27 +225,39 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
         shot_prompt_body = vp or fallback
         if spoken_requirement not in shot_prompt_body:
             shot_prompt_body = " ".join(x for x in [shot_prompt_body, spoken_requirement] if x)
-        shot_text = " ".join(x for x in [f"Shot {shot.shot_id}:", shot_prompt_body] if x)
-        add(f"shot_{shot.shot_id}", shot_text, 700)
+        shot_id = str(_get_shot_value(shot, "shot_id", "") or "")
+        shot_text = " ".join(x for x in [f"Shot {shot_id}:", shot_prompt_body] if x)
+        add(f"shot_{shot_id}", shot_text, 700)
 
     if not final_parts:
         for shot in segment.shots:
             fallback = " ".join(
                 x
                 for x in (
-                    (shot.visual_description or "").strip(),
-                    (shot.action_description or "").strip(),
+                    str(_get_shot_value(shot, "visual_description", "") or "").strip(),
+                    str(_get_shot_value(shot, "action_description", "") or "").strip(),
                 )
                 if x
             ).strip()
-            add(f"fallback_{shot.shot_id}", fallback, 500)
+            add(f"fallback_{str(_get_shot_value(shot, 'shot_id', '') or '')}", fallback, 500)
 
     character_refs = _dedupe_text_items([r for s in segment.shots for r in _effective_character_refs(s)], max_items=8)
     scene_refs = _dedupe_text_items([_effective_scene_ref(s) for s in segment.shots if _effective_scene_ref(s)], max_items=3)
     product_refs = _dedupe_text_items([r for s in segment.shots for r in _effective_product_refs(s)], max_items=5)
-    must_show = _dedupe_text_items([r for s in segment.shots for r in s.must_show], max_items=3)
-    must_avoid = _dedupe_text_items([r for s in segment.shots for r in s.must_avoid], max_items=3)
-    source_selling = _dedupe_text_items([s.source_selling_point for s in segment.shots if s.source_selling_point], max_items=1)
+    must_show = _dedupe_text_items(
+        [r for s in segment.shots for r in (_get_shot_value(s, "must_show", []) or [])], max_items=3
+    )
+    must_avoid = _dedupe_text_items(
+        [r for s in segment.shots for r in (_get_shot_value(s, "must_avoid", []) or [])], max_items=3
+    )
+    source_selling = _dedupe_text_items(
+        [
+            str(_get_shot_value(s, "source_selling_point", "") or "")
+            for s in segment.shots
+            if str(_get_shot_value(s, "source_selling_point", "") or "")
+        ],
+        max_items=1,
+    )
     visual_constraints = _summarize_visual_constraints(segment)
 
     add("refs", f"Characters: {', '.join(character_refs)}. Scenes: {', '.join(scene_refs)}. Products: {', '.join(product_refs)}.", 360)
@@ -273,7 +301,7 @@ def _duration_for_segment(segment: SegmentScriptSchema) -> int:
     if limit > 0:
         d = int(round(limit))
     else:
-        total = sum(float(s.duration_seconds or 0.0) for s in segment.shots)
+        total = sum(float(_get_shot_value(s, "duration_seconds", 0.0) or 0.0) for s in segment.shots)
         d = int(round(total)) if total > 0 else 6
     if d > 10:
         raise ShortDramaVideoInputError(
@@ -356,12 +384,22 @@ def build_segment_video_plan(
     if len(ref_urls) > _MAX_REFS:
         ref_urls = ref_urls[:_MAX_REFS]
 
-    manual_video_prompt_used = any((s.manual_video_prompt or "").strip() for s in segment.shots)
+    manual_video_prompt_used = any(str(_get_shot_value(s, "manual_video_prompt", "") or "").strip() for s in segment.shots)
     manual_refs_used = _manual_refs_used(segment)
     logger.info(
         "[S4_MANUAL_OVERRIDE_APPLIED] segment_id=%s shot_id=%s manual_video_prompt_used=%s manual_refs_used=%s final_prompt_chars=%s",
         segment.segment_id,
-        ",".join([s.shot_id for s in segment.shots if (s.manual_video_prompt or "").strip() or s.manual_character_refs or (s.manual_scene_ref or "").strip() or s.manual_product_refs]) or "",
+        ",".join(
+            [
+                str(_get_shot_value(s, "shot_id", "") or "")
+                for s in segment.shots
+                if str(_get_shot_value(s, "manual_video_prompt", "") or "").strip()
+                or (_get_shot_value(s, "manual_character_refs", []) or [])
+                or str(_get_shot_value(s, "manual_scene_ref", "") or "").strip()
+                or (_get_shot_value(s, "manual_product_refs", []) or [])
+            ]
+        )
+        or "",
         manual_video_prompt_used,
         manual_refs_used,
         len(prompt),
@@ -377,7 +415,7 @@ def build_segment_video_plan(
         prompt_budget=budget,
         execution_input={
             "segment_id": segment.segment_id,
-            "shot_ids": [s.shot_id for s in segment.shots],
+            "shot_ids": [str(_get_shot_value(s, "shot_id", "") or "") for s in segment.shots],
             "video_prompt": prompt,
             "duration_limit": duration,
             "manual_video_prompt_used": manual_video_prompt_used,
@@ -385,10 +423,26 @@ def build_segment_video_plan(
             "character_refs": list(dict.fromkeys([r for s in segment.shots for r in _effective_character_refs(s)])),
             "scene_ref": list(dict.fromkeys([_effective_scene_ref(s) for s in segment.shots if _effective_scene_ref(s)])),
             "product_refs": list(dict.fromkeys([r for s in segment.shots for r in _effective_product_refs(s)])),
-            "must_show": list(dict.fromkeys([r for s in segment.shots for r in s.must_show])),
-            "must_avoid": list(dict.fromkeys([r for s in segment.shots for r in s.must_avoid])),
-            "source_selling_point": list(dict.fromkeys([s.source_selling_point for s in segment.shots if s.source_selling_point])),
-            "source_visual_constraints": [s.source_visual_constraints for s in segment.shots if s.source_visual_constraints],
+            "must_show": list(
+                dict.fromkeys([r for s in segment.shots for r in (_get_shot_value(s, "must_show", []) or [])])
+            ),
+            "must_avoid": list(
+                dict.fromkeys([r for s in segment.shots for r in (_get_shot_value(s, "must_avoid", []) or [])])
+            ),
+            "source_selling_point": list(
+                dict.fromkeys(
+                    [
+                        str(_get_shot_value(s, "source_selling_point", "") or "")
+                        for s in segment.shots
+                        if str(_get_shot_value(s, "source_selling_point", "") or "")
+                    ]
+                )
+            ),
+            "source_visual_constraints": [
+                _get_shot_value(s, "source_visual_constraints", {})
+                for s in segment.shots
+                if _get_shot_value(s, "source_visual_constraints", {})
+            ],
             "aspect_ratio": ar,
             "reference_image_urls": ref_urls,
             "prompt_budget": budget,

@@ -1,7 +1,29 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _stringify_line(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        speaker = str(value.get("speaker") or value.get("role") or value.get("character") or "").strip()
+        text = str(
+            value.get("text")
+            or value.get("line")
+            or value.get("dialogue")
+            or value.get("content")
+            or ""
+        ).strip()
+        if speaker and text:
+            return f"{speaker}：{text}"
+        return text or str(value).strip()
+    if isinstance(value, list):
+        return "\n".join(x for x in (_stringify_line(v) for v in value) if x)
+    return str(value).strip()
 
 
 class ShotSchema(BaseModel):
@@ -17,6 +39,7 @@ class ShotSchema(BaseModel):
     action_description: str = ""
     camera_description: str = ""
     dialogue: str = ""
+    voiceover: Optional[str] = None
     narration: str = ""
     emotion: str = ""
     duration_seconds: float = 0.0
@@ -32,6 +55,30 @@ class ShotSchema(BaseModel):
     source_segment_id: str = ""
     source_selling_point: str = ""
     source_visual_constraints: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_dialogue_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        dialogue = _stringify_line(out.get("dialogue"))
+        if not dialogue:
+            for key in ("dialogue_lines", "lines", "spoken_line", "caption", "script"):
+                dialogue = _stringify_line(out.get(key))
+                if dialogue:
+                    break
+        voiceover = _stringify_line(out.get("voiceover"))
+        narration = _stringify_line(out.get("narration"))
+        if not voiceover and narration:
+            voiceover = narration
+        if dialogue:
+            out["dialogue"] = dialogue
+        if voiceover:
+            out["voiceover"] = voiceover
+        if narration or voiceover:
+            out["narration"] = narration or voiceover
+        return out
 
     @field_validator("duration_seconds", mode="before")
     @classmethod
