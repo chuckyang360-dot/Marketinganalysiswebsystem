@@ -129,10 +129,17 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
 
         product = ProductContextSchema.model_validate(pc_row.normalized_context_json)
         blueprint = StoryBlueprintSchema.model_validate(sb_row.blueprint_json)
+        project_config = {
+            "duration": project.duration,
+            "format": project.format,
+            "style": project.style,
+            "visual_style": project.visual_style,
+            "aspect_ratio": project.aspect_ratio,
+        }
 
         status_before = project.status
         try:
-            bundle = asset_spec_service.generate(body.project_id, product, blueprint)
+            bundle = asset_spec_service.generate(body.project_id, product, blueprint, project_config)
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
             logger.info(
                 "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
@@ -173,7 +180,15 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                     description=c.description,
                     visual_prompt=c.visual_prompt,
                     image_url=c.image_url,
-                    meta_json=c.meta,
+                    meta_json={
+                        **(c.meta or {}),
+                        "asset_identity": c.asset_identity,
+                        "boundary_warnings": c.boundary_warnings,
+                        "source_asset_version": c.source_asset_version,
+                        "exposure_priority": c.exposure_priority,
+                        "narrative_function": c.narrative_function,
+                        "purpose": c.purpose,
+                    },
                 )
             )
         for s in bundle.scenes:
@@ -185,7 +200,16 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                     description=s.description,
                     visual_prompt=s.visual_prompt,
                     image_url=s.image_url,
-                    meta_json=s.meta,
+                    meta_json={
+                        **(s.meta or {}),
+                        "asset_identity": s.asset_identity,
+                        "boundary_warnings": s.boundary_warnings,
+                        "scene_form": s.scene_form,
+                        "source_asset_version": s.source_asset_version,
+                        "exposure_priority": s.exposure_priority,
+                        "narrative_function": s.narrative_function,
+                        "purpose": s.purpose,
+                    },
                 )
             )
         for p in bundle.products:
@@ -196,7 +220,16 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                     description=p.description,
                     visual_prompt=p.visual_prompt,
                     image_url=p.image_url,
-                    meta_json=p.meta,
+                    meta_json={
+                        **(p.meta or {}),
+                        "asset_identity": p.asset_identity,
+                        "boundary_warnings": p.boundary_warnings,
+                        "product_role": p.product_role,
+                        "source_asset_version": p.source_asset_version,
+                        "exposure_priority": p.exposure_priority,
+                        "narrative_function": p.narrative_function,
+                        "purpose": p.purpose,
+                    },
                 )
             )
 

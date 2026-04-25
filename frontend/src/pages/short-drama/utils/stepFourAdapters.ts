@@ -100,6 +100,11 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       typeof s.image_prompt === 'string' && s.image_prompt.trim() ? s.image_prompt.trim() : undefined;
     const videoPrompt =
       typeof s.video_prompt === 'string' && s.video_prompt.trim() ? s.video_prompt.trim() : undefined;
+    const stringArray = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : undefined);
+    const sourceVisualConstraints =
+      s.source_visual_constraints && typeof s.source_visual_constraints === 'object' && !Array.isArray(s.source_visual_constraints)
+        ? (s.source_visual_constraints as Record<string, unknown>)
+        : undefined;
 
     return {
       id: i + 1,
@@ -116,6 +121,12 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       cameraDescription,
       imagePrompt,
       videoPrompt,
+      productRefs: stringArray(s.product_refs),
+      mustShow: stringArray(s.must_show),
+      mustAvoid: stringArray(s.must_avoid),
+      sourceSegmentId: typeof s.source_segment_id === 'string' ? s.source_segment_id : undefined,
+      sourceSellingPoint: typeof s.source_selling_point === 'string' ? s.source_selling_point : undefined,
+      sourceVisualConstraints,
     };
   });
 }

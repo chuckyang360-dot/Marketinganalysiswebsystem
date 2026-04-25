@@ -73,6 +73,21 @@ class AssetLibraryService:
         logger.info("[FINAL_IMAGE_PROMPT] %s", final_prompt)
         return final_prompt
 
+    def _mark_suspicious_if_text_image_weak(self, db: Session, asset: AssetEntity, *, reason: str) -> None:
+        extra = dict(asset.extra_json or {})
+        extra["suspicious"] = True
+        extra["suspicious_reason"] = reason
+        asset.extra_json = extra
+        db.add(asset)
+        logger.warning(
+            "[ASSET_TEXT_IMAGE_SUSPICIOUS] project_id=%s asset_id=%s asset_type=%s name=%s reason=%s",
+            asset.project_id,
+            asset.id,
+            asset.asset_type,
+            asset.name,
+            reason,
+        )
+
     def _persist_generated_image(
         self,
         db: Session,
@@ -653,6 +668,12 @@ class AssetLibraryService:
                 )
             )
         uploads = body.uploaded_images or []
+        if (refs or uploads) and (asset.name in _UI_NAME_NOISE or not (asset.description or "").strip()):
+            self._mark_suspicious_if_text_image_weak(
+                db,
+                asset,
+                reason="uploaded/reference image exists but asset text is generic or missing description",
+            )
         for idx, upload in enumerate(uploads):
             image_url = (upload.get("file_url") or "").strip()
             if not image_url:
@@ -736,6 +757,12 @@ class AssetLibraryService:
                     is_cover=False,
                     status="active",
                 )
+            )
+        if uploaded_images and not (asset.description or "").strip():
+            self._mark_suspicious_if_text_image_weak(
+                db,
+                asset,
+                reason="uploaded image appended but asset description is missing",
             )
         self._ensure_cover(db, asset)
         return asset

@@ -106,6 +106,25 @@ class TestProductParserXAI(unittest.TestCase):
         ctx = prov.normalize(42, {"title": "面膜", "image_urls": []})
         self.assertEqual(ctx.product_name, "面膜")
 
+    def test_s1_conflict_is_visible_in_product_context(self):
+        from app.short_drama.schemas.product import (
+            ProductContextSchema,
+            ProductImageUnderstandingSchema,
+            ProductRawInputSchema,
+        )
+        from app.short_drama.services.product_context_builder import _normalize_product_context
+
+        ctx = ProductContextSchema(product_name="红色裙子")
+        img = ProductImageUnderstandingSchema(
+            detected_product_type="裤子",
+            detected_visual_features=["蓝色牛仔裤"],
+            image_conflicts=["用户写红色裙子，但图片显示蓝色牛仔裤"],
+        )
+        out = _normalize_product_context(ctx, ProductRawInputSchema(product_name_raw="红色裙子"), img)
+        self.assertIn("蓝色牛仔裤", out.visual_features)
+        self.assertTrue(any(x.startswith("conflict:") for x in out.visual_risk_notes))
+        self.assertEqual(out.source_trace["product_name"], "user_input")
+
     def test_invalid_json_raises_after_two_repairs(self):
         from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
         from app.short_drama.providers.xai_text_provider import XAITextProvider
@@ -392,6 +411,56 @@ class TestLegacySegmentReadNormalize(unittest.TestCase):
 
 
 class TestXAIClientTimeout(unittest.TestCase):
+    def test_responses_multimodal_payload_shape(self):
+        from app.short_drama.providers.xai_client import XAIClient
+        from app.short_drama.providers.xai_text_provider import _build_user_content_parts
+
+        content = _build_user_content_parts(
+            '{"hello":"world"}',
+            ["https://cdn.example.com/a.png", "https://cdn.example.com/b.png"],
+        )
+        captured = {}
+
+        class FakeResp:
+            status_code = 200
+            headers = {"x-request-id": "req_1"}
+            text = '{"id":"resp_1","output":[]}'
+
+            def json(self):
+                return {"id": "resp_1", "output": []}
+
+        with patch("httpx.Client") as MockClient:
+            inst = MagicMock()
+            inst.__enter__.return_value = inst
+            def _capture_post(*a, **k):
+                captured["json"] = k.get("json")
+                return FakeResp()
+
+            inst.post.side_effect = _capture_post
+            MockClient.return_value = inst
+
+            XAIClient(api_key="test-key", base_url="https://example.invalid", timeout_seconds=1.0).post_responses(
+                model="m",
+                system_prompt="system instructions",
+                user_content=content,
+                log_context={"project_id": 1},
+            )
+
+        body = captured["json"]
+        self.assertEqual(body["instructions"], "system instructions")
+        self.assertIsInstance(body["input"], list)
+        self.assertEqual(body["input"][0]["role"], "user")
+        self.assertIsInstance(body["input"][0]["content"], list)
+        image_part = body["input"][0]["content"][0]
+        second_image_part = body["input"][0]["content"][1]
+        text_part = body["input"][0]["content"][2]
+        self.assertEqual(image_part["type"], "input_image")
+        self.assertIsInstance(image_part["image_url"], str)
+        self.assertEqual(second_image_part["type"], "input_image")
+        self.assertIsInstance(second_image_part["image_url"], str)
+        self.assertEqual(text_part["type"], "input_text")
+        self.assertNotIn("instructions", body["input"][0])
+
     def test_timeout_raises_provider_error(self):
         from app.short_drama.exceptions import ShortDramaProviderError
         from app.short_drama.providers.xai_client import XAIClient
@@ -425,6 +494,29 @@ class TestStoryPlannerMock(unittest.TestCase):
         self.assertEqual(len(bp.segment_plan), 3)
         self.assertEqual(bp.segment_plan[0].segment_id, "seg_1")
 
+    def test_s2_consumes_story_subset_changes(self):
+        from app.short_drama.schemas.product import ProductContextSchema
+        from app.short_drama.services.story_planner_service import MockStoryPlannerProvider
+
+        provider = MockStoryPlannerProvider()
+        base = ProductContextSchema(
+            product_name="P",
+            core_selling_points=["省时"],
+            target_users=["新手妈妈"],
+            suitable_story_angles=["痛点型"],
+        )
+        changed_points = base.model_copy(update={"core_selling_points": ["低敏"]})
+        changed_users = base.model_copy(update={"target_users": ["通勤白领"]})
+        changed_angles = base.model_copy(update={"suitable_story_angles": ["反转型"]})
+
+        bp_points = provider.plan(1, changed_points, {"format": "single_ad", "duration": "45s"})
+        bp_users = provider.plan(1, changed_users, {"format": "single_ad", "duration": "45s"})
+        bp_angles = provider.plan(1, changed_angles, {"format": "single_ad", "duration": "45s"})
+
+        self.assertIn("低敏", bp_points.product_selling_point_mapping.values())
+        self.assertIn("通勤白领", bp_users.premise)
+        self.assertIn("反转型", bp_angles.core_conflict)
+
 
 class TestAssetSpecMock(unittest.TestCase):
     def test_image_url_none(self):
@@ -442,6 +534,50 @@ class TestAssetSpecMock(unittest.TestCase):
         )
         bundle = MockAssetSpecProvider().build_specs(1, prod, story)
         self.assertTrue(all(p.image_url is None for p in bundle.products))
+
+    def test_asset_boundaries_dedupe_home_gym_scene(self):
+        from app.short_drama.schemas.asset import AssetSpecsBundleSchema, CharacterAssetSchema, ProductAssetSchema, SceneAssetSchema
+        from app.short_drama.services.asset_spec_service import _normalize_asset_bundle
+
+        bundle = AssetSpecsBundleSchema(
+            characters=[
+                CharacterAssetSchema(
+                    name="Angry Coach Training",
+                    role_type="coach",
+                    description="Female coach lifting weights in gym struggle",
+                    visual_prompt="coach doing energized workout",
+                )
+            ],
+            scenes=[
+                SceneAssetSchema(
+                    name="Home Gym Struggle",
+                    scene_type="hook",
+                    description="home gym conflict moment",
+                    visual_prompt="home gym with character struggling",
+                ),
+                SceneAssetSchema(
+                    name="Energized Workout",
+                    scene_type="resolution",
+                    description="same home gym comeback",
+                    visual_prompt="home gym energized workout",
+                ),
+            ],
+            products=[
+                ProductAssetSchema(
+                    name="Xiaomi Protein Powder in Gym Scene",
+                    description="person drinking product in gym story scene",
+                    visual_prompt="protein powder being used by human in gym",
+                )
+            ],
+        )
+        out = _normalize_asset_bundle(bundle, product_name="Xiaomi Protein Powder")
+        self.assertEqual([s.name for s in out.scenes], ["Home Gym"])
+        self.assertNotIn("Struggle", out.scenes[0].name)
+        self.assertIn("empty_location", out.scenes[0].meta["asset_boundary"])
+        self.assertNotIn("Training", out.characters[0].name)
+        self.assertIn("character_reference", out.characters[0].meta["asset_boundary"])
+        self.assertNotIn("Gym Scene", out.products[0].name)
+        self.assertIn("product_only", out.products[0].meta["asset_boundary"])
 
 
 class TestSegmentDirectorMock(unittest.TestCase):
@@ -470,6 +606,38 @@ class TestSegmentDirectorMock(unittest.TestCase):
             for sh in seg.shots:
                 self.assertTrue((sh.image_prompt or "").strip())
                 self.assertTrue((sh.video_prompt or "").strip())
+
+    def test_s3_translates_visual_subset_to_shot_execution_fields(self):
+        from app.short_drama.schemas.asset import AssetSpecsBundleSchema, CharacterAssetSchema, ProductAssetSchema, SceneAssetSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema, SegmentPlanItemSchema
+        from app.short_drama.services.segment_director_service import MockSegmentDirectorProvider, SegmentDirectorService
+
+        bp = StoryBlueprintSchema(
+            hook="强 Hook",
+            product_selling_point_mapping={"seg_1": "省时"},
+            visual_requirements=["蓝色包装必须一致"],
+            must_avoid_elements=["不要红色包装"],
+            segment_plan=[SegmentPlanItemSchema(segment_id="seg_1"), SegmentPlanItemSchema(segment_id="seg_2"), SegmentPlanItemSchema(segment_id="seg_3")],
+        )
+        assets = AssetSpecsBundleSchema(
+            characters=[CharacterAssetSchema(name="A", role_type="protagonist")],
+            scenes=[SceneAssetSchema(name="S", scene_type="interior")],
+            products=[ProductAssetSchema(name="P")],
+        )
+        cfg = {
+            "aspect_ratio": "9:16",
+            "visual_style": "premium_ad",
+            "s1_visual_constraints": {
+                "visual_features": ["蓝色包装"],
+                "consistency_notes": ["瓶身 logo 固定"],
+                "visual_risk_notes": ["不要红色包装"],
+            },
+        }
+        segs = SegmentDirectorService(MockSegmentDirectorProvider()).generate(1, bp, assets, cfg)
+        shot = segs[0].shots[0]
+        self.assertIn("省时", shot.must_show)
+        self.assertIn("不要红色包装", shot.must_avoid)
+        self.assertEqual(shot.source_visual_constraints["visual_style"], "premium_ad")
 
 
 class TestShortDramaPipelineIntegration(unittest.TestCase):

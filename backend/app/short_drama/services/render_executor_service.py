@@ -198,6 +198,7 @@ class RenderExecutorService:
                 products=products,
                 project_aspect_ratio=project_ar,
             )
+            logger.info("[S4_EXECUTION_INPUT] project_id=%s input=%s", project_id, plan.execution_input)
             logger.info(
                 "[SEGMENT_REFERENCE_SOURCE_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,
@@ -304,6 +305,7 @@ class RenderExecutorService:
                 "duration_seconds": plan.duration_seconds,
                 "aspect_ratio": plan.aspect_ratio,
                 "resolution": plan.resolution,
+                "execution_input": plan.execution_input,
             }
             if existing_job_id is not None:
                 assert job is not None

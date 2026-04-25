@@ -22,6 +22,12 @@ class ShotSchema(BaseModel):
     duration_seconds: float = 0.0
     image_prompt: str = ""
     video_prompt: str = ""
+    product_refs: List[str] = Field(default_factory=list)
+    must_show: List[str] = Field(default_factory=list)
+    must_avoid: List[str] = Field(default_factory=list)
+    source_segment_id: str = ""
+    source_selling_point: str = ""
+    source_visual_constraints: Dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("duration_seconds", mode="before")
     @classmethod

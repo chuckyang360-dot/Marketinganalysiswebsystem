@@ -89,6 +89,16 @@ def build_visual_prompt(asset_input: dict[str, str]) -> str:
     name = _strip_ui_noise((asset_input.get("name") or "").strip())
     description = _strip_ui_noise((asset_input.get("description") or "").strip())
     source = " ".join([name, description]).strip()
+    if asset_type == "product" and (not name or not description):
+        missing = []
+        if not name:
+            missing.append("product name")
+        if not description:
+            missing.append("product description")
+        raise ShortDramaImageProviderError(
+            "Product image generation blocked: missing " + ", ".join(missing),
+            category="configuration",
+        )
 
     subject_by_type = {
         "character": "A character portrait for short-form commercial storytelling",
@@ -110,6 +120,11 @@ def build_visual_prompt(asset_input: dict[str, str]) -> str:
     detail_parts: list[str] = []
     if source_details:
         detail_parts.append(f"subject details: {source_details}")
+    elif asset_type == "product":
+        raise ShortDramaImageProviderError(
+            "Product image generation blocked: missing subject details",
+            category="configuration",
+        )
     detail_parts.extend(tags)
     detail = ", ".join(detail_parts)
 

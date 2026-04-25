@@ -26,6 +26,7 @@ class SegmentVideoPlan:
     duration_seconds: int = 6
     aspect_ratio: str = "9:16"
     resolution: str | None = "720p"
+    execution_input: dict = field(default_factory=dict)
 
 
 def _norm_name(s: str) -> str:
@@ -52,6 +53,17 @@ def _merge_shot_video_prompts(segment: SegmentScriptSchema) -> str:
             continue
         if vp not in parts:
             parts.append(vp)
+        extras = " ".join(
+            x
+            for x in [
+                f"MUST SHOW: {'; '.join(shot.must_show)}." if shot.must_show else "",
+                f"DO NOT SHOW: {'; '.join(shot.must_avoid)}." if shot.must_avoid else "",
+                f"SOURCE SELLING POINT: {shot.source_selling_point}." if shot.source_selling_point else "",
+            ]
+            if x
+        ).strip()
+        if extras and extras not in parts:
+            parts.append(extras)
     if not parts:
         for shot in segment.shots:
             fallback = " ".join(
@@ -155,4 +167,19 @@ def build_segment_video_plan(
         duration_seconds=duration,
         aspect_ratio=ar,
         resolution="720p",
+        execution_input={
+            "segment_id": segment.segment_id,
+            "shot_ids": [s.shot_id for s in segment.shots],
+            "video_prompt": prompt,
+            "duration_limit": duration,
+            "character_refs": list(dict.fromkeys([r for s in segment.shots for r in s.character_refs])),
+            "scene_ref": list(dict.fromkeys([s.scene_ref for s in segment.shots if s.scene_ref])),
+            "product_refs": list(dict.fromkeys([r for s in segment.shots for r in s.product_refs])),
+            "must_show": list(dict.fromkeys([r for s in segment.shots for r in s.must_show])),
+            "must_avoid": list(dict.fromkeys([r for s in segment.shots for r in s.must_avoid])),
+            "source_selling_point": list(dict.fromkeys([s.source_selling_point for s in segment.shots if s.source_selling_point])),
+            "source_visual_constraints": [s.source_visual_constraints for s in segment.shots if s.source_visual_constraints],
+            "aspect_ratio": ar,
+            "reference_image_urls": ref_urls,
+        },
     )

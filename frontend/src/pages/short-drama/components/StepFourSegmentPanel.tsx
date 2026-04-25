@@ -166,7 +166,10 @@ export function StepFourSegmentPanel({
                                   shot.subjectDescription ||
                                   shot.cameraDescription ||
                                   shot.imagePrompt ||
-                                  shot.videoPrompt) && (
+                                  shot.videoPrompt ||
+                                  shot.sourceSellingPoint ||
+                                  shot.mustShow?.length ||
+                                  shot.mustAvoid?.length) && (
                                   <details className="rounded-lg px-2 py-2" style={{ background: "#fff", border: "1px solid #EAEAEA" }}>
                                     <summary className="cursor-pointer text-[11px] font-semibold" style={{ color: "#6E6E73" }}>
                                       结构化槽位与 Prompt
@@ -187,6 +190,15 @@ export function StepFourSegmentPanel({
                                       {shot.videoPrompt && (
                                         <p><span style={{ color: "#AEAEB2" }}>video_prompt </span>{shot.videoPrompt}</p>
                                       )}
+                                      {shot.sourceSellingPoint && (
+                                        <p><span style={{ color: "#AEAEB2" }}>source_selling_point </span>{shot.sourceSellingPoint}</p>
+                                      )}
+                                      {shot.mustShow?.length ? (
+                                        <p><span style={{ color: "#AEAEB2" }}>must_show </span>{shot.mustShow.join('；')}</p>
+                                      ) : null}
+                                      {shot.mustAvoid?.length ? (
+                                        <p><span style={{ color: "#AEAEB2" }}>must_avoid </span>{shot.mustAvoid.join('；')}</p>
+                                      ) : null}
                                     </div>
                                   </details>
                                 )}

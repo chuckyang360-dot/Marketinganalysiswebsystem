@@ -43,6 +43,8 @@ function joinUrl(path: string): string {
 }
 
 function formatShortDramaDetailObject(d: Record<string, unknown>): string {
+  const userMsg = typeof d.user_message === 'string' ? d.user_message : '';
+  if (userMsg.trim()) return userMsg.trim();
   const msg = typeof d.message === 'string' ? d.message : '';
   const seg = d.segment_id != null && d.segment_id !== '' ? `segment=${String(d.segment_id)}` : '';
   const shot = d.shot_id != null && d.shot_id !== '' ? `shot=${String(d.shot_id)}` : '';

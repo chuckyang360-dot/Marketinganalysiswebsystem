@@ -28,6 +28,47 @@ function sanitizeAssetName(input: string): string {
   return blocked.has(trimmed) ? '' : trimmed;
 }
 
+const SCENE_PLOT_STATE_TERMS = [
+  'struggle',
+  'conflict',
+  'flashback',
+  'energized',
+  'workout',
+  'failure',
+  'comeback',
+  'angry',
+  'moment',
+  'training',
+  '挣扎',
+  '冲突',
+  '闪回',
+  '回忆',
+  '训练',
+  '失败',
+  '逆袭',
+  '情绪',
+];
+
+function displayAssetName(row: AssetLibraryItemDto): string {
+  if (row.asset_type !== 'scene') return row.name;
+  const identity = row.extra && typeof row.extra === 'object' ? (row.extra as Record<string, unknown>).location_identity || (row.extra as Record<string, unknown>).asset_identity : null;
+  if (typeof identity === 'string' && identity.trim()) return identity.trim();
+  let out = row.name || '';
+  for (const term of SCENE_PLOT_STATE_TERMS) {
+    out = out.replace(new RegExp(`\\b${term}\\b`, 'gi'), ' ').replaceAll(term, ' ');
+  }
+  out = out.replace(/\s+/g, ' ').trim();
+  if (/home\s+gym/i.test(`${row.name} ${row.description ?? ''}`) || `${row.name} ${row.description ?? ''}`.includes('健身房')) return 'Home Gym';
+  return out || 'Scene Location';
+}
+
+function assetCoverImageClass(row: AssetLibraryItemDto): string {
+  if (row.asset_type === 'character') {
+    return 'h-full w-full object-cover object-top';
+  }
+  return 'h-full w-full object-cover object-center';
+}
+
 function toPositiveInt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -256,7 +297,7 @@ export function ShortDramaAssetsPage() {
       const detailVm: AssetInteractionEntity = {
         id: d.id,
         kind: toKind(d.asset_type),
-        name: d.name,
+        name: displayAssetName(d),
         typeLabel: detailTypeLabel,
         narrativeFunctionLabel: resolveNarrativeFunctionLabel(d),
         description: d.description ?? '',
@@ -414,11 +455,11 @@ export function ShortDramaAssetsPage() {
                   <div
                     className="relative h-48 shrink-0 overflow-hidden"
                     style={{ background: '#F7F8FA', cursor: 'pointer' }}
-                    onClick={() => visualAnchor && setLightbox({ img: visualAnchor, name: row.name })}
+                    onClick={() => visualAnchor && setLightbox({ img: visualAnchor, name: displayAssetName(row) })}
                     role="button"
                     tabIndex={0}
                   >
-                    {visualAnchor ? <img src={visualAnchor} alt={row.name} className="h-full w-full object-cover" /> : <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />}
+                    {visualAnchor ? <img src={visualAnchor} alt={displayAssetName(row)} className={assetCoverImageClass(row)} /> : <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />}
                   </div>
                   <div className="flex flex-1 flex-col p-4">
                     <div className="flex-1">
@@ -433,7 +474,7 @@ export function ShortDramaAssetsPage() {
                             overflow: 'hidden',
                           }}
                         >
-                          {row.name}
+                          {displayAssetName(row)}
                         </h3>
                       </div>
                       <div className="mt-1 h-[24px] flex items-center justify-between">
@@ -513,27 +554,6 @@ export function ShortDramaAssetsPage() {
           </div>
         </div>
       </div>
-      {autoPhase === 'generating_specs' || autoPhase === 'generating_images' ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-6">
-          <div className="w-full max-w-md rounded-2xl border border-[#EAEAEA] bg-white p-5 shadow-xl">
-            <div className="flex items-center gap-3">
-              <i className="ri-loader-4-line animate-spin text-[22px] text-[#1D1D1F]" />
-              <div>
-                <div className="text-[15px] font-semibold text-[#1D1D1F]">
-                  {autoPhase === 'generating_specs' ? '正在生成资产规范' : '正在生成资产图片'}
-                </div>
-                <div className="text-[12px] text-[#6E6E73]">{autoHint ?? '请稍候…'}</div>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-14 animate-pulse rounded-lg bg-[#F1F2F4]" />
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <input ref={refUploadInput} type="file" accept="image/*" className="hidden" onChange={(e) => void (async () => {
         const f = e.target.files?.[0]; e.target.value = ''; if (!f || !effectiveProjectId || refTargetAssetId.current == null) return;
         const assetId = refTargetAssetId.current; refTargetAssetId.current = null;

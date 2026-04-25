@@ -98,6 +98,9 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
                 body.input,
                 project_constraints={
                     "duration": project.duration or "",
+                    "format": project.format or "",
+                    "style": project.style or "",
+                    "visual_style": project.visual_style or "",
                     "aspect_ratio": project.aspect_ratio or "",
                 },
             )

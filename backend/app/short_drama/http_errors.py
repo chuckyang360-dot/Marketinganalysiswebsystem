@@ -21,11 +21,15 @@ def raise_short_drama_http(exc: Exception) -> None:
 def _to_http_exception(exc: Exception) -> HTTPException:
     if isinstance(exc, ShortDramaInvalidModelOutputError):
         detail = exc.http_detail()
+        user_message = "当前步骤的 AI 输出不完整或格式异常，请检查输入后重试；详细原因已记录在后端日志。"
         if isinstance(detail, dict):
-            return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
+            return HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={**detail, "user_message": user_message},
+            )
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid model output: {detail}",
+            detail={"message": str(detail), "user_message": user_message, "error": "short_drama_invalid_model_output"},
         )
     if isinstance(exc, (ShortDramaImageProviderError, ShortDramaImageSaveError)):
         msg = str(exc)

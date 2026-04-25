@@ -157,7 +157,6 @@ export function SDWorkflowNav({
           <button
             type="button"
             onClick={handleLeaveHomeClick}
-            disabled={!allowSaveAndLeave}
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-[12.5px] transition-all duration-200"
             style={{ color: '#8E8E93', background: 'transparent' }}
             onMouseEnter={(e) => {

@@ -70,6 +70,11 @@ def _build_must_show_asset_ids(assets: AssetSpecsBundleSchema) -> list[int]:
     return [int(a.id) for a in [*primary, *secondary] if a.id is not None]
 
 
+def _meta(row: Any) -> dict[str, Any]:
+    m = getattr(row, "meta_json", None)
+    return m if isinstance(m, dict) else {}
+
+
 def _validate_step4_visual_anchor(assets: AssetSpecsBundleSchema) -> None:
     missing: list[str] = []
 
@@ -124,12 +129,12 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                     description=c.description,
                     visual_prompt=c.visual_prompt,
                     image_url=c.image_url,
-                    visual_anchor_image_id=c.visual_anchor_image_id,
-                    source_asset_version=c.source_asset_version,
-                    exposure_priority=c.exposure_priority,
-                    narrative_function=c.narrative_function,
-                    purpose=c.purpose,
-                    meta=c.meta_json or {},
+                    visual_anchor_image_id=_meta(c).get("visual_anchor_image_id"),
+                    source_asset_version=str(_meta(c).get("source_asset_version") or "legacy-1"),
+                    exposure_priority=str(_meta(c).get("exposure_priority") or "secondary"),
+                    narrative_function=_meta(c).get("narrative_function"),
+                    purpose=_meta(c).get("purpose"),
+                    meta=_meta(c),
                 )
                 for c in chars
             ],
@@ -138,16 +143,16 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                     id=s.id,
                     name=s.name,
                     scene_type=s.scene_type,
-                    scene_form=s.scene_form,
+                    scene_form=_meta(s).get("scene_form"),
                     description=s.description,
                     visual_prompt=s.visual_prompt,
                     image_url=s.image_url,
-                    visual_anchor_image_id=s.visual_anchor_image_id,
-                    source_asset_version=s.source_asset_version,
-                    exposure_priority=s.exposure_priority,
-                    narrative_function=s.narrative_function,
-                    purpose=s.purpose,
-                    meta=s.meta_json or {},
+                    visual_anchor_image_id=_meta(s).get("visual_anchor_image_id"),
+                    source_asset_version=str(_meta(s).get("source_asset_version") or "legacy-1"),
+                    exposure_priority=str(_meta(s).get("exposure_priority") or "secondary"),
+                    narrative_function=_meta(s).get("narrative_function"),
+                    purpose=_meta(s).get("purpose"),
+                    meta=_meta(s),
                 )
                 for s in scenes
             ],
@@ -155,21 +160,20 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                 ProductAssetSchema(
                     id=p.id,
                     name=p.name,
-                    product_role=p.product_role,
+                    product_role=_meta(p).get("product_role"),
                     description=p.description,
                     visual_prompt=p.visual_prompt,
                     image_url=p.image_url,
-                    visual_anchor_image_id=p.visual_anchor_image_id,
-                    source_asset_version=p.source_asset_version,
-                    exposure_priority=p.exposure_priority,
-                    narrative_function=p.narrative_function,
-                    purpose=p.purpose,
-                    meta=p.meta_json or {},
+                    visual_anchor_image_id=_meta(p).get("visual_anchor_image_id"),
+                    source_asset_version=str(_meta(p).get("source_asset_version") or "legacy-1"),
+                    exposure_priority=str(_meta(p).get("exposure_priority") or "secondary"),
+                    narrative_function=_meta(p).get("narrative_function"),
+                    purpose=_meta(p).get("purpose"),
+                    meta=_meta(p),
                 )
                 for p in products
             ],
         )
-        _validate_step4_visual_anchor(assets)
         must_show_asset_ids = _build_must_show_asset_ids(assets)
         assets = assets.model_copy(
             update={

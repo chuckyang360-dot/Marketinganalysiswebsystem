@@ -34,14 +34,29 @@ env/
 
 # Railway
 .railway/
-*.png
 backend/generated/
+backend/tests/_sd_*_out/
 docs/step3-evidence/
+docs/*verify*.json
+logs/
+data/raw_data/
+data/processed_data/
+data/reports/
+configs/api_keys.json
 *.log
-*.json
-*.png
-*.jpg
-*.jpeg
-*.webp
+*.tmp.json
+*.temp.json
+*.local.json
+*-evidence.png
+*-screenshot.png
+generated-*.png
+generated-*.jpg
+generated-*.jpeg
+generated-*.webp
+/*-page-*.png
+/about-*.png
+/case-*.png
+/product-*.png
+/frontend/*fixed*.png
 backend/examples/
 frontend/scripts/

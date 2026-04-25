@@ -16,6 +16,8 @@ class CharacterAssetSchema(BaseModel):
     exposure_priority: str = "secondary"  # primary | secondary | background
     narrative_function: Optional[str] = None
     purpose: Optional[str] = None
+    asset_identity: Optional[str] = None
+    boundary_warnings: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -32,6 +34,8 @@ class SceneAssetSchema(BaseModel):
     exposure_priority: str = "secondary"  # primary | secondary | background
     narrative_function: Optional[str] = None
     purpose: Optional[str] = None
+    asset_identity: Optional[str] = None
+    boundary_warnings: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -47,6 +51,8 @@ class ProductAssetSchema(BaseModel):
     exposure_priority: str = "secondary"  # primary | secondary | background
     narrative_function: Optional[str] = None
     purpose: Optional[str] = None
+    asset_identity: Optional[str] = None
+    boundary_warnings: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 

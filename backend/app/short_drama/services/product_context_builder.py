@@ -45,6 +45,7 @@ class ProductContextBuilderService:
                     "product_summary": "merged_inference",
                 },
             )
+            out = _normalize_product_context(out, raw_input, image_understanding)
             logger.info("[S1_CONTEXT_BUILDER_RESULT] project_id=%s result=%s", project_id, out.model_dump())
             return out
 
@@ -63,9 +64,50 @@ class ProductContextBuilderService:
             expected_schema_name="ProductContext",
             stage="PRODUCT_CONTEXT_BUILD",
         )
-        out = ProductContextSchema.model_validate(data)
+        out = _normalize_product_context(ProductContextSchema.model_validate(data), raw_input, image_understanding)
         logger.info("[S1_CONTEXT_BUILDER_RESULT] project_id=%s result=%s", project_id, out.model_dump())
         return out
+
+
+def _normalize_product_context(
+    ctx: ProductContextSchema,
+    raw_input: ProductRawInputSchema,
+    image_understanding: ProductImageUnderstandingSchema,
+) -> ProductContextSchema:
+    data = ctx.model_dump()
+    trace = dict(ctx.source_trace or {})
+    for field, value in data.items():
+        if field in {"source_trace", "field_meta"}:
+            continue
+        has_value = bool(value) if not isinstance(value, (list, dict)) else len(value) > 0
+        if has_value and field not in trace:
+            if field in {"visual_features", "product_form", "visual_risk_notes", "consistency_notes", "extracted_from_images"}:
+                trace[field] = "image_understanding"
+            elif field in {"product_name", "product_category", "target_users", "core_selling_points", "usage_scenarios"}:
+                trace[field] = "user_input"
+            else:
+                trace[field] = "merged_inference"
+
+    conflicts = [str(x).strip() for x in image_understanding.image_conflicts if str(x).strip()]
+    notes = list(ctx.visual_risk_notes or [])
+    for c in conflicts:
+        note = c if c.lower().startswith("conflict:") else f"conflict: {c}"
+        if note not in notes:
+            notes.append(note)
+    if image_understanding.detected_visual_features:
+        merged_visual = list(dict.fromkeys([*ctx.visual_features, *image_understanding.detected_visual_features]))
+    else:
+        merged_visual = ctx.visual_features
+    if not ctx.product_form and image_understanding.detected_product_type:
+        data["product_form"] = image_understanding.detected_product_type
+        trace["product_form"] = "image_understanding"
+    data["visual_features"] = merged_visual
+    data["visual_risk_notes"] = notes
+    data["source_trace"] = trace
+    if not data.get("product_name") and raw_input.product_name_raw:
+        data["product_name"] = raw_input.product_name_raw
+        trace["product_name"] = "user_input"
+    return ProductContextSchema.model_validate(data)
 
 
 product_context_builder_service = ProductContextBuilderService()

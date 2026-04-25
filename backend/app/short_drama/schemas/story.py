@@ -13,6 +13,10 @@ class SegmentPlanItemSchema(BaseModel):
     story_beat: str = ""
     summary: str = ""
     product_exposure_mode: str = ""
+    source_selling_point: str = ""
+    product_feature_to_show: str = ""
+    target_user_trigger: str = ""
+    required_visual_elements: List[str] = Field(default_factory=list)
 
     @field_validator("duration_seconds", mode="before")
     @classmethod
@@ -37,6 +41,13 @@ class StoryBlueprintSchema(BaseModel):
     twist: str = ""
     resolution: str = ""
     segment_plan: List[SegmentPlanItemSchema] = Field(default_factory=list)
+    scene_goals: Dict[str, str] = Field(default_factory=dict)
+    product_selling_point_mapping: Dict[str, str] = Field(default_factory=dict)
+    target_user_expression: str = ""
+    visual_requirements: List[str] = Field(default_factory=list)
+    dialogue_tone: str = ""
+    must_show_elements: List[str] = Field(default_factory=list)
+    must_avoid_elements: List[str] = Field(default_factory=list)
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 

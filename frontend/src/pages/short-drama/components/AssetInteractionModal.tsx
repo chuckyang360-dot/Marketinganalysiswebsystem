@@ -307,6 +307,12 @@ export function AssetInteractionModal({
   const previewSrc = selectedImage?.imageUrl ?? asset.imageUrl;
   const canAddImage = (asset.imageCount ?? images.length) < (asset.imageLimit ?? 6);
   const roleLabelTitle = asset.kind === 'character' ? '角色定位' : asset.kind === 'scene' ? '场景定位' : '产品定位';
+  const boundaryText =
+    asset.kind === 'character'
+      ? '角色资产只描述人物本体：外观、身份、服装和基础表情；剧情动作请放在分镜。'
+      : asset.kind === 'scene'
+        ? '场景资产只描述可复用空空间：地点、布局、道具和光线；冲突/闪回/情绪节点不属于场景资产。'
+        : '产品资产只描述产品本体：形态、颜色、材质、包装和标签；人物使用和剧情画面请放在分镜。';
   const summary = asset.structureSummary ?? {
     sceneStage: '未标注剧情阶段',
     sceneForm: '未标注场景形态',
@@ -378,6 +384,9 @@ export function AssetInteractionModal({
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
             <div className="mb-2 text-[12px] text-[#6E6E73]">
               图像来源：<span className="font-medium text-[#444444]">{asset.sourceLabel}</span>
+            </div>
+            <div className="mb-3 rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[12px] leading-relaxed text-[#444444]">
+              {boundaryText}
             </div>
 
             <div className="flex flex-col gap-3">

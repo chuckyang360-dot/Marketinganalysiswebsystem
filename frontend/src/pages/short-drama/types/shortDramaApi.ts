@@ -127,6 +127,10 @@ export type SegmentPlanItemDto = {
   story_beat?: string;
   summary?: string;
   product_exposure_mode?: string;
+  source_selling_point?: string;
+  product_feature_to_show?: string;
+  target_user_trigger?: string;
+  required_visual_elements?: string[];
 };
 
 export type StoryBlueprintDto = {
@@ -139,6 +143,13 @@ export type StoryBlueprintDto = {
   twist?: string;
   resolution?: string;
   segment_plan?: SegmentPlanItemDto[];
+  scene_goals?: Record<string, string>;
+  product_selling_point_mapping?: Record<string, string>;
+  target_user_expression?: string;
+  visual_requirements?: string[];
+  dialogue_tone?: string;
+  must_show_elements?: string[];
+  must_avoid_elements?: string[];
   meta?: Record<string, unknown>;
 };
 

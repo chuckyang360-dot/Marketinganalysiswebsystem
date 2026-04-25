@@ -112,6 +112,10 @@ export interface SegmentPlanItem {
   goal: string;
   productExposureMode: string;
   summary: string;
+  sourceSellingPoint?: string;
+  productFeatureToShow?: string;
+  targetUserTrigger?: string;
+  requiredVisualElements?: string[];
   accentColor: string;
   /** 轻量 tag，如 B2B 广告节奏 */
   tags?: string[];
@@ -220,6 +224,12 @@ export interface Step4Shot {
   cameraDescription?: string;
   imagePrompt?: string;
   videoPrompt?: string;
+  productRefs?: string[];
+  mustShow?: string[];
+  mustAvoid?: string[];
+  sourceSegmentId?: string;
+  sourceSellingPoint?: string;
+  sourceVisualConstraints?: Record<string, unknown>;
 }
 
 export interface Step4SegmentItem {

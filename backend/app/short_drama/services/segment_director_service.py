@@ -90,7 +90,49 @@ def enrich_shot_via_slot_pipeline(
         video_prompt, field="video_prompt", shot_id=cur.shot_id, segment_id=seg.segment_id
     )
 
-    return cur.model_copy(update={"image_prompt": image_prompt, "video_prompt": video_prompt})
+    source_segment = next((x for x in blueprint.segment_plan if x.segment_id == seg.segment_id), None)
+    selling_point = (
+        cur.source_selling_point
+        or (source_segment.source_selling_point if source_segment else "")
+        or (blueprint.product_selling_point_mapping or {}).get(seg.segment_id, "")
+    )
+    source_visual_constraints = {
+        **(cur.source_visual_constraints or {}),
+        "s2_visual_requirements": blueprint.visual_requirements,
+        "s2_required_visual_elements": source_segment.required_visual_elements if source_segment else [],
+    }
+    must_show = list(
+        dict.fromkeys(
+            [
+                *(cur.must_show or []),
+                selling_point,
+                *(source_segment.required_visual_elements if source_segment else []),
+                *blueprint.must_show_elements,
+            ]
+        )
+    )
+    must_avoid = list(dict.fromkeys([*(cur.must_avoid or []), *blueprint.must_avoid_elements]))
+    executable_prompt = " ".join(
+        x
+        for x in [
+            video_prompt,
+            f"MUST SHOW: {'; '.join([m for m in must_show if m])}." if must_show else "",
+            f"DO NOT SHOW: {'; '.join([m for m in must_avoid if m])}." if must_avoid else "",
+            f"VISUAL CONSTRAINTS: {'; '.join(blueprint.visual_requirements[:8])}." if blueprint.visual_requirements else "",
+        ]
+        if x
+    ).strip()
+    return cur.model_copy(
+        update={
+            "image_prompt": image_prompt,
+            "video_prompt": executable_prompt,
+            "source_segment_id": cur.source_segment_id or seg.segment_id,
+            "source_selling_point": selling_point,
+            "source_visual_constraints": source_visual_constraints,
+            "must_show": [x for x in must_show if x],
+            "must_avoid": [x for x in must_avoid if x],
+        }
+    )
 
 
 def _enrich_shot_prompts(
@@ -139,19 +181,26 @@ class MockSegmentDirectorProvider:
         scene0 = assets.scenes[0].name if assets.scenes else "场景A"
         prod = assets.products[0].name if assets.products else "产品"
         ar = project_config.get("aspect_ratio") or "9:16"
+        visual_style = project_config.get("visual_style") or "cinematic"
+        s1_constraints = project_config.get("s1_visual_constraints") or {}
+        vf = [str(x) for x in s1_constraints.get("visual_features", []) if x]
+        consistency = [str(x) for x in s1_constraints.get("consistency_notes", []) if x]
+        risks = [str(x) for x in s1_constraints.get("visual_risk_notes", []) if x]
+        mapping = blueprint.product_selling_point_mapping or {}
+        plan = list(blueprint.segment_plan or [])
         return [
             SegmentScriptSchema(
                 segment_id="seg_1",
                 title="Hook",
-                duration_limit=12.0,
-                goal="共鸣开场",
+                duration_limit=max(1.0, min(10.0, (plan[0].duration_seconds if len(plan) > 0 else 6.0) or 6.0)),
+                goal=(plan[0].goal if len(plan) > 0 else "") or "共鸣开场",
                 shots=[
                     ShotSchema(
                         shot_id="s1_01",
                         shot_type="establishing",
                         scene_ref=scene0,
                         character_refs=[char0],
-                        visual_description=f"竖屏 {ar}，手持跟拍",
+                        visual_description=f"竖屏 {ar}，{visual_style}，手持跟拍",
                         scene_description=f"Busy city street in morning light near commuter foot traffic",
                         subject_description=f"{char0} as the lead talent in everyday wardrobe",
                         action_description="Walking quickly with urgency through the crowd toward work",
@@ -159,9 +208,21 @@ class MockSegmentDirectorProvider:
                         dialogue="又要迟到了…",
                         narration="",
                         emotion="窘迫",
-                        duration_seconds=6.0,
+                        duration_seconds=max(1.0, min(10.0, (plan[0].duration_seconds if len(plan) > 0 else 6.0) or 6.0)),
                         image_prompt="",
                         video_prompt="",
+                        product_refs=[prod],
+                        must_show=[blueprint.hook, mapping.get("seg_1", ""), *vf[:2]],
+                        must_avoid=risks,
+                        source_segment_id="seg_1",
+                        source_selling_point=mapping.get("seg_1", ""),
+                        source_visual_constraints={
+                            "visual_features": vf,
+                            "consistency_notes": consistency,
+                            "visual_risk_notes": risks,
+                            "aspect_ratio": ar,
+                            "visual_style": visual_style,
+                        },
                     )
                 ],
                 meta={"provider": "mock", "segment": "hook"},
@@ -169,15 +230,15 @@ class MockSegmentDirectorProvider:
             SegmentScriptSchema(
                 segment_id="seg_2",
                 title="Conflict / Build",
-                duration_limit=15.0,
-                goal="产品引入",
+                duration_limit=max(1.0, min(10.0, (plan[1].duration_seconds if len(plan) > 1 else 8.0) or 8.0)),
+                goal=(plan[1].goal if len(plan) > 1 else "") or "产品引入",
                 shots=[
                     ShotSchema(
                         shot_id="s2_01",
                         shot_type="insert",
                         scene_ref=scene0,
                         character_refs=[char0],
-                        visual_description="产品入画",
+                        visual_description=f"产品入画，{visual_style}，{ar}",
                         scene_description="Retail-leaning interior with clean surfaces and readable labels",
                         subject_description=f"{char0} presenting {prod} as the focal hero object",
                         action_description="Unboxing and trying the product with curious hand choreography",
@@ -188,6 +249,18 @@ class MockSegmentDirectorProvider:
                         duration_seconds=8.0,
                         image_prompt="",
                         video_prompt="",
+                        product_refs=[prod],
+                        must_show=[mapping.get("seg_2", ""), *vf, *consistency],
+                        must_avoid=risks,
+                        source_segment_id="seg_2",
+                        source_selling_point=mapping.get("seg_2", ""),
+                        source_visual_constraints={
+                            "visual_features": vf,
+                            "consistency_notes": consistency,
+                            "visual_risk_notes": risks,
+                            "aspect_ratio": ar,
+                            "visual_style": visual_style,
+                        },
                     )
                 ],
                 meta={"provider": "mock", "segment": "build"},
@@ -195,8 +268,8 @@ class MockSegmentDirectorProvider:
             SegmentScriptSchema(
                 segment_id="seg_3",
                 title="Twist / Resolution",
-                duration_limit=18.0,
-                goal="收尾与 CTA",
+                duration_limit=max(1.0, min(10.0, (plan[2].duration_seconds if len(plan) > 2 else 7.0) or 7.0)),
+                goal=(plan[2].goal if len(plan) > 2 else "") or "收尾与 CTA",
                 shots=[
                     ShotSchema(
                         shot_id="s3_01",
@@ -214,6 +287,18 @@ class MockSegmentDirectorProvider:
                         duration_seconds=7.0,
                         image_prompt="",
                         video_prompt="",
+                        product_refs=[prod],
+                        must_show=[mapping.get("seg_3", ""), *blueprint.must_show_elements],
+                        must_avoid=risks,
+                        source_segment_id="seg_3",
+                        source_selling_point=mapping.get("seg_3", ""),
+                        source_visual_constraints={
+                            "visual_features": vf,
+                            "consistency_notes": consistency,
+                            "visual_risk_notes": risks,
+                            "aspect_ratio": ar,
+                            "visual_style": visual_style,
+                        },
                     )
                 ],
                 meta={"provider": "mock", "segment": "resolution"},
@@ -237,6 +322,18 @@ class XAISegmentDirectorProvider:
             {"project_id": project_id, "stage": "SEGMENT_GENERATION", "provider": "xai"},
         )
         try:
+            s2_execution_blueprint = {
+                "hook": blueprint.hook,
+                "core_conflict": blueprint.core_conflict,
+                "twist": blueprint.twist,
+                "resolution": blueprint.resolution,
+                "segment_plan": [s.model_dump() for s in blueprint.segment_plan],
+                "scene_goals": blueprint.scene_goals,
+                "product_selling_point_mapping": blueprint.product_selling_point_mapping,
+                "visual_requirements": blueprint.visual_requirements,
+                "must_show_elements": blueprint.must_show_elements,
+                "must_avoid_elements": blueprint.must_avoid_elements,
+            }
             data = self._text.generate_structured_json(
                 project_id=project_id,
                 service_name="segment_director",
@@ -245,6 +342,7 @@ class XAISegmentDirectorProvider:
                     "project_id": project_id,
                     "project_config": project_config,
                     "story_blueprint": blueprint.model_dump(),
+                    "s2_execution_blueprint": s2_execution_blueprint,
                     "asset_specs": assets.model_dump(),
                 },
                 image_urls=None,
@@ -293,8 +391,12 @@ def _validate_segments(
             seg = seg.model_copy(update={"segment_id": _EXPECTED_SEGMENTS[i]})
         if not seg.shots:
             raise ShortDramaInvalidModelOutputError(f"segment {seg.segment_id} has no shots")
+        source_plan = next((x for x in blueprint.segment_plan if x.segment_id == seg.segment_id), None)
+        segment_limit = max(1.0, min(10.0, float(seg.duration_limit or (source_plan.duration_seconds if source_plan else 6.0) or 6.0)))
         enriched_shots: list[ShotSchema] = []
         for sh in seg.shots:
+            if not sh.duration_seconds or sh.duration_seconds > segment_limit:
+                sh = sh.model_copy(update={"duration_seconds": segment_limit})
             sh2 = enrich_shot_via_slot_pipeline(
                 sh, seg, assets, blueprint, project_id=project_id
             )
@@ -305,7 +407,7 @@ def _validate_segments(
                 segment_id=seg.segment_id,
             )
             enriched_shots.append(sh2)
-        out.append(seg.model_copy(update={"shots": enriched_shots}))
+        out.append(seg.model_copy(update={"duration_limit": segment_limit, "shots": enriched_shots}))
     return out
 
 
