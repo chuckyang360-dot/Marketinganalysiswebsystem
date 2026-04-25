@@ -2,7 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ri, sdColors, sdFontHeading } from '../utils/shortDramaHelpers';
 
 const STATS = [
-  { value: '2,400+', label: '短剧项目创建' },
+  { value: '2,400+', label: '短视频项目创建' },
   { value: '18+', label: '出海行业覆盖' },
   { value: '< 48h', label: '从输入到产出' },
   { value: '多平台适配', label: 'TikTok · YouTube · Meta' },
@@ -51,7 +51,7 @@ export function ShortDramaHero() {
           }}
         >
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-          AI Short Drama Engine · For Global Brands
+          VibeClip / 维播 · AI 商品营销短视频工作台
         </div>
 
         <h1
@@ -62,14 +62,14 @@ export function ShortDramaHero() {
             color: sdColors.ink,
           }}
         >
-          用故事，卖产品
+          让商品自己会讲故事
         </h1>
 
         <p
           className="mx-auto mb-4 max-w-2xl text-[18px] leading-relaxed lg:text-[20px]"
           style={{ color: '#6E6E73' }}
         >
-          为出海企业打造的 AI 短剧广告制作平台
+          为出海企业打造的 AI 商品营销短视频工作台
         </p>
         <p className="mx-auto mb-14 max-w-xl text-[15px] leading-relaxed" style={{ color: '#AEAEB2' }}>
           从产品资料到剧情、角色、场景、分镜与视频，一站式完成
@@ -83,7 +83,7 @@ export function ShortDramaHero() {
             style={{ background: sdColors.ink }}
           >
             <i className={ri('ri-add-circle-line', 'text-[14px]')} aria-hidden />
-            开始创建短剧
+            开始创建
           </button>
           <Link
             to="/cases"

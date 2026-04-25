@@ -10,10 +10,16 @@ export type ShortDramaProjectDto = {
   style?: string | null;
   visual_style?: string | null;
   aspect_ratio?: string | null;
-  last_active_step?: 'step_1' | 'step_2' | 'step_3' | 'step_4' | 'overview' | null;
+  last_active_step?: 'step_0' | 'step_1' | 'step_2' | 'step_3' | 'step_4' | 'overview' | null;
   step_status?: Record<string, string>;
-  overall_status?: 'draft' | 'stale' | 'generating' | 'completed' | null;
+  overall_status?: 'draft' | 'stale' | 'generating' | 'completed' | 'failed' | null;
   final_video_url?: string | null;
+  cover_asset?: {
+    asset_type: 'character' | 'product' | 'scene' | null;
+    name: string | null;
+    image_url: string | null;
+    status: 'ready' | 'missing';
+  };
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -305,6 +311,34 @@ export type GenerateSegmentScriptsResponseDto = {
   project_id: number;
   segments: unknown[];
   record_ids: number[];
+};
+
+export type UpdateSegmentShotBody = {
+  project_id: number;
+  segment_title?: string;
+  segment_goal?: string;
+  duration_limit?: number;
+  action_description?: string;
+  dialogue?: string;
+  voiceover?: string;
+  emotion?: string;
+  video_prompt?: string;
+  must_show?: string[];
+  must_avoid?: string[];
+  duration_seconds?: number;
+  manual_character_refs?: string[];
+  manual_scene_ref?: string;
+  manual_product_refs?: string[];
+  manual_video_prompt?: string;
+};
+
+export type UpdateSegmentShotResponseDto = {
+  project_id: number;
+  segment_id: string;
+  shot_id: string;
+  segment: Record<string, unknown>;
+  shot: Record<string, unknown>;
+  needs_regeneration: boolean;
 };
 
 export type GenerateAssetSpecsResponseDto = {

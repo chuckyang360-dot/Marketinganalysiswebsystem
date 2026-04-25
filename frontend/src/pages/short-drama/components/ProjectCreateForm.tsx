@@ -5,7 +5,7 @@ const DURATIONS: DurationOption[] = ['30s', '45s', '60s'];
 
 const FORMATS: { value: ProjectFormat; label: string; desc: string }[] = [
   { value: 'single_ad', label: '单条广告', desc: '独立完整的广告短片' },
-  { value: 'series', label: '系列短剧', desc: '多集连载剧情内容' },
+  { value: 'series', label: '系列短视频', desc: '多集连载营销内容' },
 ];
 
 const PLOT: { value: PlotStyle; label: string; icon: string }[] = [
@@ -67,7 +67,7 @@ export function ProjectCreateForm({
           className={inputCls}
           value={projectName}
           onChange={(e) => setProjectName(e.target.value)}
-          placeholder="例如：夏季新品推广竖屏短剧"
+          placeholder="例如：夏季新品推广竖屏短视频"
         />
       </div>
 

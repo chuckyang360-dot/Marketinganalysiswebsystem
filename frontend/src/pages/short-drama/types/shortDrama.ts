@@ -213,29 +213,43 @@ export interface StoryBlueprintAnalysisItem {
 /** Framer step4：片段与镜头（片段视频页） */
 export interface Step4Shot {
   id: number;
+  backendShotId: string;
   desc: string;
   action: string;
   dialogue: string;
   emotion: string;
   duration: string;
+  durationSeconds: number;
   /** 结构化槽位（新数据或 pipeline 推断）；旧数据可能部分为空 */
   sceneDescription?: string;
   subjectDescription?: string;
   cameraDescription?: string;
   imagePrompt?: string;
   videoPrompt?: string;
+  manualVideoPrompt?: string;
+  characterRefs?: string[];
+  manualCharacterRefs?: string[];
+  sceneRef?: string;
+  manualSceneRef?: string;
   productRefs?: string[];
+  manualProductRefs?: string[];
   mustShow?: string[];
   mustAvoid?: string[];
   sourceSegmentId?: string;
   sourceSellingPoint?: string;
   sourceVisualConstraints?: Record<string, unknown>;
+  executionInput?: Record<string, unknown>;
+  promptBudget?: Record<string, unknown>;
+  providerError?: string;
+  providerResponse?: Record<string, unknown>;
 }
 
 export interface Step4SegmentItem {
   id: number;
+  backendRecordId?: number;
   name: string;
   duration: string;
+  durationLimit: number;
   goal: string;
   characters: string[];
   scene: string;

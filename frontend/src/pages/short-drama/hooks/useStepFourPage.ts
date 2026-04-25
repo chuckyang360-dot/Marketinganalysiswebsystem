@@ -9,9 +9,10 @@ import {
   mergeShortDramaProjectVideo,
   ShortDramaApiError,
   touchShortDramaProjectStep,
+  updateShortDramaSegmentShot,
 } from '../services/shortDramaApi';
 import type { Step4SegmentItem, Step4VideoStatus, Step4VideoStatusMap } from '../types/shortDrama';
-import type { PipelineSummaryDto, RenderJobStatusResponseDto } from '../types/shortDramaApi';
+import type { PipelineSummaryDto, RenderJobStatusResponseDto, UpdateSegmentShotBody } from '../types/shortDramaApi';
 import { mergeVideoStatus, pipelineAssetsToStepFourLibraryVm, pipelineToStepFourViewModel, pipelineUsesMockTestPatternVideo, type StepFourAssetLibraryVm } from '../utils/stepFourAdapters';
 import { resolvePublicMediaUrl } from '../utils/shortDramaMedia';
 import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
@@ -459,6 +460,26 @@ export function useStepFourPage() {
     [runSingleGenerate],
   );
 
+  const handleSaveSegmentShot = useCallback(
+    async (segId: number, shotId: string, body: Omit<UpdateSegmentShotBody, 'project_id'>) => {
+      if (projectId == null) {
+        throw new ShortDramaApiError('项目不存在，无法保存片段修改', 400);
+      }
+      const seg = segments.find((s) => s.id === segId);
+      if (!seg?.backendSegmentId) {
+        throw new ShortDramaApiError(SHORT_DRAMA_UI.stepFour.segmentNotSynced, 400);
+      }
+      const res = await updateShortDramaSegmentShot(seg.backendSegmentId, shotId, {
+        project_id: projectId,
+        ...body,
+      });
+      setSegmentStatusOverrides((prev) => ({ ...prev, [segId]: 'idle' }));
+      await refreshPipeline();
+      return res;
+    },
+    [projectId, refreshPipeline, segments],
+  );
+
   const mergeFinalVideo = useCallback(
     async (opts: { buttonType: Step4MergeButtonType; navigateOnSuccess: boolean }) => {
       if (projectId == null) return;
@@ -530,6 +551,7 @@ export function useStepFourPage() {
       id: newId,
       name: `S${newId} · 新片段`,
       duration: '待定',
+      durationLimit: 0,
       goal: '请填写片段目标',
       characters: [],
       scene: '待设定',
@@ -596,6 +618,7 @@ export function useStepFourPage() {
     handleGenerateAll,
     handleGenerateVideo,
     handleRegenerate,
+    handleSaveSegmentShot,
     mergeFinalVideo,
     mergePrimaryActionsEnabled,
     canCallMergeApi,

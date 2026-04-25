@@ -12,10 +12,56 @@ import type {
 const SEGMENT_COLORS = ['#B45309', '#DC2626', '#047857', '#334155', '#9333EA', '#0F766E'];
 
 export type StepFourAssetLibraryVm = {
-  characters: { name: string; role: string; img: string | null }[];
-  scenes: { name: string; type: string }[];
-  products: { name: string; type: string }[];
+  characters: {
+    id: number;
+    name: string;
+    role: string;
+    desc: string;
+    img: string | null;
+    visualPrompt: string;
+    imageSource: string;
+    voice: string;
+    meta: Record<string, unknown>;
+  }[];
+  scenes: {
+    id: number;
+    name: string;
+    type: string;
+    desc: string;
+    img: string | null;
+    visualPrompt: string;
+    imageSource: string;
+    sceneForm?: string | null;
+    meta: Record<string, unknown>;
+  }[];
+  products: {
+    id: number;
+    name: string;
+    type: string;
+    desc: string;
+    img: string | null;
+    visualPrompt: string;
+    imageSource: string;
+    meta: Record<string, unknown>;
+  }[];
 };
+
+function metaRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function pickString(meta: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const v = meta[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function imageSourceLabel(img: string | null, anchorId?: number | null): string {
+  if (!img) return '未生成图片';
+  return anchorId ? `视觉锚点 #${anchorId}` : '资产库图片';
+}
 
 export function pipelineAssetsToStepFourLibraryVm(
   assets: PipelineAssetsBundleDto | null | undefined,
@@ -23,18 +69,45 @@ export function pipelineAssetsToStepFourLibraryVm(
   if (!assets) return { characters: [], scenes: [], products: [] };
 
   const characters = assets.characters.map((c) => {
-    return { name: c.name, role: c.role_type?.trim() || '角色', img: getAssetThumbnailUrl(c) };
+    const meta = metaRecord(c.meta);
+    return {
+      id: c.id,
+      name: c.name,
+      role: c.role_type?.trim() || '角色',
+      desc: (c.description ?? '').trim(),
+      img: getAssetThumbnailUrl(c),
+      visualPrompt: (c.visual_prompt ?? '').trim(),
+      imageSource: imageSourceLabel(getAssetThumbnailUrl(c), c.visual_anchor_image_id),
+      voice: pickString(meta, ['voice_style', 'voiceStyle', 'voice']) || '未指定',
+      meta,
+    };
   });
 
   const scenes = assets.scenes.map((s) => ({
+    id: s.id,
     name: s.name,
     type: s.scene_type?.trim() || '场景',
+    desc: (s.description ?? '').trim(),
+    img: getAssetThumbnailUrl(s),
+    visualPrompt: (s.visual_prompt ?? '').trim(),
+    imageSource: imageSourceLabel(getAssetThumbnailUrl(s), s.visual_anchor_image_id),
+    sceneForm: s.scene_form,
+    meta: metaRecord(s.meta),
   }));
 
-  const products = assets.products.map((p) => ({
-    name: p.name,
-    type: '产品',
-  }));
+  const products = assets.products.map((p) => {
+    const meta = metaRecord(p.meta);
+    return {
+      id: p.id,
+      name: p.name,
+      type: p.product_role?.trim() || pickString(meta, ['product_type', 'productType', 'type']) || '产品',
+      desc: (p.description ?? '').trim(),
+      img: getAssetThumbnailUrl(p),
+      visualPrompt: (p.visual_prompt ?? '').trim(),
+      imageSource: imageSourceLabel(getAssetThumbnailUrl(p), p.visual_anchor_image_id),
+      meta,
+    };
+  });
 
   return { characters, scenes, products };
 }
@@ -59,11 +132,13 @@ function sortSegmentRows(rows: SegmentScriptPipelineRowDto[]): SegmentScriptPipe
 const EMPTY_SHOT_PLACEHOLDER: Step4Shot[] = [
   {
     id: 1,
+    backendShotId: 'shot_1',
     desc: '—',
     action: '',
     dialogue: '',
     emotion: '',
     duration: '—',
+    durationSeconds: 0,
   },
 ];
 
@@ -107,6 +182,10 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
 
     return {
       id: i + 1,
+      backendShotId:
+        (typeof s.shot_id === 'string' && s.shot_id.trim()) ||
+        (typeof s.shot_id === 'number' ? String(s.shot_id) : '') ||
+        `shot_${i + 1}`,
       desc,
       action: typeof s.action_description === 'string' ? s.action_description : '',
       dialogue:
@@ -115,17 +194,46 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
         '',
       emotion: typeof s.emotion === 'string' ? s.emotion : '',
       duration: durationStr,
+      durationSeconds:
+        typeof dur === 'number' && Number.isFinite(dur)
+          ? dur
+          : typeof dur === 'string' && Number.isFinite(Number(dur))
+            ? Number(dur)
+            : 0,
       sceneDescription,
       subjectDescription,
       cameraDescription,
       imagePrompt,
       videoPrompt,
+      manualVideoPrompt:
+        typeof s.manual_video_prompt === 'string' && s.manual_video_prompt.trim()
+          ? s.manual_video_prompt.trim()
+          : undefined,
+      characterRefs: stringArray(s.character_refs),
+      manualCharacterRefs: stringArray(s.manual_character_refs),
+      sceneRef: typeof s.scene_ref === 'string' && s.scene_ref.trim() ? s.scene_ref.trim() : undefined,
+      manualSceneRef:
+        typeof s.manual_scene_ref === 'string' && s.manual_scene_ref.trim() ? s.manual_scene_ref.trim() : undefined,
       productRefs: stringArray(s.product_refs),
+      manualProductRefs: stringArray(s.manual_product_refs),
       mustShow: stringArray(s.must_show),
       mustAvoid: stringArray(s.must_avoid),
       sourceSegmentId: typeof s.source_segment_id === 'string' ? s.source_segment_id : undefined,
       sourceSellingPoint: typeof s.source_selling_point === 'string' ? s.source_selling_point : undefined,
       sourceVisualConstraints,
+      executionInput:
+        s.execution_input && typeof s.execution_input === 'object' && !Array.isArray(s.execution_input)
+          ? (s.execution_input as Record<string, unknown>)
+          : undefined,
+      promptBudget:
+        s.prompt_budget && typeof s.prompt_budget === 'object' && !Array.isArray(s.prompt_budget)
+          ? (s.prompt_budget as Record<string, unknown>)
+          : undefined,
+      providerError: typeof s.provider_error === 'string' ? s.provider_error : undefined,
+      providerResponse:
+        s.provider_response && typeof s.provider_response === 'object' && !Array.isArray(s.provider_response)
+          ? (s.provider_response as Record<string, unknown>)
+          : undefined,
     };
   });
 }
@@ -151,8 +259,15 @@ export function segmentScriptDtoToStepSegmentViewModel(
 
   return {
     id: uiId,
+    backendRecordId: row.id,
     name: title,
     duration,
+    durationLimit:
+      typeof durLimit === 'number' && Number.isFinite(durLimit)
+        ? durLimit
+        : typeof durLimit === 'string' && Number.isFinite(Number(durLimit))
+          ? Number(durLimit)
+          : 0,
     goal,
     characters: [],
     scene: '—',

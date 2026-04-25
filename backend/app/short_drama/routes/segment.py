@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,7 +11,13 @@ from ..http_errors import raise_short_drama_http
 from ..models import SegmentScriptRecord
 from ..schemas.asset import AssetSpecsBundleSchema, CharacterAssetSchema, ProductAssetSchema, SceneAssetSchema
 from ..schemas.product import ProductContextSchema
-from ..schemas.segment import GenerateSegmentsRequest, GenerateSegmentsResponse, SegmentScriptSchema
+from ..schemas.segment import (
+    GenerateSegmentsRequest,
+    GenerateSegmentsResponse,
+    SegmentScriptSchema,
+    UpdateSegmentShotRequest,
+    UpdateSegmentShotResponse,
+)
 from ..schemas.story import StoryBlueprintSchema
 from ..services.read_models import (
     latest_product_context,
@@ -28,6 +35,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 _SECONDARY_MUST_SHOW_LIMIT = 3
+
+
+def _clean_string_list(values: list[str] | None) -> list[str]:
+    if values is None:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        item = str(raw or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
 
 
 def _purpose_rank(v: str | None) -> int:
@@ -272,3 +293,107 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             status_code=e.status_code,
         )
         raise
+
+
+@router.patch("/{segment_id}/shots/{shot_id}", response_model=UpdateSegmentShotResponse)
+async def update_segment_shot(
+    segment_id: str,
+    shot_id: str,
+    body: UpdateSegmentShotRequest,
+    db: Session = Depends(get_db),
+):
+    log_api_request(
+        logger,
+        "PATCH /segment/{segment_id}/shots/{shot_id}",
+        project_id=body.project_id,
+        segment_id=segment_id,
+        shot_id=shot_id,
+    )
+    rec = (
+        db.query(SegmentScriptRecord)
+        .filter(
+            SegmentScriptRecord.project_id == body.project_id,
+            SegmentScriptRecord.segment_id == segment_id,
+        )
+        .first()
+    )
+    if not rec:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Segment {segment_id!r} not found")
+
+    script = dict(rec.script_json) if isinstance(rec.script_json, dict) else {}
+    shots = script.get("shots")
+    if not isinstance(shots, list):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Segment has no editable shots")
+
+    target_index = -1
+    for idx, raw in enumerate(shots):
+        shot = raw if isinstance(raw, dict) else {}
+        sid = str(shot.get("shot_id") or f"shot_{idx + 1}")
+        if sid == shot_id or str(idx + 1) == shot_id:
+            target_index = idx
+            break
+    if target_index < 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Shot {shot_id!r} not found")
+
+    if body.segment_title is not None:
+        script["title"] = body.segment_title.strip()
+    if body.segment_goal is not None:
+        script["goal"] = body.segment_goal.strip()
+    if body.duration_limit is not None:
+        script["duration_limit"] = float(body.duration_limit or 0)
+
+    shot = dict(shots[target_index]) if isinstance(shots[target_index], dict) else {}
+    text_updates = {
+        "action_description": body.action_description,
+        "dialogue": body.dialogue if body.dialogue is not None else body.voiceover,
+        "emotion": body.emotion,
+        "video_prompt": body.video_prompt,
+        "manual_video_prompt": body.manual_video_prompt,
+        "manual_scene_ref": body.manual_scene_ref,
+    }
+    for key, value in text_updates.items():
+        if value is not None:
+            shot[key] = str(value).strip()
+    if body.duration_seconds is not None:
+        shot["duration_seconds"] = float(body.duration_seconds or 0)
+    if body.must_show is not None:
+        shot["must_show"] = _clean_string_list(body.must_show)
+    if body.must_avoid is not None:
+        shot["must_avoid"] = _clean_string_list(body.must_avoid)
+    if body.manual_character_refs is not None:
+        shot["manual_character_refs"] = _clean_string_list(body.manual_character_refs)
+    if body.manual_product_refs is not None:
+        shot["manual_product_refs"] = _clean_string_list(body.manual_product_refs)
+    shot.setdefault("shot_id", shot_id)
+    shot["manual_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    shots[target_index] = shot
+    script["shots"] = shots
+    meta = dict(script.get("meta") or {})
+    meta["needs_regeneration"] = True
+    meta["dirty_segment_id"] = segment_id
+    meta["dirty_shot_id"] = shot_id
+    meta["manual_updated_at"] = shot["manual_updated_at"]
+    script["meta"] = meta
+
+    rec.script_json = script
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+
+    log_api_success(
+        logger,
+        "PATCH /segment/{segment_id}/shots/{shot_id}",
+        project_id=body.project_id,
+        segment_id=segment_id,
+        shot_id=shot_id,
+        needs_regeneration=True,
+    )
+    return UpdateSegmentShotResponse(
+        project_id=body.project_id,
+        segment_id=segment_id,
+        shot_id=shot_id,
+        segment=script,
+        shot=shot,
+        needs_regeneration=True,
+    )

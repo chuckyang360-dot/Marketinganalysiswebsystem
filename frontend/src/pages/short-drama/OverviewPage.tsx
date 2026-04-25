@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useOverviewExport } from './hooks/useOverviewExport';
 import { useOverviewPage } from './hooks/useOverviewPage';
+import { VibeClipLogo } from './components/VibeClipLogo';
 import { SHORT_DRAMA_UI } from './utils/shortDramaUiCopy';
 import { withProjectQuery } from './utils/shortDramaRoutes';
 
@@ -116,14 +117,9 @@ export function ShortDramaOverviewPage() {
       >
         <div className="flex items-center gap-3">
           <button type="button" onClick={() => navigate('/short-drama/projects')} className="flex items-center gap-2 cursor-pointer">
-            <div
-              className="w-7 h-7 flex items-center justify-center rounded-lg"
-              style={{ background: 'linear-gradient(135deg, #1D1D1F, #374151)' }}
-            >
-              <i className="ri-film-line text-white text-[13px]" />
-            </div>
+            <VibeClipLogo compact />
             <span className="text-[14px] font-bold" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
-              ShortDrama
+              VibeClip
             </span>
           </button>
           <span style={{ color: '#D1D1D6' }}>/</span>

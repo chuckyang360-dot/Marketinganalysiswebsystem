@@ -115,7 +115,7 @@ export const mockAudience: AudienceItem[] = [
   {
     id: 'a3',
     title: '独立站团队',
-    description: '快速生产系列化短剧内容，建立品牌内容资产池，降低制作成本。',
+    description: '快速生产系列化商品营销短视频，建立品牌内容资产池，降低制作成本。',
     icon: 'ri-team-line',
     accentColor: '#047857',
     examples: ['内容团队', '品牌运营', '市场部门'],
@@ -123,7 +123,7 @@ export const mockAudience: AudienceItem[] = [
   {
     id: 'a4',
     title: '海外内容营销团队',
-    description: '将 Campaign Brief 转化为可执行的短剧脚本与分镜资产。',
+    description: '将 Campaign Brief 转化为可执行的短视频脚本与分镜资产。',
     icon: 'ri-megaphone-line',
     accentColor: '#334155',
     examples: ['营销代理', '内容机构', 'MCN 公司'],

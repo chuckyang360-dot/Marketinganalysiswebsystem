@@ -450,7 +450,7 @@ export function ShortDramaAssetsPage() {
           <div>
             <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: '#8E8E93' }}>STEP 03</span>
             <h1 className="text-2xl font-black mt-0.5" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>角色与场景资产</h1>
-            <p className="text-[13px] mt-1" style={{ color: '#8E8E93' }}>构建可复用的视觉资产库，统一整部短剧的视觉风格</p>
+            <p className="text-[13px] mt-1" style={{ color: '#8E8E93' }}>构建可复用的视觉资产库，统一整部商品营销短视频的视觉风格</p>
           </div>
         </div>
         <div className="px-6 lg:px-10 pt-5">

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ri, sdColors, sdFontHeading } from '../utils/shortDramaHelpers';
+import { sdColors } from '../utils/shortDramaHelpers';
+import { VibeClipLogo } from './VibeClipLogo';
 
 type HeaderMode = 'landing' | 'workflow';
 
@@ -39,24 +40,9 @@ export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDra
             onClick={() => navigate('/short-drama')}
             className="flex cursor-pointer items-center gap-2 rounded-lg text-left transition-transform hover:scale-[1.02]"
           >
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-lg"
-              style={{ background: `linear-gradient(135deg, ${sdColors.ink}, ${sdColors.inkMuted})` }}
-            >
-              <i className={ri('ri-film-line', 'text-[13px] text-white')} aria-hidden />
-            </div>
-            <span className="truncate text-[14px] font-bold" style={{ ...sdFontHeading, color: sdColors.ink }}>
-              ShortDrama
-              <span
-                className="ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold"
-                style={{
-                  background: sdColors.surface2,
-                  color: sdColors.textTertiary,
-                  border: `1px solid ${sdColors.border}`,
-                }}
-              >
-                by GlobalPulseAI
-              </span>
+            <VibeClipLogo />
+            <span className="hidden rounded px-1.5 py-0.5 text-[11px] font-semibold text-[#6B7280] md:inline">
+              by GlobalPulseAI
             </span>
           </button>
         </div>
@@ -78,7 +64,7 @@ export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDra
             ))}
           </nav>
         ) : (
-          <div className="hidden text-[12px] font-medium text-[#8E8E93] md:block">短剧创作工作台</div>
+          <div className="hidden text-[12px] font-medium text-[#8E8E93] md:block">AI 商品营销短视频工作台</div>
         )}
 
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">

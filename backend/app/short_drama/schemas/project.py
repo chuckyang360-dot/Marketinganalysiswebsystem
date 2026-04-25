@@ -13,6 +13,13 @@ class CreateShortDramaProjectRequest(BaseModel):
     aspect_ratio: Optional[str] = Field(None, description="e.g. 9:16")
 
 
+class ProjectCoverAsset(BaseModel):
+    asset_type: Optional[Literal["character", "product", "scene"]] = None
+    name: Optional[str] = None
+    image_url: Optional[str] = None
+    status: Literal["ready", "missing"] = "missing"
+
+
 class ShortDramaProjectResponse(BaseModel):
     id: int
     user_id: int
@@ -23,10 +30,11 @@ class ShortDramaProjectResponse(BaseModel):
     style: Optional[str] = None
     visual_style: Optional[str] = None
     aspect_ratio: Optional[str] = None
-    last_active_step: Optional[Literal["step_1", "step_2", "step_3", "step_4", "overview"]] = None
+    last_active_step: Optional[Literal["step_0", "step_1", "step_2", "step_3", "step_4", "overview"]] = None
     step_status: Dict[str, str] = Field(default_factory=dict)
-    overall_status: Optional[Literal["draft", "stale", "generating", "completed"]] = None
+    overall_status: Optional[Literal["draft", "stale", "generating", "completed", "failed"]] = None
     final_video_url: Optional[str] = None
+    cover_asset: ProjectCoverAsset = Field(default_factory=ProjectCoverAsset)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

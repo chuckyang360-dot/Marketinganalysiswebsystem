@@ -5,18 +5,74 @@ import { ShortDramaLayout } from './components/ShortDramaLayout';
 import { listShortDramaProjects, ShortDramaApiError } from './services/shortDramaApi';
 import type { ShortDramaProjectDto } from './types/shortDramaApi';
 
-function statusLabel(status: ShortDramaProjectDto['overall_status']): string {
-  if (status === 'completed') return 'completed';
-  if (status === 'generating') return 'generating';
-  if (status === 'stale') return 'stale';
-  return 'draft';
+const PAGE_SIZE = 6;
+
+type ProjectStatusFilter = 'all' | 'draft' | 'generating' | 'stale' | 'completed' | 'failed';
+
+const STATUS_FILTERS: { key: ProjectStatusFilter; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'draft', label: '草稿' },
+  { key: 'generating', label: '生成中' },
+  { key: 'stale', label: '需更新' },
+  { key: 'completed', label: '已完成' },
+  { key: 'failed', label: '异常' },
+];
+
+function overallStatusLabel(status: ShortDramaProjectDto['overall_status']): string {
+  if (status === 'completed') return '已完成';
+  if (status === 'generating') return '生成中';
+  if (status === 'stale') return '需更新';
+  if (status === 'failed') return '异常';
+  return '草稿';
+}
+
+function overallStatusTone(status: ShortDramaProjectDto['overall_status']): { bg: string; color: string; border: string } {
+  if (status === 'completed') return { bg: 'rgba(4,120,87,0.08)', color: '#047857', border: 'rgba(4,120,87,0.18)' };
+  if (status === 'generating') return { bg: 'rgba(180,83,9,0.08)', color: '#B45309', border: 'rgba(180,83,9,0.18)' };
+  if (status === 'stale') return { bg: 'rgba(217,119,6,0.09)', color: '#92400E', border: 'rgba(217,119,6,0.22)' };
+  if (status === 'failed') return { bg: 'rgba(220,38,38,0.08)', color: '#B91C1C', border: 'rgba(220,38,38,0.2)' };
+  return { bg: '#F5F5F7', color: '#444444', border: '#EAEAEA' };
 }
 
 function actionLabel(status: ShortDramaProjectDto['overall_status']): string {
-  if (status === 'completed') return '查看成片';
+  if (status === 'completed') return '查看项目';
   if (status === 'stale') return '继续更新';
   if (status === 'generating') return '查看进度';
+  if (status === 'failed') return '继续修复';
   return '继续编辑';
+}
+
+function stepLabel(step: ShortDramaProjectDto['last_active_step']): string {
+  if (step === 'step_0') return '项目设置';
+  if (step === 'step_1') return '产品输入';
+  if (step === 'step_2') return '剧本大纲';
+  if (step === 'step_3') return '角色场景';
+  if (step === 'step_4') return '片段视频';
+  if (step === 'overview') return '项目总览';
+  return '项目设置';
+}
+
+function step4StatusLabel(status: string | undefined): string {
+  if (status === 'generating') return '视频生成中';
+  if (status === 'stale') return '视频需更新';
+  if (status === 'completed') return '视频已完成';
+  if (status === 'failed') return '视频失败';
+  return '视频未开始';
+}
+
+function formatUpdatedAt(value: string | null | undefined): string {
+  if (!value) return '暂无更新时间';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function coverFallbackText(p: ShortDramaProjectDto): string {
+  const t = p.cover_asset?.asset_type;
+  if (t === 'product') return '暂无角色封面，已使用产品图';
+  if (t === 'scene') return '暂无角色封面，已使用场景图';
+  return '完成 S3 后会自动生成项目封面';
 }
 
 export function ShortDramaProjectsPage() {
@@ -25,6 +81,8 @@ export function ShortDramaProjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [projects, setProjects] = useState<ShortDramaProjectDto[]>([]);
+  const [activeFilter, setActiveFilter] = useState<ProjectStatusFilter>('all');
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -45,57 +103,206 @@ export function ShortDramaProjectsPage() {
   }, [user?.id]);
 
   const sorted = useMemo(() => projects, [projects]);
+  const statusCounts = useMemo(() => {
+    const counts: Record<ProjectStatusFilter, number> = {
+      all: sorted.length,
+      draft: 0,
+      generating: 0,
+      stale: 0,
+      completed: 0,
+      failed: 0,
+    };
+    for (const project of sorted) {
+      const status = project.overall_status;
+      if (status === 'draft' || status === 'generating' || status === 'stale' || status === 'completed' || status === 'failed') {
+        counts[status] += 1;
+      }
+    }
+    return counts;
+  }, [sorted]);
+
+  const filteredProjects = useMemo(() => {
+    if (activeFilter === 'all') return sorted;
+    return sorted.filter((project) => project.overall_status === activeFilter);
+  }, [activeFilter, sorted]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredProjects.length / PAGE_SIZE));
+  const pagedProjects = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredProjects.slice(start, start + PAGE_SIZE);
+  }, [currentPage, filteredProjects]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(1);
+  }, [currentPage, totalPages]);
 
   return (
     <ShortDramaLayout headerMode="landing">
       <div className="min-h-screen bg-[#F7F8FA] px-6 py-10" style={{ fontFamily: "'Inter', sans-serif" }}>
         <div className="mx-auto max-w-5xl">
         <div className="mb-6">
-          <h1 className="text-2xl font-black text-[#1D1D1F]" style={{ fontFamily: "'Syne', sans-serif" }}>ShortDrama 项目</h1>
-          <p className="mt-1 text-[13px] text-[#8E8E93]">继续编辑草稿、处理中和已完成项目。</p>
+          <div>
+            <h1 className="text-2xl font-black text-[#1D1D1F]" style={{ fontFamily: "'Syne', sans-serif" }}>VibeClip 项目</h1>
+            <p className="mt-1 text-[13px] text-[#8E8E93]">继续编辑草稿、处理中和已完成的商品营销短视频项目。</p>
+          </div>
         </div>
         {!user?.id ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-[13px] text-amber-900">请先登录后查看项目列表。</div> : null}
         {loading ? <div className="text-[13px] text-[#8E8E93]">加载中...</div> : null}
         {error ? <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-[13px] text-red-800">{error}</div> : null}
-          <div className="space-y-3">
-            {sorted.map((p) => {
-              console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft' });
+          <div className="mb-5 flex flex-wrap gap-2">
+            {STATUS_FILTERS.map((filter) => {
+              const active = activeFilter === filter.key;
+              return (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => setActiveFilter(filter.key)}
+                  className="rounded-full px-3 py-1.5 text-[12px] font-semibold transition-colors duration-150"
+                  style={{
+                    background: active ? '#1D1D1F' : '#ffffff',
+                    color: active ? '#ffffff' : '#444444',
+                    border: `1px solid ${active ? '#1D1D1F' : '#EAEAEA'}`,
+                    boxShadow: active ? '0 6px 18px rgba(29,29,31,0.12)' : 'none',
+                  }}
+                >
+                  {filter.label} <span style={{ opacity: active ? 0.82 : 0.62 }}>{statusCounts[filter.key]}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {pagedProjects.map((p) => {
+              const tone = overallStatusTone(p.overall_status);
+              const cover = p.cover_asset;
+              console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft', cover_asset_type: cover?.asset_type || null });
               return (
                 <div
                   key={p.id}
-                  className="w-full rounded-2xl border border-[#EAEAEA] bg-white px-5 py-4"
+                  className="overflow-hidden rounded-2xl border border-[#EAEAEA] bg-white shadow-[0_8px_28px_rgba(15,23,42,0.04)] transition-transform duration-150 hover:-translate-y-0.5"
                 >
-                  <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-[2fr_1.2fr_1.2fr_auto]">
-                    <div className="min-w-0">
-                      <p className="truncate text-[15px] font-semibold text-[#1D1D1F]">{p.project_name || `项目 ${p.id}`}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-3 text-[12px] text-[#8E8E93]">
-                        <span>project_id: {p.id}</span>
-                        <span>updated_at: {p.updated_at || '-'}</span>
+                  <div className="relative h-44 bg-[#F5F5F7]">
+                    {cover?.image_url ? (
+                      <img
+                        src={cover.image_url}
+                        alt={cover.name || p.project_name || `项目 ${p.id}`}
+                        className="h-full w-full object-cover"
+                        style={{ objectPosition: cover.asset_type === 'character' ? 'center top' : 'center center' }}
+                      />
+                    ) : (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#AEAEB2]">
+                          <i className="ri-user-star-line text-[22px]" />
+                        </div>
+                        <p className="text-[13px] font-semibold text-[#6E6E73]">待生成角色资产</p>
+                        <p className="text-[11px] leading-relaxed text-[#AEAEB2]">{coverFallbackText(p)}</p>
+                      </div>
+                    )}
+                    <span
+                      className="absolute right-3 top-3 rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur"
+                      style={{ background: tone.bg, color: tone.color, border: `1px solid ${tone.border}` }}
+                    >
+                      {overallStatusLabel(p.overall_status)}
+                    </span>
+                    {cover?.image_url && cover.asset_type !== 'character' ? (
+                      <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-2.5 py-1 text-[10.5px] text-[#6E6E73]">
+                        {coverFallbackText(p)}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="p-4">
+                    <div className="mb-3">
+                      <h2 className="truncate text-[15px] font-bold text-[#1D1D1F]">{p.project_name || `项目 ${p.id}`}</h2>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-[#8E8E93]">
+                        <span>项目 ID：{p.id}</span>
+                        <span>更新于：{formatUpdatedAt(p.updated_at)}</span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-1 text-[12px] text-[#6E6E73]">
-                      <span>last_active_step: {p.last_active_step || 'step_1'}</span>
-                      <span>overall_status: {statusLabel(p.overall_status)}</span>
+
+                    <div className="space-y-2 rounded-xl bg-[#F7F8FA] p-3 text-[12px] text-[#444444]">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[#8E8E93]">当前步骤</span>
+                        <span className="font-medium text-[#1D1D1F]">{stepLabel(p.last_active_step)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[#8E8E93]">视频状态</span>
+                        <span className="font-medium text-[#1D1D1F]">{step4StatusLabel(p.step_status?.step_4)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[#8E8E93]">最终成片</span>
+                        <span className="font-medium text-[#1D1D1F]">{p.final_video_url ? '已生成' : '未生成'}</span>
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-1 text-[12px] text-[#6E6E73]">
-                      <span>final_video: {p.final_video_url ? 'yes' : 'no'}</span>
-                      <span>step4_status: {p.step_status?.step_4 || 'not_started'}</span>
-                    </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="rounded-full bg-[#F5F5F7] px-2.5 py-1 text-[11px] text-[#444444]">{statusLabel(p.overall_status)}</span>
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/short-drama/projects/${p.id}`)}
-                        className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
-                      >
-                        {actionLabel(p.overall_status)}
-                      </button>
-                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/short-drama/projects/${p.id}`)}
+                      className="mt-4 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#1D1D1F] px-4 py-2.5 text-[13px] font-semibold text-white transition-colors duration-150 hover:bg-[#374151]"
+                    >
+                      {actionLabel(p.overall_status)}
+                      <i className="ri-arrow-right-line text-[12px]" />
+                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
+          {!loading && sorted.length === 0 && !error ? (
+            <div className="rounded-2xl border border-dashed border-[#D1D1D6] bg-white px-6 py-10 text-center">
+              <p className="text-[14px] font-semibold text-[#1D1D1F]">还没有 VibeClip 项目</p>
+              <p className="mt-1 text-[12px] text-[#8E8E93]">创建项目后，这里会展示角色封面和生成进度。</p>
+            </div>
+          ) : null}
+          {!loading && sorted.length > 0 && filteredProjects.length === 0 && !error ? (
+            <div className="rounded-2xl border border-dashed border-[#D1D1D6] bg-white px-6 py-10 text-center">
+              <p className="text-[14px] font-semibold text-[#1D1D1F]">暂无该状态项目</p>
+              <p className="mt-1 text-[12px] text-[#8E8E93]">可以创建新项目，或切换其他筛选条件。</p>
+            </div>
+          ) : null}
+          {filteredProjects.length > PAGE_SIZE ? (
+            <div className="mt-6 flex flex-col items-center justify-between gap-3 rounded-2xl border border-[#EAEAEA] bg-white px-4 py-3 sm:flex-row">
+              <p className="text-[12px] text-[#8E8E93]">
+                第 {currentPage} / {totalPages} 页 · 共 {filteredProjects.length} 个项目
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  className="rounded-lg px-3 py-1.5 text-[12px] font-semibold"
+                  style={{
+                    background: currentPage <= 1 ? '#F5F5F7' : '#ffffff',
+                    color: currentPage <= 1 ? '#AEAEB2' : '#444444',
+                    border: '1px solid #EAEAEA',
+                    cursor: currentPage <= 1 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  上一页
+                </button>
+                <span className="rounded-lg bg-[#F7F8FA] px-3 py-1.5 text-[12px] font-semibold text-[#1D1D1F]">
+                  {currentPage}
+                </span>
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  className="rounded-lg px-3 py-1.5 text-[12px] font-semibold"
+                  style={{
+                    background: currentPage >= totalPages ? '#F5F5F7' : '#ffffff',
+                    color: currentPage >= totalPages ? '#AEAEB2' : '#444444',
+                    border: '1px solid #EAEAEA',
+                    cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </ShortDramaLayout>

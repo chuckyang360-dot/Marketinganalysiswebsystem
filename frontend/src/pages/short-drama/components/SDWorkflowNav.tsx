@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ri, sdFontHeading } from '../utils/shortDramaHelpers';
+import { ri } from '../utils/shortDramaHelpers';
 import { withProjectQuery } from '../utils/shortDramaRoutes';
+import { VibeClipLogo } from './VibeClipLogo';
 
 const STEPS = [
   { label: '产品输入', path: '/short-drama/product-input', step: 1 },
@@ -86,17 +87,11 @@ export function SDWorkflowNav({
             onClick={() => navigate('/short-drama')}
             className="group flex cursor-pointer items-center gap-2"
           >
-            <div
-              className="flex h-7 w-7 items-center justify-center rounded-lg transition-transform duration-200 group-hover:scale-105"
-              style={{ background: 'linear-gradient(135deg, #1D1D1F, #374151)' }}
-            >
-              <i className={ri('ri-film-line', 'text-[13px] text-white')} aria-hidden />
-            </div>
-            <span
-              className="whitespace-nowrap text-[14px] font-bold"
-              style={{ ...sdFontHeading, color: '#1D1D1F' }}
-            >
-              Short<span style={{ color: '#374151' }}>Drama</span>
+            <span className="transition-transform duration-200 group-hover:scale-105">
+              <VibeClipLogo compact />
+            </span>
+            <span className="whitespace-nowrap text-[14px] font-bold text-[#1D1D1F]">
+              VibeClip
             </span>
           </button>
 

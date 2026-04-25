@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { StepFourAssetLibrary } from './components/StepFourAssetLibrary';
-import { StepFourSegmentPanel } from './components/StepFourSegmentPanel';
+import { StepFourSegmentWorkbench } from './components/StepFourSegmentWorkbench';
 import { StepFourVideoPreview } from './components/StepFourVideoPreview';
 import { StepFourTimeline } from './components/StepFourTimeline';
 import { useStepFourPage } from './hooks/useStepFourPage';
@@ -41,6 +41,7 @@ export function ShortDramaStepFourPage() {
     handleGenerateAll,
     handleGenerateVideo,
     handleRegenerate,
+    handleSaveSegmentShot,
     mergeFinalVideo,
     mergePrimaryActionsEnabled,
     timelineMergeLabel,
@@ -312,13 +313,15 @@ export function ShortDramaStepFourPage() {
               </p>
             </div>
           ) : (
-            <StepFourSegmentPanel
+            <StepFourSegmentWorkbench
               segments={segments}
               activeSegment={activeSegment}
               videoStatus={videoStatus}
               renderProgressMap={{}}
               onSegmentChange={setActiveSegment}
               videoGenerateDisabled={videoActionsDisabled}
+              assetLibrary={assetLibraryVm}
+              onSaveSegmentShot={handleSaveSegmentShot}
               onGenerateVideo={(id) => {
                 setActiveSegment(id);
                 void handleGenerateVideo(id);

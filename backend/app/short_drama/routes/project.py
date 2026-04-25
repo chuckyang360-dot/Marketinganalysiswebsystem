@@ -11,6 +11,7 @@ from ..models import (
 from ..schemas.project import (
     CreateShortDramaProjectRequest,
     CreateShortDramaProjectResponse,
+    ProjectCoverAsset,
     ProjectEntryRedirectResponse,
     PipelineSummaryResponse,
     ShortDramaProjectListResponse,
@@ -31,6 +32,7 @@ from ..services.project_state_service import (
 from ..services.pipeline_video_state import build_pipeline_video_state, segment_row_video_fields
 from ..services.read_models import (
     latest_final_video_url,
+    list_asset_rows,
     list_pipeline_asset_rows,
     latest_product_context,
     latest_story_blueprint,
@@ -75,6 +77,41 @@ def _script_with_public_video_url(script: dict, video_url_public: str | None) ->
 router = APIRouter()
 
 
+def _project_cover_asset(db: Session, project_id: int) -> ProjectCoverAsset:
+    chars, scenes, products = list_pipeline_asset_rows(db, project_id)
+
+    def _pick(rows: list, asset_type: str) -> ProjectCoverAsset | None:
+        for row in rows:
+            image_url = _public_media_url(getattr(row, "image_url", None))
+            if image_url:
+                return ProjectCoverAsset(
+                    asset_type=asset_type,
+                    name=getattr(row, "name", None),
+                    image_url=image_url,
+                    status="ready",
+                )
+        return None
+
+    for candidate in (
+        _pick(chars, "character"),
+        _pick(products, "product"),
+        _pick(scenes, "scene"),
+    ):
+        if candidate is not None:
+            return candidate
+
+    legacy_chars, legacy_scenes, legacy_products = list_asset_rows(db, project_id)
+    for candidate in (
+        _pick(legacy_chars, "character"),
+        _pick(legacy_products, "product"),
+        _pick(legacy_scenes, "scene"),
+    ):
+        if candidate is not None:
+            return candidate
+
+    return ProjectCoverAsset(asset_type=None, name=None, image_url=None, status="missing")
+
+
 def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProjectResponse:
     final_video = latest_final_video_url(db, p.id)
     step_status = normalize_step_status(p.step_status)
@@ -92,6 +129,7 @@ def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProject
         step_status=step_status,
         overall_status=compute_overall_status(db, p, final_video_url=final_video),
         final_video_url=_public_media_url(final_video),
+        cover_asset=_project_cover_asset(db, p.id),
         created_at=p.created_at,
         updated_at=p.updated_at,
     )

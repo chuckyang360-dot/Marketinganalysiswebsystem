@@ -83,7 +83,7 @@ export function ShortDramaCreateProjectPage() {
               新建项目
             </div>
             <h2 className="mb-3 text-xl font-black" style={{ ...sdFontHeading, color: sdColors.ink }}>
-              创建短剧项目
+              创建 VibeClip 项目
             </h2>
             <p className="text-[13px] leading-relaxed text-[#8E8E93]">
               设置基础参数，系统将根据这些设定规划剧情节奏与视觉风格。
@@ -127,7 +127,7 @@ export function ShortDramaCreateProjectPage() {
           <div className="mb-8">
             <span className="text-[11px] font-bold uppercase tracking-widest text-[#8E8E93]">新建项目</span>
             <h1 className="mt-1 text-2xl font-black" style={{ ...sdFontHeading, color: sdColors.ink }}>
-              项目设置
+              创建 VibeClip 项目
             </h1>
           </div>
 

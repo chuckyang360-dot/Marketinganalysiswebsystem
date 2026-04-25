@@ -24,6 +24,8 @@ import type {
   UpdateAssetResponseDto,
   VideoBatchSummaryResponseDto,
   TouchProjectStepBody,
+  UpdateSegmentShotBody,
+  UpdateSegmentShotResponseDto,
 } from '../types/shortDramaApi';
 
 export class ShortDramaApiError extends Error {
@@ -321,6 +323,20 @@ export async function generateShortDramaSegmentScripts(projectId: number): Promi
     method: 'POST',
     body: JSON.stringify({ project_id: projectId }),
   });
+}
+
+export async function updateShortDramaSegmentShot(
+  segmentId: string,
+  shotId: string,
+  body: UpdateSegmentShotBody,
+): Promise<UpdateSegmentShotResponseDto> {
+  return sdFetchJson<UpdateSegmentShotResponseDto>(
+    `/api/short-drama/segment/${encodeURIComponent(segmentId)}/shots/${encodeURIComponent(shotId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    },
+  );
 }
 
 export async function generateShortDramaSegmentVideos(projectId: number): Promise<VideoBatchSummaryResponseDto> {

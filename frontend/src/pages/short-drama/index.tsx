@@ -4,6 +4,7 @@ import { CapabilityCards } from './components/CapabilityCards';
 import { SectionHeader } from './components/SectionHeader';
 import { ShortDramaHero } from './components/ShortDramaHero';
 import { ShortDramaLayout } from './components/ShortDramaLayout';
+import { VibeClipLogo } from './components/VibeClipLogo';
 import { WorkflowSteps } from './components/WorkflowSteps';
 import { ri, sdColors, sdFontHeading } from './utils/shortDramaHelpers';
 
@@ -30,7 +31,7 @@ export default function ShortDramaLandingPage() {
           <SectionHeader
             eyebrow="Workflow"
             eyebrowVariant="pillOutline"
-            title="5 步完成一部短剧广告"
+            title="5 步完成一支商品营销短视频"
             subtitle="结构化工作流，每一步都有清晰产出，团队协作无摩擦"
             subtitleMaxWidthClass="max-w-lg"
           />
@@ -96,10 +97,10 @@ export default function ShortDramaLandingPage() {
             className="mb-3 text-[clamp(22px,3vw,30px)] font-extrabold"
             style={{ ...sdFontHeading, color: sdColors.ink }}
           >
-            开始你的短剧项目
+            开始你的 VibeClip 项目
           </h2>
           <p className="mb-8 max-w-xl text-[15px] leading-relaxed" style={{ color: '#8E8E93' }}>
-            本轮为前端骨架：创建流程使用本地状态与占位数据，尚未连接后端。
+            让商品自己会讲故事，从资料输入到视频生成一站完成。
           </p>
           <button
             type="button"
@@ -107,7 +108,7 @@ export default function ShortDramaLandingPage() {
             className="rounded-xl px-8 py-3.5 text-[15px] font-semibold text-white transition-colors duration-200 hover:bg-[#374151]"
             style={{ background: sdColors.ink }}
           >
-            创建短剧项目
+            创建 VibeClip 项目
           </button>
           <button
             type="button"
@@ -125,14 +126,9 @@ export default function ShortDramaLandingPage() {
       <footer className="border-t border-[#EAEAEA] bg-[#F7F8FA] px-6 py-12">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 md:flex-row">
           <div className="flex items-center gap-2">
-            <div
-              className="flex h-6 w-6 items-center justify-center rounded-lg"
-              style={{ background: `linear-gradient(135deg, ${sdColors.ink}, ${sdColors.inkMuted})` }}
-            >
-              <i className={ri('ri-film-line', 'text-[11px] text-white')} aria-hidden />
-            </div>
+            <VibeClipLogo compact />
             <span className="text-[13px] font-medium text-[#8E8E93]" style={sdFontHeading}>
-              ShortDrama Engine · Powered by GlobalPulseAI
+              VibeClip by GlobalPulseAI
             </span>
           </div>
           <p className="text-[12px] text-[#AEAEB2]">© {new Date().getFullYear()} GlobalPulseAI</p>
