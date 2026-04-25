@@ -2,14 +2,17 @@ import { useMemo, useState } from 'react';
 import type { ShortDramaProjectDto } from '../types/shortDramaApi';
 import { resolveShortDramaMediaUrl } from '../utils/shortDramaMedia';
 
+type CoverAsset = NonNullable<ShortDramaProjectDto['cover_asset']>;
+type CoverAssetType = CoverAsset['asset_type'];
+
 type ProjectCoverImageProps = {
   projectName: string;
-  cover: ShortDramaProjectDto['cover_asset'] | null;
+  cover: CoverAsset | null;
   emptyTitle: string;
   emptyHint?: string;
 };
 
-function objectClassByAssetType(assetType: ShortDramaProjectDto['cover_asset']['asset_type'] | null | undefined): string {
+function objectClassByAssetType(assetType: CoverAssetType | null | undefined): string {
   if (assetType === 'character') return 'object-cover object-top';
   if (assetType === 'product') return 'object-contain object-center';
   if (assetType === 'scene') return 'object-cover object-center';
