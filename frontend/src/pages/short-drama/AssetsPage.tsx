@@ -6,6 +6,7 @@ import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEn
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
 import { appendShortDramaAssetUploadedImages, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
 import type { AssetLibraryItemDto } from './types/shortDramaApi';
+import { getAssetThumbnailUrl, resolveAssetImageUrl } from './utils/assetsPageAdapters';
 import { withProjectQuery } from './utils/shortDramaRoutes';
 import { buildRawStructureSnapshot, buildStructureSummary, resolveAssetRoleLabel, resolveAssetSourceLabel, resolveNarrativeFunctionLabel, resolveTypeFields, resolveVisualAnchorImageId, resolveVisualAnchorImageUrl } from './utils/assetSpecDisplay';
 
@@ -69,6 +70,16 @@ function assetCoverImageClass(row: AssetLibraryItemDto): string {
   return 'h-full w-full object-cover object-center';
 }
 
+function activeRenderableImages(row: AssetLibraryItemDto) {
+  return (row.images ?? [])
+    .filter((img) => String(img.status || 'active').toLowerCase() === 'active')
+    .map((img) => {
+      const resolvedUrl = resolveAssetImageUrl(img.image_url).src;
+      return resolvedUrl ? { ...img, resolvedUrl } : null;
+    })
+    .filter((img): img is NonNullable<typeof img> => img !== null);
+}
+
 function toPositiveInt(value: unknown): number | null {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -76,6 +87,15 @@ function toPositiveInt(value: unknown): number | null {
     if (Number.isInteger(n) && n > 0) return n;
   }
   return null;
+}
+
+function extractFailedAssetIds(errors: Record<string, unknown>[] | undefined): Set<number> {
+  const ids = new Set<number>();
+  for (const err of errors ?? []) {
+    const assetId = toPositiveInt(err.asset_id ?? err.assetId ?? err.id);
+    if (assetId != null) ids.add(assetId);
+  }
+  return ids;
 }
 
 function normalizeLibraryItem(row: AssetLibraryItemDto): AssetLibraryItemDto | null {
@@ -171,7 +191,9 @@ export function ShortDramaAssetsPage() {
   const [addPending, setAddPending] = useState<{ tab: TabType; mode: AddMode } | null>(null);
   const [working, setWorking] = useState(false);
   const [autoPhase, setAutoPhase] = useState<Step3AutoPhase>('idle');
-  const [autoHint, setAutoHint] = useState<string | null>(null);
+  const [, setAutoHint] = useState<string | null>(null);
+  const [imageLoadFailedIds, setImageLoadFailedIds] = useState<Set<number>>(() => new Set());
+  const [imageGenerationFailedIds, setImageGenerationFailedIds] = useState<Set<number>>(() => new Set());
   const refUploadInput = useRef<HTMLInputElement>(null);
   const refTargetAssetId = useRef<number | null>(null);
   const uploadPickerRef = useRef<HTMLInputElement>(null);
@@ -192,6 +214,7 @@ export function ShortDramaAssetsPage() {
         scenes: scenes.assets.map(normalizeLibraryItem).filter((x): x is AssetLibraryItemDto => x !== null),
         assets: products.assets.map(normalizeLibraryItem).filter((x): x is AssetLibraryItemDto => x !== null),
       });
+      setImageLoadFailedIds(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败');
     } finally {
@@ -232,7 +255,8 @@ export function ShortDramaAssetsPage() {
           setAutoPhase('generating_images');
           setAutoHint('正在生成资产图片，请稍候…');
           console.info('[S3_AUTO_TRIGGER_IMAGES]', JSON.stringify({ project_id: projectId }));
-          await generateShortDramaAssetImages(projectId);
+          const imageResult = await generateShortDramaAssetImages(projectId);
+          setImageGenerationFailedIds(extractFailedAssetIds(imageResult.errors));
           pipelineAfterSpecs = await getShortDramaPipeline(projectId);
         }
 
@@ -293,7 +317,7 @@ export function ShortDramaAssetsPage() {
       warnAssetDetailMismatch(d);
       const tf = (d.extra?.type_fields ?? {}) as Record<string, unknown>;
       const detailTypeLabel = resolveAssetRoleLabel(d);
-      const anchorImage = resolveVisualAnchorImageUrl(d);
+      const anchorImage = getAssetThumbnailUrl(d);
       const detailVm: AssetInteractionEntity = {
         id: d.id,
         kind: toKind(d.asset_type),
@@ -308,7 +332,7 @@ export function ShortDramaAssetsPage() {
         productUsage: typeof (tf.product_usage || tf.usage_mode) === 'string' ? String(tf.product_usage || tf.usage_mode) : '',
         imageCount: d.image_count,
         imageLimit: 6,
-        images: d.images.map((x) => ({ id: x.id, imageUrl: x.image_url, isCover: x.is_cover, label: x.variant_label ?? undefined })),
+        images: activeRenderableImages(d).map((x) => ({ id: x.id, imageUrl: x.resolvedUrl, isCover: x.is_cover, label: x.variant_label ?? undefined })),
         selectedImageId: resolveVisualAnchorImageId(d) ?? null,
         referenceImages: d.reference_images.map((x) => ({ id: x.id, fileUrl: x.file_url, fileName: x.file_name ?? undefined })),
         tags: d.tags ?? [],
@@ -342,6 +366,7 @@ export function ShortDramaAssetsPage() {
 
   const createLabel = activeTab === 'characters' ? '添加角色' : activeTab === 'scenes' ? '添加场景' : '添加产品';
   const currentRows = data[activeTab];
+  const showSpecSkeletonCards = autoPhase === 'generating_specs' && currentRows.length === 0;
   const tabs = useMemo(() => ([
     { key: 'characters' as const, label: '角色', count: data.characters.length, icon: 'ri-user-star-line' },
     { key: 'scenes' as const, label: '场景', count: data.scenes.length, icon: 'ri-landscape-line' },
@@ -438,18 +463,17 @@ export function ShortDramaAssetsPage() {
           </div>
         </div>
         <div className="px-6 lg:px-10 py-7">
-          {autoHint ? (
-            <div className="mb-4 rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] px-4 py-3 text-[13px] text-[#444444]">
-              <span className="mr-2 inline-block rounded-full bg-white px-2 py-0.5 text-[11px] text-[#8E8E93]">{autoPhase}</span>
-              {autoHint}
-            </div>
-          ) : null}
           {loading ? <div className="text-[13px] text-[#8E8E93]">加载中…</div> : null}
           {error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</div> : null}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {currentRows.map((row) => {
-              const visualAnchor = resolveVisualAnchorImageUrl(row);
+              const visualAnchor = getAssetThumbnailUrl(row);
               const roleLabel = resolveAssetRoleLabel(row);
+              const imageLoadFailed = imageLoadFailedIds.has(row.id);
+              const isImageGenerating = autoPhase === 'generating_images' && !visualAnchor && !imageLoadFailed;
+              const hasFailedImage =
+                !visualAnchor &&
+                (imageGenerationFailedIds.has(row.id) || (row.images ?? []).some((img) => String(img.status || '').toLowerCase() === 'failed'));
               return (
                 <div key={row.id} className="flex h-full flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
                   <div
@@ -459,7 +483,33 @@ export function ShortDramaAssetsPage() {
                     role="button"
                     tabIndex={0}
                   >
-                    {visualAnchor ? <img src={visualAnchor} alt={displayAssetName(row)} className={assetCoverImageClass(row)} /> : <div className="h-full w-full animate-pulse bg-[#ECEDEF]" />}
+                    {visualAnchor && !imageLoadFailed ? (
+                      <img
+                        src={visualAnchor}
+                        alt={displayAssetName(row)}
+                        className={assetCoverImageClass(row)}
+                        onError={() => setImageLoadFailedIds((prev) => new Set(prev).add(row.id))}
+                      />
+                    ) : isImageGenerating ? (
+                      <div className="flex h-full w-full items-center justify-center bg-[#ECEDEF]">
+                        <div className="text-center text-[12px] text-[#6E6E73]">
+                          <i className="ri-loader-4-line mb-1 block animate-spin text-[18px]" aria-hidden />
+                          图片生成中…
+                        </div>
+                      </div>
+                    ) : imageLoadFailed ? (
+                      <div className="flex h-full w-full items-center justify-center bg-[#F7F8FA] px-3 text-center text-[12px] text-[#B42318]">
+                        图片加载失败
+                      </div>
+                    ) : hasFailedImage ? (
+                      <div className="flex h-full w-full items-center justify-center bg-[#F7F8FA] px-3 text-center text-[12px] text-[#B42318]">
+                        图片生成失败，可重试
+                      </div>
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-[#F7F8FA] px-3 text-center text-[12px] text-[#8E8E93]">
+                        暂无图片
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-1 flex-col p-4">
                     <div className="flex-1">
@@ -496,8 +546,8 @@ export function ShortDramaAssetsPage() {
                         </p>
                       </div>
                       <div className="mt-2 h-[40px] flex items-center gap-1 overflow-hidden">
-                        {row.images.slice(0, 3).map((img) => (
-                          <img key={img.id} src={img.image_url} alt={img.variant_label ?? 'thumb'} className="h-9 w-9 shrink-0 rounded border border-[#EAEAEA] object-cover" />
+                        {activeRenderableImages(row).slice(0, 3).map((img) => (
+                          <img key={img.id} src={img.resolvedUrl} alt={img.variant_label ?? 'thumb'} className="h-9 w-9 shrink-0 rounded border border-[#EAEAEA] object-cover" />
                         ))}
                         {row.has_reference_images ? <span className="ml-1 text-[11px] text-[#0B8D5A]">有参考图</span> : <span className="ml-1 text-[11px] text-transparent">占位</span>}
                       </div>
@@ -523,6 +573,24 @@ export function ShortDramaAssetsPage() {
                 </div>
               );
             })}
+            {showSpecSkeletonCards ? (
+              Array.from({ length: 3 }).map((_, idx) => (
+                <div key={`spec-skeleton-${idx}`} className="flex h-full min-h-[340px] flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
+                  <div className="flex h-48 items-center justify-center bg-[#ECEDEF]">
+                    <div className="text-center text-[12px] text-[#6E6E73]">
+                      <i className="ri-loader-4-line mb-1 block animate-spin text-[18px]" aria-hidden />
+                      资产规范生成中…
+                    </div>
+                  </div>
+                  <div className="flex flex-1 flex-col p-4">
+                    <div className="h-5 w-2/3 animate-pulse rounded bg-[#ECEDEF]" />
+                    <div className="mt-3 h-4 w-full animate-pulse rounded bg-[#F1F2F4]" />
+                    <div className="mt-2 h-4 w-4/5 animate-pulse rounded bg-[#F1F2F4]" />
+                    <div className="mt-auto pt-3 text-[12px] text-[#6E6E73]">正在准备资产卡片…</div>
+                  </div>
+                </div>
+              ))
+            ) : null}
             {addPending?.tab === activeTab ? (
               <div className="flex h-full flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
                 <div className="h-48 animate-pulse bg-[#ECEDEF]" />

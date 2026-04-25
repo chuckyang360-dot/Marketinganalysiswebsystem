@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import logging
 from dataclasses import dataclass, field
 
 from ..exceptions import ShortDramaVideoInputError
@@ -10,12 +11,16 @@ from ..models import CharacterAsset, ProductAsset, SceneAsset
 from ..schemas.segment import SegmentScriptSchema
 
 
-_MAX_PROMPT_LEN = 3800
+MAX_XAI_VIDEO_PROMPT_CHARS = 3500
+_HARD_XAI_VIDEO_PROMPT_CHARS = 4096
 _MAX_REFS = 7
-_STYLE_SUFFIX = (
-    "consistent commercial ad video, smooth motion, premium brand tone, "
-    "no text overlay, no watermark"
+_STYLE_SUFFIX = "commercial ad video, consistent identity, no text overlay, no watermark"
+_REPETITIVE_PROMPT_PHRASES = (
+    "Cinematic 9:16 vertical composition",
+    "movie-grade lighting",
+    "dynamic camera movement",
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -27,6 +32,7 @@ class SegmentVideoPlan:
     aspect_ratio: str = "9:16"
     resolution: str | None = "720p"
     execution_input: dict = field(default_factory=dict)
+    prompt_budget: dict = field(default_factory=dict)
 
 
 def _norm_name(s: str) -> str:
@@ -45,26 +51,87 @@ def _dedupe_preserve(urls: list[str]) -> list[str]:
     return out
 
 
-def _merge_shot_video_prompts(segment: SegmentScriptSchema) -> str:
-    parts: list[str] = []
+def _compact_text(text: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars].rstrip()
+    boundary = max(cut.rfind("."), cut.rfind(";"), cut.rfind("，"), cut.rfind("。"))
+    if boundary > max_chars * 0.65:
+        cut = cut[: boundary + 1].rstrip()
+    return cut.rstrip(" ,;，；") + "..."
+
+
+def _drop_repetitive_boilerplate(text: str) -> str:
+    out = text
+    for phrase in _REPETITIVE_PROMPT_PHRASES:
+        out = re.sub(re.escape(phrase), "", out, flags=re.IGNORECASE)
+    out = re.sub(r"\s*[,;，；]\s*[,;，；]+\s*", ", ", out)
+    return re.sub(r"\s+", " ", out).strip(" ,;，；")
+
+
+def _dedupe_text_items(items: list[str], *, max_items: int) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in items:
+        item = re.sub(r"\s+", " ", str(raw or "").strip())
+        if not item:
+            continue
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _summarize_visual_constraints(segment: SegmentScriptSchema) -> list[str]:
+    vals: list[str] = []
+    for shot in segment.shots:
+        sc = shot.source_visual_constraints or {}
+        if not isinstance(sc, dict):
+            continue
+        for key in ("visual_style", "aspect_ratio"):
+            v = sc.get(key)
+            if isinstance(v, str) and v.strip():
+                vals.append(f"{key}: {v.strip()}")
+        for key in ("visual_features", "consistency_notes", "visual_risk_notes", "s2_required_visual_elements"):
+            v = sc.get(key)
+            if isinstance(v, list):
+                vals.extend(str(x) for x in v[:2] if x)
+    return _dedupe_text_items(vals, max_items=2)
+
+
+def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str) -> tuple[str, dict]:
+    dropped_sections: list[str] = []
+    before_parts: list[str] = []
+    final_parts: list[str] = []
+
+    def add(label: str, value: str, max_chars: int) -> None:
+        value = re.sub(r"\s+", " ", (value or "").strip())
+        if not value:
+            return
+        before_parts.append(value)
+        cleaned = _drop_repetitive_boilerplate(value)
+        if cleaned != value:
+            dropped_sections.append("repetitive_template_phrases")
+        value = cleaned
+        if not value:
+            return
+        compacted = _compact_text(value, max_chars)
+        if compacted != value:
+            dropped_sections.append(f"{label}_truncated")
+        final_parts.append(compacted)
+
     for shot in segment.shots:
         vp = (shot.video_prompt or "").strip()
-        if not vp:
-            continue
-        if vp not in parts:
-            parts.append(vp)
-        extras = " ".join(
-            x
-            for x in [
-                f"MUST SHOW: {'; '.join(shot.must_show)}." if shot.must_show else "",
-                f"DO NOT SHOW: {'; '.join(shot.must_avoid)}." if shot.must_avoid else "",
-                f"SOURCE SELLING POINT: {shot.source_selling_point}." if shot.source_selling_point else "",
-            ]
-            if x
-        ).strip()
-        if extras and extras not in parts:
-            parts.append(extras)
-    if not parts:
+        action = (shot.action_description or "").strip()
+        shot_text = " ".join(x for x in [f"Shot {shot.shot_id}:", action, vp] if x)
+        add(f"shot_{shot.shot_id}", shot_text, 700)
+
+    if not final_parts:
         for shot in segment.shots:
             fallback = " ".join(
                 x
@@ -74,19 +141,46 @@ def _merge_shot_video_prompts(segment: SegmentScriptSchema) -> str:
                 )
                 if x
             ).strip()
-            if fallback and fallback not in parts:
-                parts.append(fallback)
-    text = " ".join(parts).strip()
-    text = re.sub(r"\s+", " ", text)
+            add(f"fallback_{shot.shot_id}", fallback, 500)
+
+    character_refs = _dedupe_text_items([r for s in segment.shots for r in s.character_refs], max_items=8)
+    scene_refs = _dedupe_text_items([s.scene_ref for s in segment.shots if s.scene_ref], max_items=3)
+    product_refs = _dedupe_text_items([r for s in segment.shots for r in s.product_refs], max_items=5)
+    must_show = _dedupe_text_items([r for s in segment.shots for r in s.must_show], max_items=3)
+    must_avoid = _dedupe_text_items([r for s in segment.shots for r in s.must_avoid], max_items=3)
+    source_selling = _dedupe_text_items([s.source_selling_point for s in segment.shots if s.source_selling_point], max_items=1)
+    visual_constraints = _summarize_visual_constraints(segment)
+
+    add("refs", f"Characters: {', '.join(character_refs)}. Scenes: {', '.join(scene_refs)}. Products: {', '.join(product_refs)}.", 360)
+    add("must_show", f"Must show: {'; '.join(must_show)}.", 320)
+    add("must_avoid", f"Must avoid: {'; '.join(must_avoid)}.", 320)
+    add("visual", f"Aspect ratio: {aspect_ratio}. Visual constraints: {'; '.join(visual_constraints)}.", 260)
+    add("source_selling_point", f"Selling point: {'; '.join(source_selling)}.", 180)
+    add("style", _STYLE_SUFFIX, 140)
+
+    before_text = " ".join(before_parts)
+    text = re.sub(r"\s+", " ", " ".join(final_parts)).strip()
     if not text:
         raise ShortDramaVideoInputError(
             f"Segment {segment.segment_id!r} has empty video_prompt (and no usable shot fallback)"
         )
-    suffix = f". {_STYLE_SUFFIX}"
-    max_main = max(100, _MAX_PROMPT_LEN - len(suffix))
-    if len(text) > max_main:
-        text = text[:max_main].rstrip() + "…"
-    return (text + suffix).strip()
+
+    before_chars = len(before_text)
+    truncated = len(text) > MAX_XAI_VIDEO_PROMPT_CHARS
+    if truncated:
+        dropped_sections.append("budget_hard_trim")
+        text = _compact_text(text, MAX_XAI_VIDEO_PROMPT_CHARS)
+    if len(text) > _HARD_XAI_VIDEO_PROMPT_CHARS:
+        dropped_sections.append("xai_hard_limit_trim")
+        text = _compact_text(text, MAX_XAI_VIDEO_PROMPT_CHARS)
+    budget = {
+        "before_chars": before_chars,
+        "after_chars": len(text),
+        "truncated": truncated or bool(dropped_sections),
+        "dropped_sections": list(dict.fromkeys(dropped_sections)),
+        "final_prompt_preview": text[:500],
+    }
+    return text, budget
 
 
 def _duration_for_segment(segment: SegmentScriptSchema) -> int:
@@ -125,11 +219,20 @@ def build_segment_video_plan(
     products: list[ProductAsset],
     project_aspect_ratio: str | None,
 ) -> SegmentVideoPlan:
-    prompt = _merge_shot_video_prompts(segment)
-    duration = _duration_for_segment(segment)
     ar = (project_aspect_ratio or "9:16").strip()
     if ":" not in ar:
         ar = "9:16"
+    prompt, budget = _budgeted_segment_prompt(segment, aspect_ratio=ar)
+    duration = _duration_for_segment(segment)
+    logger.info(
+        "[S4_VIDEO_PROMPT_BUDGET] segment_id=%s before_chars=%s after_chars=%s truncated=%s dropped_sections=%s final_prompt_preview=%s",
+        segment.segment_id,
+        budget["before_chars"],
+        budget["after_chars"],
+        budget["truncated"],
+        budget["dropped_sections"],
+        budget["final_prompt_preview"],
+    )
 
     cmap = _char_by_name(characters)
     smap = _scene_by_name(scenes)
@@ -167,6 +270,7 @@ def build_segment_video_plan(
         duration_seconds=duration,
         aspect_ratio=ar,
         resolution="720p",
+        prompt_budget=budget,
         execution_input={
             "segment_id": segment.segment_id,
             "shot_ids": [s.shot_id for s in segment.shots],
@@ -181,5 +285,6 @@ def build_segment_video_plan(
             "source_visual_constraints": [s.source_visual_constraints for s in segment.shots if s.source_visual_constraints],
             "aspect_ratio": ar,
             "reference_image_urls": ref_urls,
+            "prompt_budget": budget,
         },
     )

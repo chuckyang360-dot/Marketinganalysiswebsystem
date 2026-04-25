@@ -59,20 +59,25 @@ function formatShortDramaDetailObject(d: Record<string, unknown>): string {
 
 async function parseErrorMessage(res: Response): Promise<string> {
   const text = await res.text();
+  const promptTooLongMessage = '视频生成提示词过长，系统已自动压缩。请重试。';
+  const looksPromptTooLong = (value: string) =>
+    /prompt length exceeds|maximum allowed length of 4096|提示词过长/i.test(value);
   try {
     const j = JSON.parse(text) as { detail?: unknown };
-    if (typeof j.detail === 'string') return j.detail;
+    if (typeof j.detail === 'string') return looksPromptTooLong(j.detail) ? promptTooLongMessage : j.detail;
     if (Array.isArray(j.detail)) {
       return j.detail
         .map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg: unknown }).msg) : String(x)))
         .join('; ');
     }
     if (typeof j.detail === 'object' && j.detail !== null && !Array.isArray(j.detail)) {
-      return formatShortDramaDetailObject(j.detail as Record<string, unknown>);
+      const formatted = formatShortDramaDetailObject(j.detail as Record<string, unknown>);
+      return looksPromptTooLong(formatted) ? promptTooLongMessage : formatted;
     }
   } catch {
     /* ignore */
   }
+  if (looksPromptTooLong(text)) return promptTooLongMessage;
   return text.slice(0, 400) || res.statusText || `HTTP ${res.status}`;
 }
 

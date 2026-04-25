@@ -1,4 +1,5 @@
 import type { AssetLibraryItemDto } from '../types/shortDramaApi';
+import { getAssetThumbnailUrl } from './assetsPageAdapters';
 
 function pickTypeFields(row: AssetLibraryItemDto): Record<string, unknown> {
   const extra = row.extra;
@@ -96,16 +97,7 @@ function resolveSceneLabelWithSource(row: AssetLibraryItemDto): { label: SceneLa
 }
 
 export function resolveVisualAnchorImageUrl(row: AssetLibraryItemDto): string {
-  const tf = pickTypeFields(row);
-  const anchorId = asPositiveInt(readTopLevelField(row, 'visual_anchor_image_id')) ?? asPositiveInt(tf.visual_anchor_image_id);
-  if (anchorId != null) {
-    const byId = row.images.find((img) => img.id === anchorId);
-    const url = asText(byId?.image_url);
-    if (url) return url;
-  }
-  const coverUrl = resolveCoverImageUrl(row);
-  if (coverUrl) return coverUrl;
-  return asText(row.images[0]?.image_url);
+  return getAssetThumbnailUrl(row) ?? '';
 }
 
 export function resolveVisualAnchorImageId(row: AssetLibraryItemDto): number | null {

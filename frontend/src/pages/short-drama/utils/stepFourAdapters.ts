@@ -1,5 +1,5 @@
 import {
-  resolveAssetImageUrl,
+  getAssetThumbnailUrl,
 } from './assetsPageAdapters';
 import { resolvePublicMediaUrl } from './shortDramaMedia';
 import type { Step4SegmentItem, Step4Shot, Step4VideoStatus, Step4VideoStatusMap } from '../types/shortDrama';
@@ -23,8 +23,7 @@ export function pipelineAssetsToStepFourLibraryVm(
   if (!assets) return { characters: [], scenes: [], products: [] };
 
   const characters = assets.characters.map((c) => {
-    const { src } = resolveAssetImageUrl(c.image_url,);
-    return { name: c.name, role: c.role_type?.trim() || '角色', img: src };
+    return { name: c.name, role: c.role_type?.trim() || '角色', img: getAssetThumbnailUrl(c) };
   });
 
   const scenes = assets.scenes.map((s) => ({

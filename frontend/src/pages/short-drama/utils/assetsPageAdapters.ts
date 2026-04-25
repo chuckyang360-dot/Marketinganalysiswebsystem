@@ -6,6 +6,9 @@ import type {
   AssetsPageViewModel,
 } from '../types/shortDrama';
 import type {
+  AssetImageDto,
+  AssetLibraryItemDto,
+  AssetReferenceImageDto,
   PipelineAssetsBundleDto,
   PipelineCharacterAssetDto,
   PipelineProductAssetDto,
@@ -56,6 +59,52 @@ export function resolveAssetImageUrl(imageUrl: string | null | undefined): { src
   return { src: null, hasRealImage: false };
 }
 
+type ThumbnailLikeAsset = {
+  image_url?: string | null;
+  cover_image_id?: number | null;
+  cover_image?: Partial<AssetImageDto> | null;
+  images?: Partial<AssetImageDto>[];
+  reference_images?: Partial<AssetReferenceImageDto>[];
+};
+
+function isActiveStatus(status: unknown): boolean {
+  return String(status || 'active').toLowerCase() === 'active';
+}
+
+function resolveMaybeImageUrl(value: string | null | undefined): string | null {
+  return resolveAssetImageUrl(value).src;
+}
+
+export function getAssetThumbnailUrl(asset: ThumbnailLikeAsset | AssetLibraryItemDto | null | undefined): string | null {
+  if (!asset) return null;
+  const cover = asset.cover_image;
+  if (cover && isActiveStatus(cover.status)) {
+    const src = resolveMaybeImageUrl(typeof cover.image_url === 'string' ? cover.image_url : null);
+    if (src) return src;
+  }
+
+  const images = (asset.images ?? []).filter((img) => isActiveStatus(img.status));
+  const coverId = typeof asset.cover_image_id === 'number' ? asset.cover_image_id : Number(asset.cover_image_id);
+  if (Number.isInteger(coverId) && coverId > 0) {
+    const byCoverId = images.find((img) => img.id === coverId);
+    const src = resolveMaybeImageUrl(typeof byCoverId?.image_url === 'string' ? byCoverId.image_url : null);
+    if (src) return src;
+  }
+
+  for (const img of images) {
+    const src = resolveMaybeImageUrl(typeof img.image_url === 'string' ? img.image_url : null);
+    if (src) return src;
+  }
+
+  for (const ref of asset.reference_images ?? []) {
+    if (!isActiveStatus(ref.status)) continue;
+    const src = resolveMaybeImageUrl(typeof ref.file_url === 'string' ? ref.file_url : null);
+    if (src) return src;
+  }
+
+  return resolveMaybeImageUrl(asset.image_url ?? null);
+}
+
 function metaRecord(meta: unknown): Record<string, unknown> {
   return meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, unknown>) : {};
 }
@@ -77,7 +126,7 @@ function tagsFromMeta(meta: Record<string, unknown>, fallback: string[]): string
 
 export function characterAssetDtoToViewModel(row: PipelineCharacterAssetDto): AssetsPageCharacterVm {
   const meta = metaRecord(row.meta);
-  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url);
+  const src = getAssetThumbnailUrl(row);
   const voice =
     pickString(meta, ['voice_style', 'voiceStyle', 'voice']) ||
     (row.role_type?.includes('主') ? '未指定（主角）' : '未指定');
@@ -90,14 +139,14 @@ export function characterAssetDtoToViewModel(row: PipelineCharacterAssetDto): As
     tags: tagsFromMeta(meta, visual ? [visual.slice(0, 24)] : []),
     voice,
     img: src,
-    hasRealImage,
+    hasRealImage: Boolean(src),
     visualPrompt: visual || '—',
   };
 }
 
 export function sceneAssetDtoToViewModel(row: PipelineSceneAssetDto): AssetsPageSceneVm {
   const meta = metaRecord(row.meta);
-  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url);
+  const src = getAssetThumbnailUrl(row);
   const visual = (row.visual_prompt ?? '').trim();
   const type = (row.scene_type ?? '').trim() || pickString(meta, ['sceneType', 'type']) || '场景';
   return {
@@ -106,14 +155,14 @@ export function sceneAssetDtoToViewModel(row: PipelineSceneAssetDto): AssetsPage
     type,
     desc: (row.description ?? '').trim() || '—',
     img: src,
-    hasRealImage,
+    hasRealImage: Boolean(src),
     visualPrompt: visual || '—',
   };
 }
 
 export function productAssetDtoToViewModel(row: PipelineProductAssetDto): AssetsPageProductVm {
   const meta = metaRecord(row.meta);
-  const { src, hasRealImage } = resolveAssetImageUrl(row.image_url);
+  const src = getAssetThumbnailUrl(row);
   const desc = (row.description ?? '').trim() || '—';
   const visual = (row.visual_prompt ?? '').trim();
   const placement =
@@ -128,7 +177,7 @@ export function productAssetDtoToViewModel(row: PipelineProductAssetDto): Assets
     cameraHint,
     desc,
     img: src,
-    hasRealImage,
+    hasRealImage: Boolean(src),
   };
 }
 

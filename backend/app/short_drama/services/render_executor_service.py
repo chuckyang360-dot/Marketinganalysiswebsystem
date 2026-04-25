@@ -305,6 +305,7 @@ class RenderExecutorService:
                 "duration_seconds": plan.duration_seconds,
                 "aspect_ratio": plan.aspect_ratio,
                 "resolution": plan.resolution,
+                "prompt_budget": plan.prompt_budget,
                 "execution_input": plan.execution_input,
             }
             if existing_job_id is not None:
