@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUser } from '../../services/api';
+import { ProjectCoverImage } from './components/ProjectCoverImage';
 import { ShortDramaLayout } from './components/ShortDramaLayout';
 import { listShortDramaProjects, ShortDramaApiError } from './services/shortDramaApi';
 import type { ShortDramaProjectDto } from './types/shortDramaApi';
-import { resolveShortDramaMediaUrl } from './utils/shortDramaMedia';
 
 const PAGE_SIZE = 6;
 
@@ -74,6 +74,18 @@ function coverFallbackText(p: ShortDramaProjectDto): string {
   if (t === 'product') return '暂无角色封面，已使用产品图';
   if (t === 'scene') return '暂无角色封面，已使用场景图';
   return '完成 S3 后会自动生成项目封面';
+}
+
+function coverEmptyTitle(p: ShortDramaProjectDto): string {
+  const step3 = p.step_status?.step_3;
+  const hasAssetContext =
+    step3 === 'completed' ||
+    step3 === 'stale' ||
+    step3 === 'generating' ||
+    p.last_active_step === 'step_4' ||
+    p.last_active_step === 'overview' ||
+    Boolean(p.cover_asset?.asset_type);
+  return hasAssetContext ? '暂无项目封面' : '待生成角色资产';
 }
 
 export function ShortDramaProjectsPage() {
@@ -179,7 +191,6 @@ export function ShortDramaProjectsPage() {
             {pagedProjects.map((p) => {
               const tone = overallStatusTone(p.overall_status);
               const cover = p.cover_asset ?? null;
-              const coverUrl = resolveShortDramaMediaUrl(cover?.image_url ?? null);
               console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft', cover_asset_type: cover?.asset_type || null });
               return (
                 <div
@@ -187,29 +198,19 @@ export function ShortDramaProjectsPage() {
                   className="overflow-hidden rounded-2xl border border-[#EAEAEA] bg-white shadow-[0_8px_28px_rgba(15,23,42,0.04)] transition-transform duration-150 hover:-translate-y-0.5"
                 >
                   <div className="relative h-44 bg-[#F5F5F7]">
-                    {coverUrl ? (
-                      <img
-                        src={coverUrl}
-                        alt={cover?.name || p.project_name || `项目 ${p.id}`}
-                        className="h-full w-full object-cover"
-                        style={{ objectPosition: cover?.asset_type === 'character' ? 'center top' : 'center center' }}
-                      />
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white text-[#AEAEB2]">
-                          <i className="ri-user-star-line text-[22px]" />
-                        </div>
-                        <p className="text-[13px] font-semibold text-[#6E6E73]">待生成角色资产</p>
-                        <p className="text-[11px] leading-relaxed text-[#AEAEB2]">{coverFallbackText(p)}</p>
-                      </div>
-                    )}
+                    <ProjectCoverImage
+                      projectName={p.project_name || `项目 ${p.id}`}
+                      cover={cover}
+                      emptyTitle={coverEmptyTitle(p)}
+                      emptyHint={coverEmptyTitle(p) === '待生成角色资产' ? coverFallbackText(p) : undefined}
+                    />
                     <span
                       className="absolute right-3 top-3 rounded-full px-2.5 py-1 text-[11px] font-semibold backdrop-blur"
                       style={{ background: tone.bg, color: tone.color, border: `1px solid ${tone.border}` }}
                     >
                       {overallStatusLabel(p.overall_status)}
                     </span>
-                    {coverUrl && cover?.asset_type !== 'character' ? (
+                    {cover?.image_url && cover?.asset_type !== 'character' ? (
                       <span className="absolute bottom-3 left-3 rounded-full bg-white/90 px-2.5 py-1 text-[10.5px] text-[#6E6E73]">
                         {coverFallbackText(p)}
                       </span>
