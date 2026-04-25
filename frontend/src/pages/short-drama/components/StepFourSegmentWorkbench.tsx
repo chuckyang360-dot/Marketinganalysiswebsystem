@@ -21,7 +21,8 @@ type ShotDraft = {
 };
 
 function normalizeDialogueSourceForSave(
-  source?: Step4Shot["dialogueSource"],
+  source: Step4Shot["dialogueSource"] | undefined,
+  hasInput: boolean,
 ): "dialogue" | "voiceover" | undefined {
   if (source === "voiceover" || source === "narration") return "voiceover";
   if (
@@ -32,6 +33,7 @@ function normalizeDialogueSourceForSave(
     source === "lines" ||
     source === "script"
   ) return "dialogue";
+  if (hasInput) return "dialogue";
   return undefined;
 }
 
@@ -155,7 +157,8 @@ export function StepFourSegmentWorkbench({
     try {
       for (const shot of targets) {
         const sd = draft.shots[shot.id] ?? makeShotDraft(shot);
-        const normalizedSource = normalizeDialogueSourceForSave(sd.dialogueSource);
+        const hasDialogueInput = sd.dialogue.trim().length > 0;
+        const normalizedSource = normalizeDialogueSourceForSave(sd.dialogueSource, hasDialogueInput);
         const dialoguePayload =
           normalizedSource === "voiceover"
             ? { voiceover: sd.dialogue }

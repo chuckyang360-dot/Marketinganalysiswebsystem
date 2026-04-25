@@ -157,20 +157,59 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
         manual_vp = (shot.manual_video_prompt or "").strip()
         vp = manual_vp or (shot.video_prompt or "").strip()
         action = (shot.action_description or "").strip()
-        dialogue = (shot.dialogue or shot.narration or "").strip()
+        dialogue = (shot.dialogue or "").strip()
+        voiceover = (shot.voiceover or shot.narration or "").strip()
         must_show = "; ".join(_dedupe_text_items([str(x) for x in (shot.must_show or [])], max_items=3))
         must_avoid = "; ".join(_dedupe_text_items([str(x) for x in (shot.must_avoid or [])], max_items=3))
+        has_dialogue = bool(dialogue)
+        has_voiceover = bool(voiceover)
+        if has_dialogue and has_voiceover:
+            spoken_policy = "both"
+            spoken_requirement = (
+                f'Dialogue requirement: The character must say exactly: "{dialogue}". '
+                "Do not invent extra dialogue. "
+                f'Voiceover requirement: Use this exact voiceover narration: "{voiceover}". '
+                "Do not invent extra narration."
+            )
+        elif has_dialogue:
+            spoken_policy = "dialogue"
+            spoken_requirement = (
+                f'Dialogue requirement: The character must say exactly: "{dialogue}". '
+                "Do not invent extra dialogue."
+            )
+        elif has_voiceover:
+            spoken_policy = "voiceover"
+            spoken_requirement = (
+                f'Voiceover requirement: Use this exact voiceover narration: "{voiceover}". '
+                "Do not invent extra narration."
+            )
+        else:
+            spoken_policy = "none"
+            spoken_requirement = "No dialogue, no voiceover, no subtitles, no on-screen text."
+        logger.info(
+            "[S4_SPOKEN_CONTENT_POLICY] segment_id=%s shot_id=%s has_dialogue=%s has_voiceover=%s spoken_policy=%s dialogue_preview=%s voiceover_preview=%s",
+            segment.segment_id,
+            shot.shot_id,
+            has_dialogue,
+            has_voiceover,
+            spoken_policy,
+            dialogue[:80],
+            voiceover[:80],
+        )
         fallback = " ".join(
             x
             for x in [
                 action,
-                f"Dialogue/voiceover: {dialogue}" if dialogue else "",
+                spoken_requirement,
                 f"Must show: {must_show}" if must_show else "",
                 f"Must avoid: {must_avoid}" if must_avoid else "",
             ]
             if x
         )
-        shot_text = " ".join(x for x in [f"Shot {shot.shot_id}:", vp or fallback] if x)
+        shot_prompt_body = vp or fallback
+        if spoken_requirement not in shot_prompt_body:
+            shot_prompt_body = " ".join(x for x in [shot_prompt_body, spoken_requirement] if x)
+        shot_text = " ".join(x for x in [f"Shot {shot.shot_id}:", shot_prompt_body] if x)
         add(f"shot_{shot.shot_id}", shot_text, 700)
 
     if not final_parts:
