@@ -92,6 +92,18 @@ function stringifyLine(value: unknown): string {
   return '';
 }
 
+function resolveDialogueSource(shot: Record<string, unknown>): Step4Shot['dialogueSource'] {
+  if (stringifyLine(shot.dialogue)) return 'dialogue';
+  if (stringifyLine(shot.voiceover)) return 'voiceover';
+  if (stringifyLine(shot.narration)) return 'narration';
+  if (stringifyLine(shot.spoken_line)) return 'spoken_line';
+  if (stringifyLine(shot.caption)) return 'caption';
+  if (stringifyLine(shot.dialogue_lines)) return 'dialogue_lines';
+  if (stringifyLine(shot.lines)) return 'lines';
+  if (stringifyLine(shot.script)) return 'script';
+  return 'none';
+}
+
 function imageSourceLabel(img: string | null, anchorId?: number | null): string {
   if (!img) return '未生成图片';
   return anchorId ? `视觉锚点 #${anchorId}` : '资产库图片';
@@ -247,7 +259,7 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       action: typeof s.action_description === 'string' ? s.action_description : '',
       dialogue: displayDialogue,
       voiceover,
-      dialogueSource: dialogue ? 'dialogue' : voiceover ? 'voiceover' : undefined,
+      dialogueSource: resolveDialogueSource(s),
       emotion: typeof s.emotion === 'string' ? s.emotion : '',
       duration: durationStr,
       durationSeconds:

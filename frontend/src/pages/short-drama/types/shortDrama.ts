@@ -217,6 +217,17 @@ export interface Step4Shot {
   desc: string;
   action: string;
   dialogue: string;
+  voiceover?: string;
+  dialogueSource?:
+    | 'dialogue'
+    | 'voiceover'
+    | 'narration'
+    | 'spoken_line'
+    | 'caption'
+    | 'dialogue_lines'
+    | 'lines'
+    | 'script'
+    | 'none';
   emotion: string;
   duration: string;
   durationSeconds: number;
