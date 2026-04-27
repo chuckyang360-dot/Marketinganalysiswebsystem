@@ -41,6 +41,7 @@ from .read_models import all_segment_scripts_have_video, list_asset_rows, list_s
 from .workflow_orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
+_HARD_VIDEO_PROMPT_CHARS = 4096
 
 
 def download_video(video_url: str, *, project_id: int, segment_id: str) -> Path:
@@ -329,6 +330,30 @@ class RenderExecutorService:
 
             model_name = effective_xai_video_model()
             final_prompt = plan.segment_video_prompt or ""
+            final_prompt_len = len(final_prompt)
+            if final_prompt_len > _HARD_VIDEO_PROMPT_CHARS:
+                raise ShortDramaVideoInputError(
+                    f"segment {segment_id} video prompt exceeds {_HARD_VIDEO_PROMPT_CHARS} chars"
+                )
+            shot_count = len(seg.shots or [])
+            segment_title = str(getattr(seg, "title", "") or "")
+            execution_input = plan.execution_input or {}
+            logger.info(
+                "[S5_VIDEO_PROMPT_COMPACT] project_id=%s segment_id=%s segment_title=%s shot_count=%s "
+                "original_prompt_len=%s final_prompt_len=%s included_product_refs=%s included_character_refs=%s "
+                "included_scene_refs=%s truncated=%s prompt_preview=%s",
+                project_id,
+                segment_id,
+                segment_title,
+                shot_count,
+                int((plan.prompt_budget or {}).get("before_chars", final_prompt_len)),
+                final_prompt_len,
+                bool((plan.prompt_budget or {}).get("included_product_refs", False)),
+                bool((plan.prompt_budget or {}).get("included_character_refs", False)),
+                bool((plan.prompt_budget or {}).get("included_scene_refs", False)),
+                bool((plan.prompt_budget or {}).get("truncated", False)),
+                final_prompt[:200],
+            )
             for shot in seg.shots:
                 dialogue_text = str(getattr(shot, "spoken_text", "") or getattr(shot, "dialogue", "") or "").strip()
                 voiceover_text = str(
@@ -348,7 +373,7 @@ class RenderExecutorService:
                     dialogue_text[:40],
                     bool(voiceover_text and voiceover_text in final_prompt),
                     voiceover_text[:40],
-                    len(final_prompt),
+                    final_prompt_len,
                     "xai_video",
                     model_name,
                 )

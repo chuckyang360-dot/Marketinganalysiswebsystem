@@ -15,7 +15,7 @@ from ..models import CharacterAsset, ProductAsset, SceneAsset
 from ..schemas.segment import SegmentScriptSchema
 
 
-MAX_XAI_VIDEO_PROMPT_CHARS = 3500
+SAFE_VIDEO_PROMPT_CHARS = 3200
 _HARD_XAI_VIDEO_PROMPT_CHARS = 4096
 _MAX_REFS = 7
 _STYLE_SUFFIX = "commercial ad video, consistent identity, no text overlay, no watermark"
@@ -25,6 +25,49 @@ _REPETITIVE_PROMPT_PHRASES = (
     "dynamic camera movement",
 )
 logger = logging.getLogger(__name__)
+_SHOT_MAX_CHARS = 700
+_SHOT_MIN_CHARS = 400
+_SEGMENT_MAX_SHOTS = 3
+_PRODUCT_SHOWCASE_MAX_CONSTRAINTS = 3
+_FORBIDDEN_TOKENS = (
+    "brand_raw",
+    "conflict:",
+    "conflict",
+    "source_trace",
+    "field_meta",
+    "raw_",
+    "{'display':",
+    "'description':",
+)
+_PAIN_POINT_HINTS = (
+    "掉落",
+    "疲惫",
+    "拥挤",
+    "不便",
+    "冲突",
+    "痛点",
+    "通勤",
+    "低头走路",
+)
+_PRODUCT_SHOWCASE_HINTS = (
+    "产品",
+    "展示",
+    "开箱",
+    "打开",
+    "演示",
+    "特写",
+    "showcase",
+    "demo",
+)
+_RESULT_HINTS = (
+    "结果",
+    "反馈",
+    "满意",
+    "轻松",
+    "放心",
+    "笑",
+    "结束",
+)
 
 
 def _get_shot_value(shot, key: str, default=None):
@@ -99,6 +142,141 @@ def _dedupe_text_items(items: list[str], *, max_items: int) -> list[str]:
     return out
 
 
+def _sanitize_prompt_text(text: str) -> str:
+    out = str(text or "")
+    for token in _FORBIDDEN_TOKENS:
+        out = out.replace(token, "")
+    # Drop JSON-like / dict-like inline objects that pollute shot instructions.
+    out = re.sub(r"\{[^{}]*:[^{}]*\}", " ", out)
+    out = re.sub(r"\[[^\[\]]*\{[^\]]*\}[^\[\]]*\]", " ", out)
+    out = re.sub(r"\s+", " ", out).strip()
+    return out
+
+
+def _is_probable_product_constraint(text: str) -> bool:
+    t = str(text or "").casefold()
+    if not t:
+        return False
+    markers = ("隔间", "结构", "材质", "皮革", "monogram", "mcm", "logo", "尺寸", "拉链", "双折")
+    return any(m in t for m in markers)
+
+
+def _shot_category(shot) -> str:
+    merged = " ".join(
+        [
+            str(_get_shot_value(shot, "shot_role", "") or ""),
+            str(_get_shot_value(shot, "shot_title", "") or ""),
+            str(_get_shot_value(shot, "visual_action", "") or _get_shot_value(shot, "action_description", "") or ""),
+        ]
+    ).casefold()
+    if any(k.casefold() in merged for k in _PRODUCT_SHOWCASE_HINTS):
+        return "product_showcase"
+    if any(k.casefold() in merged for k in _RESULT_HINTS):
+        return "result_feedback"
+    if any(k.casefold() in merged for k in _PAIN_POINT_HINTS):
+        return "pain_point"
+    return "neutral"
+
+
+def _shot_has_explicit_product_action(shot, product_refs: list[str]) -> bool:
+    merged = " ".join(
+        [
+            str(_get_shot_value(shot, "visual_action", "") or _get_shot_value(shot, "action_description", "") or ""),
+            str(_get_shot_value(shot, "shot_title", "") or ""),
+        ]
+    ).casefold()
+    if any(k.casefold() in merged for k in ("产品", "钱包", "展示", "打开", "拿起", "使用", "特写")):
+        return True
+    return any(str(p or "").strip().casefold() in merged for p in product_refs if str(p or "").strip())
+
+
+def _safe_join(label: str, value: str) -> str:
+    val = _sanitize_prompt_text(value)
+    if not val:
+        return ""
+    return f"{label}: {val}."
+
+
+def _filter_shot_list_values(values: list[str], *, include_product_constraints: bool, max_items: int) -> list[str]:
+    cleaned = [_sanitize_prompt_text(v) for v in values if str(v or "").strip()]
+    deduped = _dedupe_text_items(cleaned, max_items=max_items * 2)
+    if include_product_constraints:
+        constrained = [x for x in deduped if _is_probable_product_constraint(x)]
+        base = [x for x in deduped if x not in constrained]
+        return base[:max_items] + constrained[:_PRODUCT_SHOWCASE_MAX_CONSTRAINTS]
+    return [x for x in deduped if not _is_probable_product_constraint(x)][:max_items]
+
+
+def _build_compact_shot_prompt(shot) -> tuple[str, dict]:
+    visual_action = _sanitize_prompt_text(
+        str(_get_shot_value(shot, "visual_action", "") or _get_shot_value(shot, "action_description", "") or "")
+    )
+    scene_ref = _sanitize_prompt_text(_effective_scene_ref(shot))
+    character_refs = _filter_shot_list_values(_effective_character_refs(shot), include_product_constraints=False, max_items=3)
+    product_refs_all = _filter_shot_list_values(_effective_product_refs(shot), include_product_constraints=False, max_items=2)
+    camera_framing = _sanitize_prompt_text(
+        str(_get_shot_value(shot, "camera_framing", "") or _get_shot_value(shot, "framing", "") or "")
+    )
+    camera_movement = _sanitize_prompt_text(str(_get_shot_value(shot, "camera_movement", "") or ""))
+    mood = _sanitize_prompt_text(str(_get_shot_value(shot, "mood", "") or _get_shot_value(shot, "emotion", "") or ""))
+    style_instruction = _sanitize_prompt_text(str(_get_shot_value(shot, "visual_style_instruction", "") or ""))
+    market_detail = _sanitize_prompt_text(str(_get_shot_value(shot, "market_localization_detail", "") or ""))
+    shot_category = _shot_category(shot)
+    explicit_product = _shot_has_explicit_product_action(shot, product_refs_all)
+    include_product_refs = shot_category == "product_showcase" or explicit_product or shot_category == "result_feedback"
+    product_refs = product_refs_all if include_product_refs else []
+
+    # must_show / must_avoid are kept shot-scoped only, filtered by role.
+    raw_must_show = [str(x) for x in (_get_shot_value(shot, "must_show", []) or [])]
+    raw_must_avoid = [str(x) for x in (_get_shot_value(shot, "must_avoid", []) or [])]
+    must_show = _filter_shot_list_values(
+        raw_must_show,
+        include_product_constraints=shot_category == "product_showcase",
+        max_items=3,
+    )
+    must_avoid = _filter_shot_list_values(
+        raw_must_avoid,
+        include_product_constraints=shot_category == "product_showcase",
+        max_items=3,
+    )
+
+    parts = [
+        _safe_join("Visual action", visual_action),
+        _safe_join("Scene", scene_ref),
+        _safe_join("Characters", ", ".join(character_refs)),
+    ]
+    if product_refs:
+        parts.append(_safe_join("Product refs", ", ".join(product_refs)))
+    parts.extend(
+        [
+            _safe_join("Camera framing", camera_framing),
+            _safe_join("Camera movement", camera_movement),
+            _safe_join("Mood", mood),
+            _safe_join("Visual style", style_instruction),
+            _safe_join("Market localization", market_detail),
+        ]
+    )
+    if must_show:
+        parts.append(_safe_join("Must show", "; ".join(must_show)))
+    if must_avoid:
+        parts.append(_safe_join("Must avoid", "; ".join(must_avoid)))
+    compact = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip()
+    compact = _drop_repetitive_boilerplate(compact)
+    if len(compact) > _SHOT_MAX_CHARS:
+        compact = _compact_text(compact, _SHOT_MAX_CHARS)
+    if len(compact) < _SHOT_MIN_CHARS and len(compact) > 0:
+        compact = f"{compact} {_STYLE_SUFFIX}"
+        compact = _compact_text(compact, _SHOT_MAX_CHARS)
+
+    return compact, {
+        "included_product_refs": bool(product_refs),
+        "included_character_refs": bool(character_refs),
+        "included_scene_refs": bool(scene_ref),
+        "must_show": must_show,
+        "must_avoid": must_avoid,
+    }
+
+
 def _effective_character_refs(shot) -> list[str]:
     manual = _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "manual_character_refs", []) or [])], max_items=8)
     if manual:
@@ -152,160 +330,65 @@ def _summarize_visual_constraints(segment: SegmentScriptSchema) -> list[str]:
 
 def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str) -> tuple[str, dict]:
     dropped_sections: list[str] = []
-    before_parts: list[str] = []
-    final_parts: list[str] = []
-
-    def add(label: str, value: str, max_chars: int) -> None:
-        value = re.sub(r"\s+", " ", (value or "").strip())
-        if not value:
-            return
-        before_parts.append(value)
-        cleaned = _drop_repetitive_boilerplate(value)
-        if cleaned != value:
-            dropped_sections.append("repetitive_template_phrases")
-        value = cleaned
-        if not value:
-            return
-        compacted = _compact_text(value, max_chars)
-        if compacted != value:
-            dropped_sections.append(f"{label}_truncated")
-        final_parts.append(compacted)
-
-    for shot in segment.shots:
-        manual_vp = str(_get_shot_value(shot, "manual_video_prompt", "") or "").strip()
-        vp = manual_vp or str(_get_shot_value(shot, "video_prompt", "") or "").strip()
-        action = str(_get_shot_value(shot, "action_description", "") or "").strip()
-        dialogue = str(_get_shot_value(shot, "spoken_text", "") or _get_shot_value(shot, "dialogue", "") or "").strip()
-        voiceover = str(
-            _get_shot_value(shot, "voiceover_text", "")
-            or _get_shot_value(shot, "voiceover", None)
-            or _get_shot_value(shot, "narration", "")
-            or ""
-        ).strip()
-        subtitle = str(_get_shot_value(shot, "subtitle_text", "") or _get_shot_value(shot, "subtitle", "") or "").strip()
-        must_show = "; ".join(
-            _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "must_show", []) or [])], max_items=3)
-        )
-        must_avoid = "; ".join(
-            _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "must_avoid", []) or [])], max_items=3)
-        )
-        has_dialogue = bool(dialogue)
-        has_voiceover = bool(voiceover)
-        if has_dialogue and has_voiceover:
-            spoken_policy = "both"
-            spoken_requirement = (
-                f'Dialogue requirement: The character must say exactly: "{dialogue}". '
-                "Do not invent extra dialogue. "
-                f'Voiceover requirement: Use this exact voiceover narration: "{voiceover}". '
-                "Do not invent extra narration."
-            )
-        elif has_dialogue:
-            spoken_policy = "dialogue"
-            spoken_requirement = (
-                f'Dialogue requirement: The character must say exactly: "{dialogue}". '
-                "Do not invent extra dialogue."
-            )
-        elif has_voiceover:
-            spoken_policy = "voiceover"
-            spoken_requirement = (
-                f'Voiceover requirement: Use this exact voiceover narration: "{voiceover}". '
-                "Do not invent extra narration."
-            )
-        elif subtitle:
-            spoken_policy = "subtitle"
-            spoken_requirement = (
-                f'Subtitle requirement: Use this exact subtitle text: "{subtitle}". '
-                "Do not invent extra subtitle lines."
-            )
-        else:
-            spoken_policy = "none"
-            spoken_requirement = "无角色口播、无旁白、无字幕，不要添加屏幕文字。"
-        logger.info(
-            "[S4_SPOKEN_CONTENT_POLICY] segment_id=%s shot_id=%s has_dialogue=%s has_voiceover=%s spoken_policy=%s dialogue_preview=%s voiceover_preview=%s",
-            segment.segment_id,
-            str(_get_shot_value(shot, "shot_id", "") or ""),
-            has_dialogue,
-            has_voiceover,
-            spoken_policy,
-            dialogue[:80],
-            voiceover[:80],
-        )
-        fallback = " ".join(
-            x
-            for x in [
-                action,
-                spoken_requirement,
-                f"Must show: {must_show}" if must_show else "",
-                f"Must avoid: {must_avoid}" if must_avoid else "",
-            ]
-            if x
-        )
-        shot_prompt_body = vp or fallback
-        if spoken_requirement not in shot_prompt_body:
-            shot_prompt_body = " ".join(x for x in [shot_prompt_body, spoken_requirement] if x)
+    shot_parts: list[str] = []
+    shot_details: list[dict] = []
+    original_shots = list(segment.shots or [])
+    if len(original_shots) > _SEGMENT_MAX_SHOTS:
+        dropped_sections.append("segment_shot_count_trimmed")
+    selected_shots = original_shots[:_SEGMENT_MAX_SHOTS]
+    for shot in selected_shots:
         shot_id = str(_get_shot_value(shot, "shot_id", "") or "")
-        shot_text = " ".join(x for x in [f"Shot {shot_id}:", shot_prompt_body] if x)
-        add(f"shot_{shot_id}", shot_text, 700)
-
-    if not final_parts:
-        for shot in segment.shots:
-            fallback = " ".join(
-                x
-                for x in (
-                    str(_get_shot_value(shot, "visual_description", "") or "").strip(),
-                    str(_get_shot_value(shot, "action_description", "") or "").strip(),
+        shot_prompt, detail = _build_compact_shot_prompt(shot)
+        if not shot_prompt:
+            fallback = _sanitize_prompt_text(
+                " ".join(
+                    x
+                    for x in (
+                        str(_get_shot_value(shot, "visual_description", "") or "").strip(),
+                        str(_get_shot_value(shot, "action_description", "") or "").strip(),
+                    )
+                    if x
                 )
-                if x
-            ).strip()
-            add(f"fallback_{str(_get_shot_value(shot, 'shot_id', '') or '')}", fallback, 500)
+            )
+            shot_prompt = _compact_text(fallback, _SHOT_MAX_CHARS) if fallback else ""
+        if not shot_prompt:
+            continue
+        shot_parts.append(f"Shot {shot_id}: {shot_prompt}".strip())
+        shot_details.append(detail)
 
-    character_refs = _dedupe_text_items([r for s in segment.shots for r in _effective_character_refs(s)], max_items=8)
-    scene_refs = _dedupe_text_items([_effective_scene_ref(s) for s in segment.shots if _effective_scene_ref(s)], max_items=3)
-    product_refs = _dedupe_text_items([r for s in segment.shots for r in _effective_product_refs(s)], max_items=5)
-    must_show = _dedupe_text_items(
-        [r for s in segment.shots for r in (_get_shot_value(s, "must_show", []) or [])], max_items=3
-    )
-    must_avoid = _dedupe_text_items(
-        [r for s in segment.shots for r in (_get_shot_value(s, "must_avoid", []) or [])], max_items=3
-    )
-    source_selling = _dedupe_text_items(
-        [
-            str(_get_shot_value(s, "source_selling_point", "") or "")
-            for s in segment.shots
-            if str(_get_shot_value(s, "source_selling_point", "") or "")
-        ],
-        max_items=1,
-    )
-    visual_constraints = _summarize_visual_constraints(segment)
-
-    add("refs", f"Characters: {', '.join(character_refs)}. Scenes: {', '.join(scene_refs)}. Products: {', '.join(product_refs)}.", 360)
-    add("must_show", f"Must show: {'; '.join(must_show)}.", 320)
-    add("must_avoid", f"Must avoid: {'; '.join(must_avoid)}.", 320)
-    add("visual", f"Aspect ratio: {aspect_ratio}. Visual constraints: {'; '.join(visual_constraints)}.", 260)
-    add("source_selling_point", f"Selling point: {'; '.join(source_selling)}.", 180)
-    add("style", _STYLE_SUFFIX, 140)
-
-    before_text = " ".join(before_parts)
-    text = re.sub(r"\s+", " ", " ".join(final_parts)).strip()
+    text = re.sub(r"\s+", " ", " ".join(shot_parts)).strip()
+    before_chars = len(text)
     if not text:
         raise ShortDramaVideoInputError(
             f"Segment {segment.segment_id!r} has empty video_prompt (and no usable shot fallback)"
         )
-
-    before_chars = len(before_text)
-    truncated = len(text) > MAX_XAI_VIDEO_PROMPT_CHARS
+    truncated = len(text) > SAFE_VIDEO_PROMPT_CHARS
     if truncated:
-        dropped_sections.append("budget_hard_trim")
-        text = _compact_text(text, MAX_XAI_VIDEO_PROMPT_CHARS)
+        dropped_sections.append("safe_budget_trim")
+        text = _compact_text(text, SAFE_VIDEO_PROMPT_CHARS)
+    text = _sanitize_prompt_text(text)
     if len(text) > _HARD_XAI_VIDEO_PROMPT_CHARS:
         dropped_sections.append("xai_hard_limit_trim")
-        text = _compact_text(text, MAX_XAI_VIDEO_PROMPT_CHARS)
+        text = _compact_text(text, SAFE_VIDEO_PROMPT_CHARS)
+    if len(text) > _HARD_XAI_VIDEO_PROMPT_CHARS:
+        raise ShortDramaVideoInputError(
+            f"Segment {segment.segment_id!r} video_prompt still exceeds xAI hard limit {_HARD_XAI_VIDEO_PROMPT_CHARS}"
+        )
+    included_product_refs = any(d.get("included_product_refs") for d in shot_details)
+    included_character_refs = any(d.get("included_character_refs") for d in shot_details)
+    included_scene_refs = any(d.get("included_scene_refs") for d in shot_details)
     budget = {
         "before_chars": before_chars,
         "after_chars": len(text),
         "truncated": truncated or bool(dropped_sections),
         "dropped_sections": list(dict.fromkeys(dropped_sections)),
         "final_prompt_preview": text[:500],
+        "shot_count": len(selected_shots),
+        "included_product_refs": included_product_refs,
+        "included_character_refs": included_character_refs,
+        "included_scene_refs": included_scene_refs,
+        "safe_video_prompt_chars": SAFE_VIDEO_PROMPT_CHARS,
+        "hard_video_prompt_chars": _HARD_XAI_VIDEO_PROMPT_CHARS,
     }
     return text, budget
 
