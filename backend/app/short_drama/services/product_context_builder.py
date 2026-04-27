@@ -35,8 +35,10 @@ class ProductContextBuilderService:
                 key_functions=list(raw_input.selling_points_raw)[:6],
                 emotional_value=[],
                 suitable_story_angles=["场景代入型", "痛点型"],
+                user_pain_points=[],
                 visual_risk_notes=list(image_understanding.detected_quality_risks)[:8],
                 consistency_notes=["主体外观与主图保持一致"],
+                immutable_structure_constraints=[],
                 extracted_from_images=list(image_understanding.detected_visual_features)[:10],
                 parse_confidence=0.55,
                 source_trace={
@@ -54,6 +56,7 @@ class ProductContextBuilderService:
             "raw_input": raw_input.model_dump(),
             "image_understanding": image_understanding.model_dump(),
             "project_constraints": project_constraints or {},
+            "creative_intent": (project_constraints or {}).get("creative_intent") or (project_constraints or {}).get("legacy_creative_intent_summary") or "",
             "language_policy": (project_constraints or {}).get("language_policy", {}),
             "language_prompt_rules": (project_constraints or {}).get("language_prompt_rules", ""),
         }
@@ -84,12 +87,19 @@ def _normalize_product_context(
             continue
         has_value = bool(value) if not isinstance(value, (list, dict)) else len(value) > 0
         if has_value and field not in trace:
-            if field in {"visual_features", "product_form", "visual_risk_notes", "consistency_notes", "extracted_from_images"}:
+            if field in {
+                "visual_features",
+                "product_form",
+                "visual_risk_notes",
+                "consistency_notes",
+                "immutable_structure_constraints",
+                "extracted_from_images",
+            }:
                 trace[field] = "image_understanding"
             elif field in {"product_name", "product_category", "target_users", "core_selling_points", "usage_scenarios"}:
                 trace[field] = "user_input"
             else:
-                trace[field] = "merged_inference"
+                trace[field] = "model_inference"
 
     conflicts = [str(x).strip() for x in image_understanding.image_conflicts if str(x).strip()]
     notes = list(ctx.visual_risk_notes or [])
@@ -105,8 +115,19 @@ def _normalize_product_context(
         data["product_form"] = image_understanding.detected_product_type
         trace["product_form"] = "image_understanding"
     data["visual_features"] = merged_visual
+    data["user_pain_points"] = [
+        str(x).strip()
+        for x in (ctx.user_pain_points or [])
+        if str(x).strip() and not any(term in str(x) for term in ("不要", "禁止", "不能", "不可", "避免"))
+    ]
     data["visual_risk_notes"] = notes
     data["source_trace"] = trace
+    field_meta = dict(ctx.field_meta or {})
+    for field, origin in trace.items():
+        if field in data and field not in {"source_trace", "field_meta"}:
+            existing = field_meta.get(field) if isinstance(field_meta.get(field), dict) else {}
+            field_meta[field] = {**existing, "origin": origin}
+    data["field_meta"] = field_meta
     if not data.get("product_name") and raw_input.product_name_raw:
         data["product_name"] = raw_input.product_name_raw
         trace["product_name"] = "user_input"
@@ -114,7 +135,7 @@ def _normalize_product_context(
 
 
 def _normalize_source_trace_value(value: Any) -> str:
-    allowed = {"user_input", "image_understanding", "merged_inference"}
+    allowed = {"user_input", "image_understanding", "merged_inference", "model_inference"}
 
     if isinstance(value, list):
         parts = {str(v).strip() for v in value if str(v).strip()}
@@ -130,6 +151,9 @@ def _normalize_source_trace_value(value: Any) -> str:
 
     if "merged_inference" in parts:
         return "merged_inference"
+
+    if "model_inference" in parts:
+        return "model_inference"
 
     if "user_input" in parts and "image_understanding" in parts:
         return "merged_inference"

@@ -4,19 +4,33 @@ export type DurationOption = '30s' | '45s' | '60s';
 
 export type ProjectFormat = 'single_ad' | 'series';
 
-export type PlotStyle = 'twist' | 'conflict' | 'suspense' | 'comedy' | 'emotion';
+export type NarrativeStyle = 'light_conflict' | 'healing' | 'comedy' | 'suspense' | 'emotional';
 
-export type VisualStyle = 'cinematic' | 'animation' | '3d' | 'premium_ad';
+export type VisualStyle = 'cinematic' | 'anime' | '3d_render' | 'premium_ad';
 
 export type AspectRatioOption = '9:16' | '16:9';
+export type TargetMarketOption =
+  | 'North America'
+  | 'Europe'
+  | 'Japan'
+  | 'Southeast Asia'
+  | 'China'
+  | 'Global'
+  | 'Custom';
 
 export interface ShortDramaProjectDraft {
   projectName: string;
   duration: DurationOption;
   format: ProjectFormat;
-  plotStyles: PlotStyle[];
+  narrativeStyle: NarrativeStyle;
   visualStyle: VisualStyle;
   aspectRatio: AspectRatioOption;
+  targetMarket: TargetMarketOption;
+  marketingGoal: string;
+  targetAudience: string;
+  brandTone: string;
+  creativeIntent: string;
+  creativeBrief: string;
 }
 
 export interface ProductInputDraft {
@@ -50,8 +64,10 @@ export interface ParsedProductContextDraft {
   keyFunctions: string[];
   emotionalValue: string[];
   suitableStoryAngles: string[];
+  userPainPoints: string[];
   visualRiskNotes: string[];
   consistencyNotes: string[];
+  immutableStructureConstraints: string[];
   extractedFromImages: string[];
   parseConfidence: number;
   sourceTrace: Record<string, string>;
@@ -100,6 +116,27 @@ export interface StoryBlueprint {
   coreConflict: string;
   twist: string;
   resolution: string;
+  frameworkSections?: {
+    key: string;
+    label: string;
+    content: string;
+  }[];
+  languagePolicy?: {
+    workflowLanguage?: string;
+    videoLanguage?: string;
+    targetMarket?: string;
+  };
+  marketingStrategy?: Record<string, string>;
+  storyStructure?: Record<string, unknown>;
+  storyFramework?: {
+    type?: string;
+    name?: string;
+    structure?: string[];
+    reason?: string;
+  };
+  assetRequirements?: Record<string, unknown>;
+  shotPlan?: Record<string, unknown>;
+  spokenStrategy?: Record<string, unknown>;
 }
 
 export interface SegmentPlanItem {
@@ -111,11 +148,16 @@ export interface SegmentPlanItem {
   duration: string;
   goal: string;
   productExposureMode: string;
+  productExposure?: string;
+  segmentRole?: string;
+  emotionalState?: string;
   summary: string;
   sourceSellingPoint?: string;
   productFeatureToShow?: string;
   targetUserTrigger?: string;
   requiredVisualElements?: string[];
+  expectedAssets?: string[];
+  transitionToNext?: string;
   accentColor: string;
   /** 轻量 tag，如 B2B 广告节奏 */
   tags?: string[];
@@ -210,14 +252,35 @@ export interface StoryBlueprintAnalysisItem {
   color: string;
 }
 
+export interface StoryBlueprintAnalysisSectionField {
+  label: string;
+  value: string;
+}
+
+export interface StoryBlueprintAnalysisSection {
+  key: string;
+  title: string;
+  icon: string;
+  color: string;
+  fields: StoryBlueprintAnalysisSectionField[];
+}
+
 /** Framer step4：片段与镜头（片段视频页） */
 export interface Step4Shot {
   id: number;
   backendShotId: string;
   desc: string;
+  shotRole?: string;
   action: string;
+  spokenText: string;
+  voiceoverText: string;
+  subtitleText: string;
+  camera?: string;
+  cameraMovement?: string;
+  framing?: string;
   dialogue: string;
   voiceover?: string;
+  subtitle?: string;
   dialogueSource?:
     | 'dialogue'
     | 'voiceover'
@@ -237,6 +300,9 @@ export interface Step4Shot {
   cameraDescription?: string;
   imagePrompt?: string;
   videoPrompt?: string;
+  generationPrompt?: string;
+  visualStyleInstruction?: string;
+  marketLocalizationDetail?: string;
   manualVideoPrompt?: string;
   characterRefs?: string[];
   manualCharacterRefs?: string[];
@@ -262,6 +328,8 @@ export interface Step4SegmentItem {
   duration: string;
   durationLimit: number;
   goal: string;
+  segmentRole?: string;
+  productExposure?: string;
   characters: string[];
   scene: string;
   placement: string;
@@ -270,6 +338,8 @@ export interface Step4SegmentItem {
   shots: Step4Shot[];
   /** 后端 segment_id（如 seg_1），用于单段视频生成 */
   backendSegmentId?: string;
+  functionLabel?: string;
+  shortLabel?: string;
   /** pipeline 返回的相对或绝对地址，展示前需经 utils/shortDramaMedia.resolvePublicMediaUrl */
   videoUrl?: string | null;
 }

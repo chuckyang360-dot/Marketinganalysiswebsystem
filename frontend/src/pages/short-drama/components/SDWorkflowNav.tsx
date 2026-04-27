@@ -66,9 +66,8 @@ export function SDWorkflowNav({
       navigate('/');
       return;
     }
-    console.info('[FRONT_SAVE_DRAFT_SUCCESS_REDIRECT]', { project_id: projectId ?? null, step: currentStep ?? null });
+    console.info('[FRONT_SAVE_DRAFT_SUCCESS_STAY]', { project_id: projectId ?? null, step: currentStep ?? null });
     window.alert('草稿已保存');
-    navigate('/short-drama/projects');
   };
 
   return (

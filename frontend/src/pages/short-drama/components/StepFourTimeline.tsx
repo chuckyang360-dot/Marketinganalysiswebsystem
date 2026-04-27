@@ -36,6 +36,14 @@ export function StepFourTimeline({
   const allDone = mergeReady;
   const doneCount = coreDoneCount;
 
+  const timelineLabel = (seg: Step4SegmentItem): { label: string; source: string } => {
+    if (seg.shortLabel?.trim()) return { label: seg.shortLabel.trim(), source: 'short_label' };
+    if (seg.functionLabel?.trim()) return { label: seg.functionLabel.trim().slice(0, 8), source: 'function_label' };
+    const fromTitle = seg.name.includes('：') ? seg.name.split('：')[0].trim() : seg.name.trim();
+    if (fromTitle) return { label: fromTitle.slice(0, 8), source: 'title' };
+    return { label: `S${seg.id}`, source: 'fallback' };
+  };
+
   return (
     <div
       className="flex-shrink-0 px-4 py-3 flex flex-col gap-2"
@@ -84,6 +92,16 @@ export function StepFourTimeline({
           {segments.map((seg) => {
             const status = videoStatus[seg.id] || "idle";
             const isActive = activeSegment === seg.id;
+            const label = timelineLabel(seg);
+            if (import.meta.env.DEV) {
+              console.info('[S4_TIMELINE_ITEM_RENDERED]', {
+                segmentId: seg.id,
+                shortLabel: label.label,
+                duration: seg.duration,
+                status,
+                source: label.source,
+              });
+            }
 
             return (
               <button
@@ -127,10 +145,8 @@ export function StepFourTimeline({
                 {status === "idle" && seg.isNew && (
                   <i className="ri-edit-line text-[10px] shrink-0" style={{ color: "#AEAEB2" }} />
                 )}
-                <span className="truncate text-[11px]">{seg.name}</span>
-                {status !== "idle" && (
-                  <span className="shrink-0 text-[10px]" style={{ color: "#AEAEB2" }}>{seg.duration}</span>
-                )}
+                <span className="truncate text-[11px]">{`S${seg.id} · ${label.label}`}</span>
+                <span className="shrink-0 text-[10px]" style={{ color: "#AEAEB2" }}>{seg.duration}</span>
                 {/* New badge */}
                 {seg.isNew && status === "idle" && (
                   <span
@@ -194,7 +210,7 @@ export function StepFourTimeline({
                 }}
               />
               <span className="text-[10px]" style={{ color: "#AEAEB2" }}>
-                {s.name.split(" · ")[1] || s.name}
+                {timelineLabel(s).label}
               </span>
             </div>
           ))}

@@ -1,13 +1,21 @@
 import type {
   PipelineSummaryDto,
   SegmentPlanItemDto,
-  StoryBlueprintDto,
 } from '../types/shortDramaApi';
 import type {
-  StoryBlueprintAnalysisItem,
+  StoryBlueprintAnalysisSection,
   StoryBlueprintGlobalField,
   StoryBlueprintSettingRow,
 } from '../types/shortDrama';
+import {
+  marketingGoalZhLabel,
+  dialogueModeZhLabel,
+  formatZhLabel,
+  languageZhLabel,
+  storyStyleZhLabel,
+  targetMarketZhLabel,
+  visualStyleZhLabel,
+} from './projectLocales';
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -31,20 +39,15 @@ export function getPipelineStoryMeta(
   return asRecord(meta);
 }
 
-function formatStyleField(style: string | null | undefined): string {
-  if (!style?.trim()) return '—';
-  const s = style.trim();
-  if (s.includes(',')) return s.split(',').map((x) => x.trim()).filter(Boolean).join(' · ');
-  return s;
-}
-
 function extractMarket(
   normalized: Record<string, unknown> | null,
   pipeline: PipelineSummaryDto | null | undefined,
 ): string {
+  const projectMarket = pipeline?.project?.target_market;
+  if (typeof projectMarket === 'string' && projectMarket.trim()) return targetMarketZhLabel(projectMarket);
   if (normalized) {
     const tm = normalized['target_market'] ?? normalized['targetMarkets'];
-    if (typeof tm === 'string' && tm.trim()) return tm.trim();
+    if (typeof tm === 'string' && tm.trim()) return targetMarketZhLabel(tm.trim());
     if (Array.isArray(tm) && tm.length) return tm.map(String).join('、');
     const tu = normalized['target_users'];
     if (typeof tu === 'string' && tu.trim()) return tu.trim();
@@ -58,11 +61,24 @@ function extractMarket(
   const meta = getPipelineStoryMeta(pipeline);
   const mm = meta?.['target_market'] ?? meta?.['market'];
   if (typeof mm === 'string' && mm.trim()) return mm.trim();
-  return 'N/A';
+  return '北美';
 }
 
 function segmentPlanFromBlueprint(blueprint: StoryBlueprintDto | null | undefined): SegmentPlanItemDto[] {
   return blueprint?.segment_plan ?? [];
+}
+
+function creativeStrategyFromBlueprint(blueprint: StoryBlueprintDto | null | undefined): Record<string, unknown> {
+  const brief = blueprint?.creative_brief;
+  if (!brief || typeof brief !== 'object' || Array.isArray(brief)) return {};
+  const strategy = (brief as Record<string, unknown>).creative_strategy;
+  return strategy && typeof strategy === 'object' && !Array.isArray(strategy) ? (strategy as Record<string, unknown>) : {};
+}
+
+function readableValue(value: unknown, fallback = '—'): string {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join(' → ') || fallback;
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return fallback;
 }
 
 /** 叙事节奏标签：段数（左栏「叙事节奏」与右栏「叙事节奏」共用） */
@@ -99,72 +115,6 @@ function deriveEmotionArcLabel(blueprint: StoryBlueprintDto | null | undefined):
   return '弱';
 }
 
-function deriveProtagonistHint(
-  normalized: Record<string, unknown> | null,
-  blueprint: StoryBlueprintDto | null | undefined,
-): string {
-  const tu = normalized?.['target_users'];
-  if (typeof tu === 'string' && tu.trim()) return tu.trim().slice(0, 120);
-  const notes = normalized?.['notes_for_story'];
-  if (typeof notes === 'string' && notes.trim()) return notes.trim().slice(0, 120);
-  const pn = normalized?.['product_name'];
-  const premise = (blueprint?.premise ?? '').trim();
-  if (premise.length > 10) {
-    const head = premise.split(/[。！？\n]/)[0]?.trim() ?? premise.slice(0, 80);
-    const prefix = typeof pn === 'string' && pn.trim() ? `${pn.trim()} · ` : '';
-    return `${prefix}${head}`.slice(0, 120);
-  }
-  if (typeof pn === 'string' && pn.trim()) return `${pn.trim()}（受众与角色细节未解析）`;
-  return '未定义';
-}
-
-function deriveCoreEmotionHint(blueprint: StoryBlueprintDto | null | undefined): string {
-  const hook = blueprint?.hook ?? '';
-  const conflict = blueprint?.core_conflict ?? '';
-  const resolution = blueprint?.resolution ?? '';
-  const blob = `${hook} ${conflict} ${resolution}`;
-  const low = /孤独|迷茫|焦虑|失落|压抑|挫折|怀疑/.test(blob);
-  const high = /自信|温暖|希望|惊喜|升华|释然|坚定/.test(blob);
-  if (low && high) return '低谷 → 上扬';
-  if (/冲突|对立|质疑|挣扎/.test(blob)) return '对立推进';
-  if (high) return '正向情绪主导';
-  if (low) return '压抑基调';
-  return '情绪驱动';
-}
-
-function derivePovHint(blueprint: StoryBlueprintDto | null | undefined): string {
-  const h = (blueprint?.hook ?? '').trim();
-  if (/^(我|「我|‘我)/.test(h) || /\b我\b/.test(h.slice(0, 20))) return '第一人称倾向';
-  return '第三人称';
-}
-
-function buildVerdict(params: {
-  pace: string;
-  hook: string;
-  density: string;
-  arc: string;
-}): { title: string; body: string } {
-  const chunks: string[] = [];
-  if (params.pace === '紧凑') chunks.push('分段紧凑');
-  else if (params.pace === '标准') chunks.push('节奏标准');
-  else chunks.push('分段偏少、节奏偏慢');
-
-  if (params.hook === '强') chunks.push('Hook 信息足');
-  else if (params.hook === '中') chunks.push('Hook 中等');
-  else chunks.push('Hook 偏短，可加强开头');
-
-  if (params.density === '高') chunks.push('产品露出密度高');
-  else if (params.density === '中') chunks.push('产品露出适中');
-  else chunks.push('产品露出偏少');
-
-  if (params.arc === '起伏明显') chunks.push('冲突与反转并存');
-  else if (params.arc === '平滑') chunks.push('叙事较线性');
-  else chunks.push('戏剧张力一般');
-
-  const body = `${chunks.join('；')}。请结合投放目标微调各段时长与露出方式。`;
-  return { title: '结构评估', body };
-}
-
 /**
  * 左侧：项目设置 + 全局设定（真实 pipeline + 可推导字段）
  */
@@ -174,71 +124,105 @@ export function buildStoryBlueprintLeftRailsFromPipeline(
   const p = pipeline?.project;
   const normalized = getPipelineProductNormalized(pipeline);
   const blueprint = pipeline?.story_blueprint?.blueprint ?? undefined;
-  const plan = segmentPlanFromBlueprint(blueprint);
-  const paceGlobal = deriveNarrativePaceLabel(plan.length);
-
   const settings: StoryBlueprintSettingRow[] = [
     { label: '时长', value: p?.duration?.trim() || '—' },
-    { label: '形式', value: p?.format?.trim() || '—' },
-    { label: '风格', value: formatStyleField(p?.style ?? null) },
-    { label: '视觉', value: p?.visual_style?.trim() || '—' },
+    { label: '形式', value: formatZhLabel(p?.format ?? null) },
+    { label: '叙事风格', value: storyStyleZhLabel(p?.style ?? null) },
+    { label: '视觉', value: visualStyleZhLabel(p?.visual_style ?? null) },
     { label: '比例', value: p?.aspect_ratio?.trim() || '—' },
     { label: '市场', value: extractMarket(normalized, pipeline) },
+    { label: '视频语言', value: languageZhLabel(p?.video_language ?? blueprint?.language_policy?.video_language ?? 'en-US') },
+    { label: '工作语言', value: languageZhLabel(p?.workflow_language ?? blueprint?.language_policy?.workflow_language ?? 'zh-CN') },
   ];
 
-  const globalFields: StoryBlueprintGlobalField[] = [
-    { label: '主角', value: deriveProtagonistHint(normalized, blueprint) },
-    { label: '核心情绪', value: deriveCoreEmotionHint(blueprint) },
-    { label: 'POV', value: derivePovHint(blueprint) },
-    { label: '叙事节奏', value: paceGlobal },
-  ];
-
-  return { settings, globalFields };
+  return { settings, globalFields: [] };
 }
 
 /**
  * 右侧：结构分析 + 评估文案（由当前 blueprint 派生）
  */
 export function deriveStoryStructureAnalysis(
-  blueprint: StoryBlueprintDto | null | undefined,
-): { items: StoryBlueprintAnalysisItem[]; verdictTitle: string; verdictBody: string } {
+  pipeline: PipelineSummaryDto | null | undefined,
+): { sections: StoryBlueprintAnalysisSection[] } {
+  const blueprint = pipeline?.story_blueprint?.blueprint;
+  const project = pipeline?.project;
   if (!blueprint || Object.keys(blueprint).length === 0) {
     return {
-      items: [
-        { label: '叙事节奏', value: '—', icon: 'ri-pulse-line', color: '#B45309' },
-        { label: '情绪弧线', value: '—', icon: 'ri-emotion-line', color: '#DC2626' },
-        { label: '广告密度', value: '—', icon: 'ri-bar-chart-2-line', color: '#047857' },
-        { label: 'Hook 强度', value: '—', icon: 'ri-star-line', color: '#B45309' },
+      sections: [
+        {
+          key: 'marketing_strategy',
+          title: '营销策略',
+          icon: 'ri-megaphone-line',
+          color: '#047857',
+          fields: [
+            { label: '目标受众', value: '—' },
+            { label: '核心痛点', value: '—' },
+            { label: '情绪触发', value: '—' },
+            { label: '产品承诺', value: '—' },
+            { label: '转化目标', value: '—' },
+            { label: '行动号召', value: '—' },
+          ],
+        },
+        {
+          key: 'creative_strategy',
+          title: '制作摘要',
+          icon: 'ri-file-list-3-line',
+          color: '#334155',
+          fields: [
+            { label: '资产需求', value: '—' },
+            { label: '分镜段落', value: '—' },
+            { label: '目标市场', value: '—' },
+            { label: '视频语言', value: '—' },
+            { label: '口播方式', value: '—' },
+            { label: '画面比例', value: '—' },
+          ],
+        },
       ],
-      verdictTitle: '结构评估',
-      verdictBody: '请先生成剧本，系统将基于 segment 与 Hook 文本生成简要结构分析。',
     };
   }
 
   const plan = segmentPlanFromBlueprint(blueprint);
-  const pace = deriveNarrativePaceLabel(plan.length);
-  const hookLabel = deriveHookStrengthLabel(blueprint.hook);
-  const density = deriveAdDensityLabel(plan);
-  const arc = deriveEmotionArcLabel(blueprint);
-
-  const hookDisplay =
-    hookLabel === '强' ? '强（文本充实）' : hookLabel === '中' ? '中' : '弱（可加长 Hook）';
-
-  const items: StoryBlueprintAnalysisItem[] = [
-    { label: '叙事节奏', value: pace, icon: 'ri-pulse-line', color: '#B45309' },
-    { label: '情绪弧线', value: arc, icon: 'ri-emotion-line', color: '#DC2626' },
-    { label: '广告密度', value: density, icon: 'ri-bar-chart-2-line', color: '#047857' },
-    { label: 'Hook 强度', value: hookDisplay, icon: 'ri-star-line', color: '#B45309' },
+  const creativeStrategy = creativeStrategyFromBlueprint(blueprint);
+  const spoken = blueprint.spoken_strategy ?? {};
+  const assets = blueprint.asset_requirements ?? {};
+  const assetNeeds = `${Array.isArray(assets.characters) ? assets.characters.length : 0} 角色 / ${Array.isArray(assets.scenes) ? assets.scenes.length : 0} 场景 / ${Array.isArray(assets.products) ? assets.products.length : 0} 产品`;
+  const sections: StoryBlueprintAnalysisSection[] = [
+    {
+      key: 'marketing_strategy',
+      title: '营销策略',
+      icon: 'ri-megaphone-line',
+      color: '#047857',
+      fields: [
+        { label: '目标受众', value: readableValue(blueprint.target_audience) },
+        { label: '核心痛点', value: readableValue(blueprint.core_pain) },
+        { label: '情绪触发', value: readableValue(blueprint.emotional_trigger) },
+        { label: '产品承诺', value: readableValue(blueprint.product_promise) },
+        {
+          label: '转化目标',
+          value: readableValue(
+            blueprint.conversion_goal,
+            marketingGoalZhLabel(project?.marketing_goal),
+          ),
+        },
+      ],
+    },
+    {
+      key: 'creative_strategy',
+      title: '制作摘要',
+      icon: 'ri-file-list-3-line',
+      color: '#334155',
+      fields: [
+        { label: '资产需求', value: assetNeeds },
+        { label: '分镜段落', value: String(plan.length) },
+        { label: '目标市场', value: targetMarketZhLabel(project?.target_market || blueprint.language_policy?.target_market) },
+        { label: '视频语言', value: languageZhLabel(project?.video_language || blueprint.language_policy?.video_language) },
+        { label: '口播方式', value: dialogueModeZhLabel(spoken.default_dialogue_mode || 'spoken') },
+        { label: '画面比例', value: readableValue(project?.aspect_ratio) },
+      ],
+    },
   ];
 
-  const { title, body } = buildVerdict({
-    pace,
-    hook: hookLabel,
-    density,
-    arc,
-  });
-
-  return { items, verdictTitle: title, verdictBody: body };
+  return { sections };
 }
 
 /**

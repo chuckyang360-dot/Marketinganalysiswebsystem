@@ -8,9 +8,17 @@ class CreateShortDramaProjectRequest(BaseModel):
     project_name: str = Field(..., min_length=1, max_length=256)
     duration: Optional[str] = Field(None, description="e.g. 60s")
     format: Optional[str] = Field(None, description="e.g. vertical_9_16")
-    style: Optional[str] = Field(None, description="Tone / genre hints")
+    style: Optional[str | List[str]] = Field(None, description="Narrative style (single-select; legacy list accepted)")
     visual_style: Optional[str] = Field(None, description="Cinematography / look")
     aspect_ratio: Optional[str] = Field(None, description="e.g. 9:16")
+    target_market: Optional[str] = Field("North America", description="Target market, defaults to North America")
+    marketing_goal: Optional[str] = Field("brand_seeding", description="Marketing goal for story strategy")
+    target_audience: Optional[str] = Field("", description="Target audience free text")
+    brand_tone: Optional[str] = Field("natural", description="Brand tone")
+    creative_intent: Optional[str] = Field("", description="Natural-language creative intent")
+    creative_brief: Optional[str] = Field("", description="Additional creative brief")
+    workflow_language: Optional[str] = Field(None, description="Workflow language like zh-CN/en-US")
+    video_language: Optional[str] = Field(None, description="Dialogue/subtitle language like en-US")
 
 
 class ProjectCoverAsset(BaseModel):
@@ -30,6 +38,14 @@ class ShortDramaProjectResponse(BaseModel):
     style: Optional[str] = None
     visual_style: Optional[str] = None
     aspect_ratio: Optional[str] = None
+    target_market: Optional[str] = None
+    marketing_goal: Optional[str] = None
+    target_audience: Optional[str] = None
+    brand_tone: Optional[str] = None
+    creative_intent: Optional[str] = None
+    creative_brief: Optional[str] = None
+    workflow_language: Optional[str] = None
+    video_language: Optional[str] = None
     last_active_step: Optional[Literal["step_0", "step_1", "step_2", "step_3", "step_4", "overview"]] = None
     step_status: Dict[str, str] = Field(default_factory=dict)
     overall_status: Optional[Literal["draft", "stale", "generating", "completed", "failed"]] = None

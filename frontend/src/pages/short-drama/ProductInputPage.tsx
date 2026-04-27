@@ -18,6 +18,11 @@ import { ri, sdColors, sdFontHeading } from './utils/shortDramaHelpers';
 import { withProjectQuery } from './utils/shortDramaRoutes';
 import { touchProjectNameFromPipeline } from './utils/shortDramaStorage';
 import { workflowNavProjectName } from './utils/workflowProjectName';
+import { getUserFriendlyParseError, normalizeProductParseError } from './utils/productParseErrors';
+import {
+  PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE,
+  PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_TITLE,
+} from './utils/productParseErrors';
 
 const emptyDraft: ProductInputDraft = {
   productNameRaw: '',
@@ -43,13 +48,19 @@ const idlePreview: ProductPreviewSummary = {
   keyFunctions: [],
   emotionalValue: [],
   suitableStoryAngles: [],
+  userPainPoints: [],
   visualRiskNotes: [],
   consistencyNotes: [],
+  immutableStructureConstraints: [],
   extractedFromImages: [],
   parseConfidence: 0,
   sourceTrace: {},
   fieldMeta: {},
   status: 'idle',
+};
+
+const safeJoin = (value: unknown, separator = '、') => {
+  return Array.isArray(value) ? value.filter(Boolean).join(separator) : '';
 };
 
 export function ShortDramaProductInputPage() {
@@ -67,6 +78,7 @@ export function ShortDramaProductInputPage() {
   const [navTitle, setNavTitle] = useState<string | null>(null);
   const [isReparseDialogOpen, setIsReparseDialogOpen] = useState(false);
   const [lastParseError, setLastParseError] = useState<string | null>(null);
+  const [isServiceUnavailableDialogOpen, setIsServiceUnavailableDialogOpen] = useState(false);
 
   useEffect(() => {
     refreshSession();
@@ -123,6 +135,7 @@ export function ShortDramaProductInputPage() {
   const missingProject = projectId == null;
   const canGoStoryStep = !missingProject && preview.status === 'ready';
   const displayName = workflowNavProjectName({ fetchedProjectName: navTitle, sessionProjectName: projectName });
+  const friendlyParseError = lastParseError ? getUserFriendlyParseError(lastParseError) : null;
 
   const runParse = async (mode: 'replace_all' | 'preserve_user_edited') => {
     if (projectId == null) return;
@@ -139,9 +152,18 @@ export function ShortDramaProductInputPage() {
     if (next.status === 'ready') {
       setLastReparseInfo({ updated: result.updatedFields, preserved: result.preservedFields });
       setLastParseError(null);
+      setIsServiceUnavailableDialogOpen(false);
     } else {
       setLastReparseInfo(null);
-      setLastParseError(next.errorMessage || '解析失败，请查看后端日志。');
+      const normalized = normalizeProductParseError(next.errorMessage || '产品解析失败，请检查输入内容或稍后重试。');
+      if (normalized === PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE) {
+        console.warn('[S1_PARSE_UPSTREAM_UNAVAILABLE_UI]', { project_id: projectId, raw_error: next.errorMessage || '' });
+        setIsServiceUnavailableDialogOpen(true);
+        setLastParseError(null);
+      } else {
+        setLastParseError(normalized);
+        setIsServiceUnavailableDialogOpen(false);
+      }
     }
     setIsParsing(false);
     setIsReparseDialogOpen(false);
@@ -174,11 +196,24 @@ export function ShortDramaProductInputPage() {
     if (projectId == null) return false;
     const nextResult = await parseSafe(projectId, draft, 'replace_all');
     const next = nextResult.preview;
-    if (next.status !== 'ready') return false;
+    if (next.status !== 'ready') {
+      const normalized = normalizeProductParseError(next.errorMessage || '产品解析失败，请检查输入内容或稍后重试。');
+      if (normalized === PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE) {
+        console.warn('[S1_SAVE_DRAFT_PARSE_UNAVAILABLE]', { project_id: projectId, raw_error: next.errorMessage || '' });
+        setIsServiceUnavailableDialogOpen(true);
+        setLastParseError(null);
+      } else {
+        setLastParseError(normalized);
+      }
+      return false;
+    }
     setPreview(next);
     await persistEditedContextIfNeeded();
     await touchShortDramaProjectStep(projectId, { step: 'step_1', save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft' });
     setIsRawDirty(false);
+    setIsParsedDirty(false);
+    setLastParseError(null);
+    setIsServiceUnavailableDialogOpen(false);
     return true;
   };
 
@@ -194,13 +229,40 @@ export function ShortDramaProductInputPage() {
         onReplaceAll={() => void runParse('replace_all')}
         onPreserveEdited={() => void runParse('preserve_user_edited')}
       />
+      {isServiceUnavailableDialogOpen ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-md rounded-2xl border border-[#EAEAEA] bg-white p-5 shadow-xl">
+            <h3 className="text-[17px] font-bold text-[#1D1D1F]">{PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_TITLE}</h3>
+            <p className="mt-2 text-[13px] leading-relaxed text-[#6E6E73]">{PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE}</p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsServiceUnavailableDialogOpen(false)}
+                className="rounded-lg border border-[#EAEAEA] px-3.5 py-2 text-[12.5px]"
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsServiceUnavailableDialogOpen(false);
+                  void handleParse();
+                }}
+                className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
+              >
+                重新解析
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <SDWorkflowNav currentStep={1} projectName={displayName} projectId={projectId} isDirty={isRawDirty || isParsedDirty} onSaveDraft={saveDraft} />
       <div className="pt-14">
         <div className="mx-auto max-w-4xl px-6 py-10">
           <header className="mb-6">
             <span className="text-[11px] font-bold uppercase tracking-widest text-[#8E8E93]">STEP 01</span>
             <h1 className="mt-1 text-2xl font-black" style={{ ...sdFontHeading, color: sdColors.ink }}>产品理解层</h1>
-            <p className="mt-1 text-[13px] text-[#8E8E93]">原始输入 + 图片理解 -&gt; 结构化 Product Context</p>
+            <p className="mt-1 text-[13px] text-[#8E8E93]">上传产品资料，AI 自动识别商品特征、卖点和使用场景。</p>
           </header>
 
           {missingProject ? (
@@ -216,7 +278,7 @@ export function ShortDramaProductInputPage() {
           )}
 
           <div className="mb-4 rounded-xl border border-[#EAEAEA] bg-white px-4 py-3 text-[12px]">
-            解析版本：v{parseVersion} {parseDirty ? <span className="ml-2 text-[#B45309]">原始输入已修改，解析结果待更新</span> : null}
+            {parseDirty ? <span className="text-[#B45309]">原始输入已修改，解析结果待更新</span> : <span className="text-[#8E8E93]">等待解析产品信息</span>}
             {isParsedDirty ? <span className="ml-2 text-[#0F766E]">解析结果已被人工修订</span> : null}
             {hasUserEditedParsedFields ? <span className="ml-2 text-[#6B7280]">存在人工编辑字段</span> : null}
           </div>
@@ -229,19 +291,35 @@ export function ShortDramaProductInputPage() {
               {isParsing ? '解析中…' : '解析产品信息'}
             </button>
           </div>
-          {lastParseError ? (
-            <div className="mt-3 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] text-[#B91C1C]">
-              解析失败：{lastParseError}
+          {friendlyParseError ? (
+            <div className="mt-3 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-3 py-3 text-[12px] text-[#B91C1C]">
+              {friendlyParseError.title ? (
+                <p className="font-semibold">{friendlyParseError.title}</p>
+              ) : (
+                <p>解析失败：{friendlyParseError.message}</p>
+              )}
+              {friendlyParseError.title ? (
+                <p className="mt-1 leading-relaxed">{friendlyParseError.message}</p>
+              ) : null}
+              {friendlyParseError.suggestions?.length ? (
+                <ol className="mt-2 list-decimal space-y-1 pl-5">
+                  {friendlyParseError.suggestions.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ol>
+              ) : null}
             </div>
           ) : null}
 
           <div className="mt-8 rounded-2xl border border-[#EAEAEA] bg-white p-6">
             <h2 className="mb-4 text-[14px] font-bold text-[#1D1D1F]">解析结果层（可编辑）</h2>
             <textarea className="w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={3} value={preview.productSummary} onChange={(e) => { setPreview((p) => ({ ...p, productSummary: e.target.value, fieldMeta: { ...p.fieldMeta, product_summary: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="产品概述" />
-            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={preview.coreSellingPoints.join('\n')} onChange={(e) => { setPreview((p) => ({ ...p, coreSellingPoints: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, core_selling_points: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="核心卖点（每行一条）" />
-            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={preview.visualFeatures.join('\n')} onChange={(e) => { setPreview((p) => ({ ...p, visualFeatures: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, visual_features: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="视觉特征（每行一条）" />
-            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={preview.suitableStoryAngles.join('\n')} onChange={(e) => { setPreview((p) => ({ ...p, suitableStoryAngles: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, suitable_story_angles: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="故事角度（每行一条）" />
-            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={preview.visualRiskNotes.join('\n')} onChange={(e) => { setPreview((p) => ({ ...p, visualRiskNotes: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, visual_risk_notes: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="风险提示（每行一条）" />
+            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={safeJoin(preview.coreSellingPoints, '\n')} onChange={(e) => { setPreview((p) => ({ ...p, coreSellingPoints: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, core_selling_points: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="核心卖点（每行一条）" />
+            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={safeJoin(preview.visualFeatures, '\n')} onChange={(e) => { setPreview((p) => ({ ...p, visualFeatures: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, visual_features: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="视觉特征（每行一条）" />
+            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={safeJoin(preview.suitableStoryAngles, '\n')} onChange={(e) => { setPreview((p) => ({ ...p, suitableStoryAngles: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, suitable_story_angles: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="故事角度（每行一条）" />
+            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={safeJoin(preview.userPainPoints, '\n')} onChange={(e) => { setPreview((p) => ({ ...p, userPainPoints: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, user_pain_points: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="用户真实痛点（每行一条）" />
+            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={safeJoin(preview.visualRiskNotes, '\n')} onChange={(e) => { setPreview((p) => ({ ...p, visualRiskNotes: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, visual_risk_notes: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="风险提示（每行一条）" />
+            <textarea className="mt-3 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-[13px]" rows={2} value={safeJoin(preview.immutableStructureConstraints, '\n')} onChange={(e) => { setPreview((p) => ({ ...p, immutableStructureConstraints: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean), fieldMeta: { ...p.fieldMeta, immutable_structure_constraints: { edited_by_user: true, edited_at: new Date().toISOString() } } })); setIsParsedDirty(true); }} placeholder="产品不可变结构约束（每行一条）" />
           </div>
           {lastReparseInfo && preview.status === 'ready' ? (
             <div className="mt-3 rounded-lg border border-[#EAEAEA] bg-white px-3 py-2 text-[12px] text-[#4B5563]">

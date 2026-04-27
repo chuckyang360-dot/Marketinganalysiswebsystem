@@ -1,4 +1,5 @@
-import type { AspectRatioOption, DurationOption, PlotStyle, ProjectFormat, VisualStyle } from '../types/shortDrama';
+import type { AspectRatioOption, DurationOption, NarrativeStyle, ProjectFormat, TargetMarketOption, VisualStyle } from '../types/shortDrama';
+import { BRAND_TONE_OPTIONS, MARKETING_GOAL_OPTIONS, TARGET_MARKET_OPTIONS } from '../utils/projectLocales';
 import { ri, sdColors } from '../utils/shortDramaHelpers';
 
 const DURATIONS: DurationOption[] = ['30s', '45s', '60s'];
@@ -8,18 +9,18 @@ const FORMATS: { value: ProjectFormat; label: string; desc: string }[] = [
   { value: 'series', label: '系列短视频', desc: '多集连载营销内容' },
 ];
 
-const PLOT: { value: PlotStyle; label: string; icon: string }[] = [
-  { value: 'twist', label: '反转', icon: 'ri-exchange-line' },
-  { value: 'conflict', label: '冲突', icon: 'ri-sword-line' },
-  { value: 'suspense', label: '悬疑', icon: 'ri-eye-2-line' },
-  { value: 'comedy', label: '搞笑', icon: 'ri-emotion-laugh-line' },
-  { value: 'emotion', label: '情绪', icon: 'ri-heart-pulse-line' },
+const NARRATIVE_STYLE_OPTIONS: { value: NarrativeStyle; label: string; icon: string }[] = [
+  { value: 'light_conflict', label: '轻冲突', icon: 'ri-scales-3-line' },
+  { value: 'healing', label: '治愈陪伴', icon: 'ri-mental-health-line' },
+  { value: 'comedy', label: '轻喜剧', icon: 'ri-emotion-laugh-line' },
+  { value: 'suspense', label: '悬疑反转', icon: 'ri-eye-2-line' },
+  { value: 'emotional', label: '情绪共鸣', icon: 'ri-heart-pulse-line' },
 ];
 
 const VISUAL: { value: VisualStyle; label: string; icon: string }[] = [
   { value: 'cinematic', label: '写实电影感', icon: 'ri-camera-lens-line' },
-  { value: 'animation', label: '动画风格', icon: 'ri-brush-line' },
-  { value: '3d', label: '3D 渲染', icon: 'ri-shape-2-line' },
+  { value: 'anime', label: '动画风格', icon: 'ri-brush-line' },
+  { value: '3d_render', label: '3D 渲染', icon: 'ri-shape-2-line' },
   { value: 'premium_ad', label: '高级广告感', icon: 'ri-sparkling-2-line' },
 ];
 
@@ -32,12 +33,24 @@ type Props = {
   setDuration: (v: DurationOption) => void;
   format: ProjectFormat;
   setFormat: (v: ProjectFormat) => void;
-  plotStyles: PlotStyle[];
-  togglePlotStyle: (v: PlotStyle) => void;
+  narrativeStyle: NarrativeStyle;
+  setNarrativeStyle: (v: NarrativeStyle) => void;
   visualStyle: VisualStyle;
   setVisualStyle: (v: VisualStyle) => void;
   aspectRatio: AspectRatioOption;
   setAspectRatio: (v: AspectRatioOption) => void;
+  targetMarket: TargetMarketOption;
+  setTargetMarket: (v: TargetMarketOption) => void;
+  marketingGoal: string;
+  setMarketingGoal: (v: string) => void;
+  targetAudience: string;
+  setTargetAudience: (v: string) => void;
+  brandTone: string;
+  setBrandTone: (v: string) => void;
+  creativeIntent: string;
+  setCreativeIntent: (v: string) => void;
+  creativeBrief: string;
+  setCreativeBrief: (v: string) => void;
 };
 
 export function ProjectCreateForm({
@@ -47,12 +60,24 @@ export function ProjectCreateForm({
   setDuration,
   format,
   setFormat,
-  plotStyles,
-  togglePlotStyle,
+  narrativeStyle,
+  setNarrativeStyle,
   visualStyle,
   setVisualStyle,
   aspectRatio,
   setAspectRatio,
+  targetMarket,
+  setTargetMarket,
+  marketingGoal,
+  setMarketingGoal,
+  targetAudience,
+  setTargetAudience,
+  brandTone,
+  setBrandTone,
+  creativeIntent,
+  setCreativeIntent,
+  creativeBrief,
+  setCreativeBrief,
 }: Props) {
   const inputCls =
     'w-full rounded-xl border border-[#EAEAEA] bg-[#F7F8FA] px-4 py-3 text-[14px] outline-none transition-colors focus:border-[#1D1D1F] focus:bg-white';
@@ -124,15 +149,15 @@ export function ProjectCreateForm({
       </div>
 
       <div>
-        <label className="mb-3 block text-[13px] font-semibold text-[#444444]">剧情风格（可多选）</label>
+        <label className="mb-3 block text-[13px] font-semibold text-[#444444]">叙事风格</label>
         <div className="flex flex-wrap gap-2">
-          {PLOT.map((s) => {
-            const active = plotStyles.includes(s.value);
+          {NARRATIVE_STYLE_OPTIONS.map((s) => {
+            const active = narrativeStyle === s.value;
             return (
               <button
                 key={s.value}
                 type="button"
-                onClick={() => togglePlotStyle(s.value)}
+                onClick={() => setNarrativeStyle(s.value)}
                 className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-medium transition-colors"
                 style={{
                   background: active ? sdColors.ink : sdColors.surface,
@@ -187,6 +212,75 @@ export function ProjectCreateForm({
             </button>
           ))}
         </div>
+      </div>
+
+      <div>
+        <label className="mb-3 block text-[13px] font-semibold text-[#444444]">目标市场</label>
+        <select
+          className={inputCls}
+          value={targetMarket}
+          onChange={(e) => setTargetMarket(e.target.value as TargetMarketOption)}
+        >
+          {TARGET_MARKET_OPTIONS.map((market) => (
+            <option key={market.value} value={market.value}>
+              {market.value} / {market.zhLabel}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-3 block text-[13px] font-semibold text-[#444444]">营销目标</label>
+        <select className={inputCls} value={marketingGoal} onChange={(e) => setMarketingGoal(e.target.value)}>
+          {MARKETING_GOAL_OPTIONS.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.zhLabel}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-[13px] font-semibold text-[#444444]">目标受众</label>
+        <input
+          className={inputCls}
+          value={targetAudience}
+          onChange={(e) => setTargetAudience(e.target.value)}
+          placeholder="例如：北美年轻通勤人群、TikTok 女性用户、独居青年等。"
+        />
+      </div>
+
+      <div>
+        <label className="mb-3 block text-[13px] font-semibold text-[#444444]">品牌调性</label>
+        <select className={inputCls} value={brandTone} onChange={(e) => setBrandTone(e.target.value)}>
+          {BRAND_TONE_OPTIONS.map((item) => (
+            <option key={item.value} value={item.value}>
+              {item.zhLabel}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-[13px] font-semibold text-[#444444]">创作意图</label>
+        <textarea
+          className={inputCls}
+          rows={4}
+          value={creativeIntent}
+          onChange={(e) => setCreativeIntent(e.target.value)}
+          placeholder="用自然语言描述这条视频想表达什么、希望什么风格、强调什么、不想要什么。"
+        />
+      </div>
+
+      <div>
+        <label className="mb-2 block text-[13px] font-semibold text-[#444444]">补充创作说明</label>
+        <textarea
+          className={inputCls}
+          rows={4}
+          value={creativeBrief}
+          onChange={(e) => setCreativeBrief(e.target.value)}
+          placeholder="补充你希望强调的剧情方向、禁忌、产品使用场景等。"
+        />
       </div>
 
       <div>

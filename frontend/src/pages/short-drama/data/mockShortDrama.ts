@@ -134,9 +134,15 @@ export const defaultProjectDraft: ShortDramaProjectDraft = {
   projectName: '',
   duration: '60s',
   format: 'single_ad',
-  plotStyles: ['conflict'],
+  narrativeStyle: 'light_conflict',
   visualStyle: 'cinematic',
   aspectRatio: '9:16',
+  targetMarket: 'North America',
+  marketingGoal: 'brand_seeding',
+  targetAudience: '',
+  brandTone: 'natural',
+  creativeIntent: '',
+  creativeBrief: '',
 };
 
 /** 剧本大纲页左侧：项目设置（与 Create / 统一 mock 设定一致） */
@@ -279,7 +285,7 @@ export const mockProductPreview: ProductPreviewSummary = {
   status: 'idle',
 };
 
-export const mockMarkets = ['北美', '欧洲', '东南亚', '中东', '日本/韩国', '澳大利亚', '全球'] as const;
+export const mockMarkets = ['北美', '欧洲', '日本', '东南亚', '中国', '全球', '自定义'] as const;
 
 export const mockCategories = [
   '家居生活',

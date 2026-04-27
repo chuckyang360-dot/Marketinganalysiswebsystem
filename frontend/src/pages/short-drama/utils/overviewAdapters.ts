@@ -2,6 +2,7 @@ import type { PipelineSummaryDto, SegmentScriptPipelineRowDto, StoryBlueprintDto
 import { resolveAssetImageUrl, } from './assetsPageAdapters';
 import { NEUTRAL_VERTICAL_POSTER, resolvePublicMediaUrl } from './shortDramaMedia';
 import { segmentScriptDtoToStepSegmentViewModel } from './stepFourAdapters';
+import { formatZhLabel, storyStyleZhLabel, targetMarketZhLabel, visualStyleZhLabel } from './projectLocales';
 
 const EM_DASH = '—';
 
@@ -127,18 +128,18 @@ export function pipelineToOverviewViewModel(pipeline: PipelineSummaryDto | null)
   const finalAbs = resolvePublicMediaUrl(pipeline?.final_video_url);
 
   const duration = proj?.duration?.trim() || EM_DASH;
-  const format = proj?.format?.trim() || EM_DASH;
+  const format = formatZhLabel(proj?.format);
   const ratio = proj?.aspect_ratio?.trim() || EM_DASH;
-  const style = proj?.style?.trim() || EM_DASH;
-  const visualStyle = proj?.visual_style?.trim() || EM_DASH;
+  const style = storyStyleZhLabel(proj?.style);
+  const visualStyle = visualStyleZhLabel(proj?.visual_style);
 
-  let market = EM_DASH;
+  let market = targetMarketZhLabel(proj?.target_market ?? 'North America');
   const norm = pipeline?.product_context && (pipeline.product_context as { normalized?: unknown }).normalized;
   if (norm && typeof norm === 'object' && !Array.isArray(norm)) {
     const n = norm as Record<string, unknown>;
     const m = n.target_markets ?? n.markets;
-    if (Array.isArray(m) && m.length && typeof m[0] === 'string') market = m[0];
-    else if (typeof m === 'string' && m.trim()) market = m.trim();
+    if (Array.isArray(m) && m.length && typeof m[0] === 'string') market = targetMarketZhLabel(m[0]);
+    else if (typeof m === 'string' && m.trim()) market = targetMarketZhLabel(m.trim());
   }
 
   const status = proj?.status ?? '';

@@ -170,14 +170,25 @@ export function StepFourAssetLibrary({ library, onDragAsset: _onDragAsset }: Ass
   );
 }
 
-function getMetaText(item: AssetItem, keys: string[]): string {
+function getMetaText(item: AssetItem, keys: string[], fallback = "—"): string {
   const meta = "meta" in item && item.meta && typeof item.meta === "object" ? item.meta : {};
+  const typeFields =
+    "type_fields" in (meta as Record<string, unknown>) &&
+    (meta as Record<string, unknown>).type_fields &&
+    typeof (meta as Record<string, unknown>).type_fields === "object"
+      ? ((meta as Record<string, unknown>).type_fields as Record<string, unknown>)
+      : {};
   for (const key of keys) {
-    const v = (meta as Record<string, unknown>)[key];
+    const v = (typeFields as Record<string, unknown>)[key] ?? (meta as Record<string, unknown>)[key];
     if (typeof v === "string" && v.trim()) return v.trim();
     if (Array.isArray(v) && v.length) return v.map(String).filter(Boolean).join("；");
   }
-  return "—";
+  return fallback;
+}
+
+function sceneMetaText(item: AssetItem, keys: string[], fallback: string): string {
+  const value = getMetaText(item, keys, "").trim();
+  return value || fallback;
 }
 
 function AssetDetailModal({
@@ -194,28 +205,35 @@ function AssetDetailModal({
           ["名称", item.name],
           ["角色定位", "role" in item ? item.role : "—"],
           ["描述", "desc" in item ? item.desc || "—" : "—"],
-          ["外观/服装/基础表情", getMetaText(item, ["appearance", "clothing", "base_expression", "expression", "visual_features"])],
-          ["音色", "voice" in item ? item.voice : getMetaText(item, ["voice_style", "voice"])],
-          ["结构摘要信息", getMetaText(item, ["asset_identity", "narrative_function", "purpose", "exposure_priority"])],
+          ["外观", getMetaText(item, ["appearance"])],
+          ["服装", getMetaText(item, ["costume", "clothing"])],
+          ["基础表情", getMetaText(item, ["base_expression", "expression"])],
+          ["剧情用途", getMetaText(item, ["story_usage"])],
+          ["音色", "voice" in item ? item.voice : getMetaText(item, ["voice_profile", "voice_style", "voice"])],
+          ["结构摘要信息", getMetaText(item, ["structure_summary"], "暂无结构摘要")],
           ["图片来源", "imageSource" in item ? item.imageSource : "—"],
         ]
       : kind === "scene"
         ? [
             ["名称", item.name],
-            ["场景类型", "type" in item ? item.type : "—"],
-            ["地点/空间", getMetaText(item, ["location", "space", "place", "scene_form"])],
-            ["灯光", getMetaText(item, ["lighting", "light"])],
-            ["氛围", getMetaText(item, ["mood", "atmosphere"])],
-            ["道具", getMetaText(item, ["props", "key_props"])],
-            ["描述", "desc" in item ? item.desc || "—" : "—"],
+            ["场景定位", sceneMetaText(item, ["scene_form"], "未标注")],
+            ["地点/空间", sceneMetaText(item, ["location", "space", "place"], "未标注")],
+            ["描述", "desc" in item ? item.desc || "暂无描述" : "暂无描述"],
+            ["灯光", sceneMetaText(item, ["lighting", "light"], "暂无描述")],
+            ["氛围", sceneMetaText(item, ["mood", "atmosphere"], "暂无描述")],
+            ["道具", sceneMetaText(item, ["props", "key_props"], "暂无描述")],
+            ["剧情用途", sceneMetaText(item, ["story_usage"], "暂无描述")],
+            ["结构摘要信息", getMetaText(item, ["structure_summary"], "暂无结构摘要")],
             ["图片来源", "imageSource" in item ? item.imageSource : "—"],
           ]
         : [
             ["名称", item.name],
             ["产品定位", "type" in item ? item.type : "—"],
             ["描述", "desc" in item ? item.desc || "—" : "—"],
+            ["形态/材质/特征", getMetaText(item, ["form", "material", "color", "visual_features"])],
             ["产品使用方式", getMetaText(item, ["product_usage", "usage_mode", "placement", "shot_use"])],
-            ["结构摘要信息", getMetaText(item, ["asset_identity", "narrative_function", "purpose", "exposure_priority"])],
+            ["剧情用途", getMetaText(item, ["story_usage"])],
+            ["结构摘要信息", getMetaText(item, ["structure_summary"], "暂无结构摘要")],
             ["图片来源", "imageSource" in item ? item.imageSource : "—"],
           ];
 

@@ -7,7 +7,9 @@ type RefKind = "characters" | "scene" | "products";
 
 type ShotDraft = {
   action: string;
-  dialogue: string;
+  spokenText: string;
+  voiceoverText: string;
+  subtitleText: string;
   dialogueSource?: Step4Shot["dialogueSource"];
   emotion: string;
   videoPrompt: string;
@@ -19,23 +21,6 @@ type ShotDraft = {
   sceneRef: string;
   productRefs: string[];
 };
-
-function normalizeDialogueSourceForSave(
-  source: Step4Shot["dialogueSource"] | undefined,
-  hasInput: boolean,
-): "dialogue" | "voiceover" | undefined {
-  if (source === "voiceover" || source === "narration") return "voiceover";
-  if (
-    source === "dialogue" ||
-    source === "spoken_line" ||
-    source === "caption" ||
-    source === "dialogue_lines" ||
-    source === "lines" ||
-    source === "script"
-  ) return "dialogue";
-  if (hasInput) return "dialogue";
-  return undefined;
-}
 
 type SegmentDraft = {
   title: string;
@@ -157,20 +142,16 @@ export function StepFourSegmentWorkbench({
     try {
       for (const shot of targets) {
         const sd = draft.shots[shot.id] ?? makeShotDraft(shot);
-        const hasDialogueInput = sd.dialogue.trim().length > 0;
-        const normalizedSource = normalizeDialogueSourceForSave(sd.dialogueSource, hasDialogueInput);
-        const dialoguePayload =
-          normalizedSource === "voiceover"
-            ? { voiceover: sd.dialogue }
-            : { dialogue: sd.dialogue };
         await onSaveSegmentShot(seg.id, shot.backendShotId, {
           segment_title: draft.title,
           segment_goal: draft.goal,
           duration_limit: draft.durationLimit,
           action_description: sd.action,
-          ...dialoguePayload,
+          spoken_text: sd.spokenText,
+          voiceover_text: sd.voiceoverText,
+          subtitle_text: sd.subtitleText,
           emotion: sd.emotion,
-          video_prompt: sd.videoPrompt,
+          generation_prompt: sd.videoPrompt,
           manual_video_prompt: sd.manualVideoPrompt,
           must_show: splitList(sd.mustShowText),
           must_avoid: splitList(sd.mustAvoidText),
@@ -351,7 +332,9 @@ function makeSegmentDraft(seg: Step4SegmentItem): SegmentDraft {
 function makeShotDraft(shot?: Step4Shot): ShotDraft {
   return {
     action: shot?.action ?? "",
-    dialogue: shot?.dialogue ?? "",
+    spokenText: shot?.spokenText ?? shot?.dialogue ?? "",
+    voiceoverText: shot?.voiceoverText ?? shot?.voiceover ?? "",
+    subtitleText: shot?.subtitleText ?? shot?.subtitle ?? "",
     dialogueSource: shot?.dialogueSource,
     emotion: shot?.emotion ?? "",
     videoPrompt: shot?.videoPrompt ?? "",
@@ -416,17 +399,19 @@ function ShotFields({
   onChange: (patch: Partial<ShotDraft>) => void;
   onSelect: (kind: RefKind) => void;
 }) {
-  const dialogueLabel =
+  const languageSuffix =
     videoLanguage === 'en-US'
-      ? '台词 / 旁白（视频语言：英语）'
+      ? '（视频语言：英语）'
       : videoLanguage === 'zh-CN'
-        ? '台词 / 旁白（视频语言：中文）'
-        : '台词 / 旁白';
+        ? '（视频语言：中文）'
+        : '';
   return (
     <div className="space-y-4">
       <div className="rounded-xl p-3 space-y-3" style={{ background: "#fff", border: "1px solid #EAEAEA" }}>
         <Field label="画面动作" value={draft.action} editing={editing} multiline onChange={(v) => onChange({ action: v })} />
-        <Field label={dialogueLabel} value={draft.dialogue} editing={editing} multiline onChange={(v) => onChange({ dialogue: v })} />
+        <Field label={`角色口播${languageSuffix}`} value={draft.spokenText} editing={editing} multiline onChange={(v) => onChange({ spokenText: v })} />
+        <Field label={`旁白/画外音${languageSuffix}`} value={draft.voiceoverText} editing={editing} multiline onChange={(v) => onChange({ voiceoverText: v })} />
+        <Field label={`字幕文案${languageSuffix}`} value={draft.subtitleText} editing={editing} multiline onChange={(v) => onChange({ subtitleText: v })} />
         <div className="grid grid-cols-2 gap-3">
           <Field label="情绪状态" value={draft.emotion} editing={editing} onChange={(v) => onChange({ emotion: v })} />
           <NumberField label="镜头时长" value={draft.durationSeconds} editing={editing} onChange={(v) => onChange({ durationSeconds: v })} />

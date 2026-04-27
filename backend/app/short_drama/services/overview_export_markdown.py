@@ -128,9 +128,12 @@ def build_script_markdown(
             act = (shot.get("action_description") or "").strip()
             if act:
                 lines.append(f"- **动作**：{act}")
-            dialogue = (shot.get("dialogue") or "").strip() or (shot.get("narration") or "").strip()
-            if dialogue:
-                lines.append(f"- **台词 / 旁白**：{dialogue}")
+            spoken = (shot.get("spoken_text") or shot.get("dialogue") or "").strip()
+            voiceover = (shot.get("voiceover_text") or shot.get("voiceover") or shot.get("narration") or "").strip()
+            subtitle = (shot.get("subtitle_text") or shot.get("subtitle") or "").strip()
+            lines.append(f"- **角色口播**：{spoken or '无角色口播'}")
+            lines.append(f"- **旁白/画外音**：{voiceover or '无旁白'}")
+            lines.append(f"- **字幕文案**：{subtitle or '无字幕'}")
             em = (shot.get("emotion") or "").strip() or "—"
             lines.append(f"- **情绪**：{em}")
             lines.append(f"- **时长**：{_fmt_duration_seconds(shot.get('duration_seconds'))}")

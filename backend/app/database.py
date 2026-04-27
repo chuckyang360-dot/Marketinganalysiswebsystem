@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 engine = create_engine(
     settings.DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
-    echo=settings.DEBUG
+    echo=settings.DB_DEBUG,
 )
 
 # Create SessionLocal class
@@ -20,6 +20,70 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create Base class for models
 Base = declarative_base()
+
+
+def ensure_short_drama_project_columns(target_engine=None) -> None:
+    """Idempotent migration for newly added short_drama_projects language/market columns."""
+    db_engine = target_engine or engine
+    table_name = "short_drama_projects"
+    required_columns = {
+        "target_market": ("VARCHAR", "'North America'"),
+        "marketing_goal": ("VARCHAR", "'brand_seeding'"),
+        "target_audience": ("VARCHAR", "''"),
+        "brand_tone": ("VARCHAR", "'natural'"),
+        "creative_intent": ("VARCHAR", "''"),
+        "creative_brief": ("VARCHAR", "''"),
+        "workflow_language": ("VARCHAR", "'zh-CN'"),
+        "video_language": ("VARCHAR", "'en-US'"),
+    }
+    added_columns: list[str] = []
+    skipped_columns: list[str] = []
+    try:
+        insp = inspect(db_engine)
+        dialect = db_engine.dialect.name
+        if not insp.has_table(table_name):
+            logger.info(
+                "[SHORT_DRAMA_DB_MIGRATION] table=%s added_columns=%s skipped_columns=%s dialect=%s",
+                table_name,
+                added_columns,
+                list(required_columns.keys()),
+                dialect,
+            )
+            return
+        cols = {c["name"] for c in insp.get_columns(table_name)}
+        with db_engine.begin() as conn:
+            for col_name, (col_type, default_value) in required_columns.items():
+                if col_name in cols:
+                    skipped_columns.append(col_name)
+                    continue
+                if dialect == "postgresql":
+                    stmt = (
+                        f"ALTER TABLE {table_name} "
+                        f"ADD COLUMN IF NOT EXISTS {col_name} {col_type} DEFAULT {default_value}"
+                    )
+                else:
+                    stmt = (
+                        f"ALTER TABLE {table_name} "
+                        f"ADD COLUMN {col_name} {col_type} DEFAULT {default_value}"
+                    )
+                conn.execute(text(stmt))
+                added_columns.append(col_name)
+        logger.info(
+            "[SHORT_DRAMA_DB_MIGRATION] table=%s added_columns=%s skipped_columns=%s dialect=%s",
+            table_name,
+            added_columns,
+            skipped_columns,
+            dialect,
+        )
+    except Exception:
+        logger.exception(
+            "[SHORT_DRAMA_DB_MIGRATION] table=%s added_columns=%s skipped_columns=%s dialect=%s",
+            table_name,
+            added_columns,
+            skipped_columns,
+            (db_engine.dialect.name if db_engine is not None else "unknown"),
+        )
+        raise
 
 
 def get_db():
@@ -321,5 +385,6 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _sqlite_ensure_render_job_columns()
     _ensure_short_drama_project_step_columns()
+    ensure_short_drama_project_columns(engine)
     _ensure_short_drama_asset_library_backfill()
     _ensure_short_drama_product_context_columns()

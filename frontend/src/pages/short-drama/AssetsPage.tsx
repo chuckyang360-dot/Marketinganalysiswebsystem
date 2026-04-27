@@ -359,7 +359,14 @@ export function ShortDramaAssetsPage() {
         prompt: d.base_prompt ?? '',
         imageUrl: anchorImage,
         sourceLabel: resolveAssetSourceLabel(d),
-        voiceStyle: typeof tf.personality === 'string' ? tf.personality : '',
+        voiceStyle:
+          typeof tf.voice_profile === 'string'
+            ? tf.voice_profile
+            : typeof tf.voice_style === 'string'
+              ? tf.voice_style
+              : typeof tf.personality === 'string'
+                ? tf.personality
+                : '',
         productUsage: typeof (tf.product_usage || tf.usage_mode) === 'string' ? String(tf.product_usage || tf.usage_mode) : '',
         imageCount: d.image_count,
         imageLimit: 6,
@@ -755,6 +762,7 @@ export function ShortDramaAssetsPage() {
               project_id: effectiveProjectId,
               name: payload.name,
               description: payload.description,
+              base_prompt: payload.prompt,
               tags: [payload.typeLabel],
               type_fields: tf,
             });

@@ -58,11 +58,13 @@ class ProductContextSchema(BaseModel):
     key_functions: List[str] = Field(default_factory=list)
     emotional_value: List[str] = Field(default_factory=list)
     suitable_story_angles: List[str] = Field(default_factory=list)
+    user_pain_points: List[str] = Field(default_factory=list)
     visual_risk_notes: List[str] = Field(default_factory=list)
     consistency_notes: List[str] = Field(default_factory=list)
+    immutable_structure_constraints: List[str] = Field(default_factory=list)
     extracted_from_images: List[str] = Field(default_factory=list)
     parse_confidence: float = 0.0
-    source_trace: Dict[str, Literal["user_input", "image_understanding", "merged_inference"]] = (
+    source_trace: Dict[str, Literal["user_input", "image_understanding", "merged_inference", "model_inference"]] = (
         Field(default_factory=dict)
     )
     field_meta: Dict[str, Dict[str, Any]] = Field(default_factory=dict)

@@ -183,7 +183,7 @@ def _fill_action_from_shot(shot: ShotSchema) -> str:
     vd = _clean_prose((shot.visual_description or "").strip())
     if vd and len(vd) > 5:
         return vd[:320]
-    dlg = _clean_prose((shot.dialogue or shot.narration or "").strip())
+    dlg = _clean_prose((shot.spoken_text or shot.dialogue or shot.voiceover_text or shot.narration or "").strip())
     if dlg and len(dlg) > 5:
         return f"Beat driven by line delivery: {dlg[:200]}"
     return "Natural, readable motion that advances the beat."
@@ -275,7 +275,20 @@ def validate_composed_prompt_text(text: str, *, field: str, shot_id: str, segmen
             missing_fields=[],
             code="composed_vague",
         )
-    banned_fragments = ("show something nice", "something nice", "make it cool", "good cinematic shot")
+    banned_fragments = (
+        "show something nice",
+        "something nice",
+        "make it cool",
+        "good cinematic shot",
+        "本段核心信息",
+        "表现兴趣",
+        "表现欲望",
+        "表现注意",
+        "突出人物与产品关系",
+        "展示核心信息",
+        "核心信息：",
+        "function_label",
+    )
     if any(b in low for b in banned_fragments):
         raise ShortDramaInvalidModelOutputError(
             f"Composed {field} contains filler phrasing (segment={segment_id}, shot={shot_id})",

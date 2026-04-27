@@ -146,7 +146,7 @@ export default function SegmentPanel({
                                   <p style={{ color: "#444444" }} className="leading-snug">{shot.action}</p>
                                 </div>
                                 <div>
-                                  <p className="mb-1" style={{ color: "#AEAEB2" }}>台词 / 旁白</p>
+                                    <p className="mb-1" style={{ color: "#AEAEB2" }}>角色口播</p>
                                   <p style={{ color: "#444444" }} className="leading-snug">{shot.dialogue}</p>
                                 </div>
                                 <div>

@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -27,6 +28,7 @@ from ..services.read_models import latest_product_context, next_product_context_
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import ProjectStatus, WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
+from ..utils.language import build_language_policy, language_prompt_rules
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +46,51 @@ _PRODUCT_CONTEXT_FIELDS = [
     "key_functions",
     "emotional_value",
     "suitable_story_angles",
+    "user_pain_points",
     "visual_risk_notes",
     "consistency_notes",
+    "immutable_structure_constraints",
     "extracted_from_images",
     "parse_confidence",
     "source_trace",
 ]
+
+
+def _redact_image_url(raw: object) -> dict[str, object]:
+    text = str(raw or "").strip()
+    if not text:
+        return {
+            "image_url_type": "unknown",
+            "image_preview": "",
+            "image_size_chars": 0,
+        }
+    image_url_type = "data_url" if text.startswith("data:image/") else "remote_url"
+    return {
+        "image_url_type": image_url_type,
+        "image_preview": f"{text[:40]}...<redacted>",
+        "image_size_chars": len(text),
+    }
+
+
+def _sanitize_parse_input_for_log(raw_input: dict[str, object]) -> dict[str, object]:
+    sanitized = dict(raw_input)
+    image_rows = raw_input.get("product_images")
+    if isinstance(image_rows, list):
+        sanitized_images: list[dict[str, object]] = []
+        for row in image_rows:
+            item = row if isinstance(row, dict) else {}
+            sanitized_images.append(
+                {
+                    "image_order": item.get("image_order"),
+                    "is_main_image": bool(item.get("is_main_image")),
+                    **_redact_image_url(item.get("image_url")),
+                }
+            )
+        sanitized["product_images"] = {
+            "image_count": len(image_rows),
+            "items": sanitized_images,
+        }
+    return sanitized
 
 
 def _merge_context_by_mode(
@@ -79,11 +120,12 @@ def _merge_context_by_mode(
 @router.post("/parse", response_model=ParseProductResponse)
 async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /product/parse", project_id=body.project_id)
+    safe_input = _sanitize_parse_input_for_log(body.input.model_dump())
     logger.info(
         "[S1_PARSE_REQUEST] project_id=%s reparse_mode=%s input=%s",
         body.project_id,
         body.reparse_mode,
-        body.input.model_dump(),
+        safe_input,
     )
     try:
         project = orchestrator.get_project(db, body.project_id)
@@ -92,6 +134,15 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
         had_existing_context = existing_context is not None
 
         status_before = project.status
+        language_policy = build_language_policy(
+            workflow_source=body.input.model_dump(),
+            market_source={
+                "target_users_raw": body.input.target_users_raw,
+                "usage_scenarios_raw": body.input.usage_scenarios_raw,
+                "extra_notes_raw": body.input.extra_notes_raw,
+            },
+            explicit_target_market=(project.target_market or "North America"),
+        )
         try:
             artifacts = product_parser_service.parse(
                 body.project_id,
@@ -102,6 +153,24 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
                     "style": project.style or "",
                     "visual_style": project.visual_style or "",
                     "aspect_ratio": project.aspect_ratio or "",
+                    "target_market": language_policy["target_market"],
+                    "creative_intent": project.creative_intent or "",
+                    "legacy_creative_intent_summary": "；".join(
+                        [
+                            x
+                            for x in [
+                                f"营销目标：{project.marketing_goal}" if project.marketing_goal else "",
+                                f"目标受众：{project.target_audience}" if project.target_audience else "",
+                                f"品牌调性：{project.brand_tone}" if project.brand_tone else "",
+                                f"补充说明：{project.creative_brief}" if project.creative_brief else "",
+                            ]
+                            if x
+                        ]
+                    ),
+                    "workflow_language": language_policy["workflow_language"],
+                    "video_language": language_policy["video_language"],
+                    "language_policy": language_policy,
+                    "language_prompt_rules": language_prompt_rules(language_policy),
                 },
             )
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
@@ -124,7 +193,15 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
                 project.status,
             )
             logger.exception("Product parse unexpected error project_id=%s", body.project_id)
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Product parse failed")
+            if isinstance(e, (ValidationError, ValueError, TypeError)):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="产品解析失败，请检查输入内容或稍后重试。",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="产品解析服务暂时异常，请稍后重试。",
+            )
 
         prev_ctx = (
             ProductContextSchema.model_validate(existing_context.normalized_context_json)

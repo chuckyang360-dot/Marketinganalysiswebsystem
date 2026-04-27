@@ -11,6 +11,7 @@ class Settings(BaseSettings):
 
     # Database Configuration
     DATABASE_URL: str = "sqlite:///./vibe_marketing.db"
+    DB_DEBUG: bool = Field(default=False, env="DB_DEBUG")
 
     # JWT Configuration
     SECRET_KEY: str = "your-secret-key-here-change-in-production"

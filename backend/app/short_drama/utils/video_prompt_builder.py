@@ -1,4 +1,8 @@
-"""Build reference-to-video inputs from segment scripts + asset rows."""
+"""Build segment-level reference-to-video inputs from segment scripts + asset rows.
+
+Current render granularity is segment-level: shots are summarized into one prompt
+for each segment. Future shot-level rendering can add separate plan/job fields.
+"""
 
 from __future__ import annotations
 
@@ -33,6 +37,8 @@ def _get_shot_value(shot, key: str, default=None):
 class SegmentVideoPlan:
     segment_id: str
     segment_video_prompt: str
+    render_granularity: str = "segment"
+    future_shot_level_reserved: bool = True
     selected_reference_image_urls: list[str] = field(default_factory=list)
     duration_seconds: int = 6
     aspect_ratio: str = "9:16"
@@ -131,10 +137,12 @@ def _summarize_visual_constraints(segment: SegmentScriptSchema) -> list[str]:
         sc = _get_shot_value(shot, "source_visual_constraints", {}) or {}
         if not isinstance(sc, dict):
             continue
-        for key in ("visual_style", "aspect_ratio"):
+        for key in ("visual_style", "aspect_ratio", "market_visual_constraints", "visual_style_constraints"):
             v = sc.get(key)
             if isinstance(v, str) and v.strip():
                 vals.append(f"{key}: {v.strip()}")
+            elif isinstance(v, dict) and v:
+                vals.append(f"{key}: {v}")
         for key in ("visual_features", "consistency_notes", "visual_risk_notes", "s2_required_visual_elements"):
             v = sc.get(key)
             if isinstance(v, list):
@@ -167,10 +175,14 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
         manual_vp = str(_get_shot_value(shot, "manual_video_prompt", "") or "").strip()
         vp = manual_vp or str(_get_shot_value(shot, "video_prompt", "") or "").strip()
         action = str(_get_shot_value(shot, "action_description", "") or "").strip()
-        dialogue = str(_get_shot_value(shot, "dialogue", "") or "").strip()
+        dialogue = str(_get_shot_value(shot, "spoken_text", "") or _get_shot_value(shot, "dialogue", "") or "").strip()
         voiceover = str(
-            _get_shot_value(shot, "voiceover", None) or _get_shot_value(shot, "narration", "") or ""
+            _get_shot_value(shot, "voiceover_text", "")
+            or _get_shot_value(shot, "voiceover", None)
+            or _get_shot_value(shot, "narration", "")
+            or ""
         ).strip()
+        subtitle = str(_get_shot_value(shot, "subtitle_text", "") or _get_shot_value(shot, "subtitle", "") or "").strip()
         must_show = "; ".join(
             _dedupe_text_items([str(x) for x in (_get_shot_value(shot, "must_show", []) or [])], max_items=3)
         )
@@ -199,9 +211,15 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
                 f'Voiceover requirement: Use this exact voiceover narration: "{voiceover}". '
                 "Do not invent extra narration."
             )
+        elif subtitle:
+            spoken_policy = "subtitle"
+            spoken_requirement = (
+                f'Subtitle requirement: Use this exact subtitle text: "{subtitle}". '
+                "Do not invent extra subtitle lines."
+            )
         else:
             spoken_policy = "none"
-            spoken_requirement = "No dialogue, no voiceover, no subtitles, no on-screen text."
+            spoken_requirement = "无角色口播、无旁白、无字幕，不要添加屏幕文字。"
         logger.info(
             "[S4_SPOKEN_CONTENT_POLICY] segment_id=%s shot_id=%s has_dialogue=%s has_voiceover=%s spoken_policy=%s dialogue_preview=%s voiceover_preview=%s",
             segment.segment_id,

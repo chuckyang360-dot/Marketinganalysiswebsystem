@@ -25,7 +25,7 @@ from ..services.read_models import (
     list_pipeline_asset_rows,
     next_segment_batch_version,
 )
-from ..services.segment_director_service import segment_director_service
+from ..services.segment_director_service import segment_director_service, segments_from_story_shot_plan
 from ..services.project_state_service import STEP_4, mark_step_completed, update_last_active_step
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import WorkflowStep
@@ -222,6 +222,7 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                 "target_users": product_ctx.target_users,
                 "usage_scenarios": product_ctx.usage_scenarios,
             },
+            explicit_target_market=(project.target_market or "North America"),
         )
 
         project_config = {
@@ -230,6 +231,12 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             "style": project.style,
             "visual_style": project.visual_style,
             "aspect_ratio": project.aspect_ratio,
+            "target_market": language_policy["target_market"],
+            "marketing_goal": project.marketing_goal or "brand_seeding",
+            "target_audience": project.target_audience or "",
+            "brand_tone": project.brand_tone or "natural",
+            "creative_intent": project.creative_intent or "",
+            "creative_brief": project.creative_brief or "",
             "workflow_language": language_policy["workflow_language"],
             "video_language": language_policy["video_language"],
             "language_policy": language_policy,
@@ -243,9 +250,101 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                 "usage_scenarios": product_ctx.usage_scenarios,
             },
         }
+        project_config["legacy_creative_intent_summary"] = "；".join(
+            [
+                x
+                for x in [
+                    f"营销目标：{project_config['marketing_goal']}" if project_config["marketing_goal"] else "",
+                    f"目标受众：{project_config['target_audience']}" if project_config["target_audience"] else "",
+                    f"品牌调性：{project_config['brand_tone']}" if project_config["brand_tone"] else "",
+                    f"补充说明：{project_config['creative_brief']}" if project_config["creative_brief"] else "",
+                ]
+                if x
+            ]
+        )
+        project_config["effective_creative_intent"] = (
+            project_config["creative_intent"] or project_config["legacy_creative_intent_summary"]
+        )
 
         try:
-            segments = segment_director_service.generate(body.project_id, blueprint, assets, project_config)
+            segments = None if blueprint.creative_brief else segments_from_story_shot_plan(blueprint, assets=assets, project_config=project_config)
+            source = "story_blueprint.shot_plan" if segments is not None else "segment_director_provider"
+            if segments is None:
+                segments = segment_director_service.generate(body.project_id, blueprint, assets, project_config)
+            shot_count = sum(len(s.shots) for s in segments)
+            story_framework = blueprint.story_framework if isinstance(blueprint.story_framework, dict) else {}
+            original_structure = story_framework.get("structure") if isinstance(story_framework.get("structure"), list) else []
+            segment_functions = [
+                str((s.meta or {}).get("function_label") or s.goal or s.title or "").strip() for s in segments
+            ]
+            logger.info(
+                "[S4_SHOT_PLAN_SOURCE] project_id=%s source=%s segment_count=%s shot_count=%s",
+                body.project_id,
+                source,
+                len(segments),
+                shot_count,
+            )
+            logger.info(
+                "[S4_FRAMEWORK_SEGMENT_PLAN] %s",
+                {
+                    "project_id": body.project_id,
+                    "duration": project_config.get("duration"),
+                    "format": project_config.get("format"),
+                    "story_framework_type": story_framework.get("type"),
+                    "original_structure": original_structure,
+                    "segment_count": len(segments),
+                    "segment_functions": segment_functions,
+                    "merged_from_structure": len(segments) <= len(original_structure),
+                },
+            )
+            for seg in segments:
+                first = seg.shots[0] if seg.shots else None
+                char_refs = list((first.character_refs if first else []) or [])
+                scene_ref = str((first.scene_ref if first else "") or "")
+                prod_refs = list((first.product_refs if first else []) or [])
+                missing_fields: list[str] = []
+                if not first:
+                    missing_fields.append("shots")
+                else:
+                    if not str(first.action_description or "").strip():
+                        missing_fields.append("action_description")
+                    if float(first.duration_seconds or 0) <= 0:
+                        missing_fields.append("duration_seconds")
+                    if not char_refs:
+                        missing_fields.append("character_refs")
+                    if not scene_ref:
+                        missing_fields.append("scene_ref")
+                    if not prod_refs:
+                        missing_fields.append("product_refs")
+                used_fallback_assets = bool(char_refs or scene_ref or prod_refs)
+                asset_refs_complete = bool(char_refs and scene_ref and prod_refs)
+                logger.info(
+                    "[S4_SEGMENT_SHOT_FIELDS_BUILT] %s",
+                    {
+                        "project_id": body.project_id,
+                        "segment_id": seg.segment_id,
+                        "segment_name": seg.title,
+                        "shot_count": len(seg.shots),
+                        "first_shot_action_preview": str((first.action_description if first else "") or "")[:180],
+                        "first_shot_duration": float((first.duration_seconds if first else 0) or 0),
+                        "character_refs": char_refs,
+                        "scene_ref": scene_ref,
+                        "product_refs": prod_refs,
+                        "used_fallback_assets": used_fallback_assets,
+                        "missing_fields": missing_fields,
+                    },
+                )
+                logger.info(
+                    "[S4_SHOTS_BY_FRAMEWORK_BUILT] %s",
+                    {
+                        "project_id": body.project_id,
+                        "segment_id": seg.segment_id,
+                        "segment_function": str((seg.meta or {}).get("function_label") or seg.goal or seg.title or ""),
+                        "shot_count": len(seg.shots),
+                        "shot_actions_preview": [str(sh.action_description or "")[:120] for sh in seg.shots[:2]],
+                        "asset_refs_complete": asset_refs_complete,
+                    },
+                )
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
             # Recoverable model/validator issues: keep project out of terminal failed so user can retry.
             db.rollback()
@@ -361,10 +460,15 @@ async def update_segment_shot(
     shot = dict(shots[target_index]) if isinstance(shots[target_index], dict) else {}
     text_updates = {
         "action_description": body.action_description,
-        "dialogue": body.dialogue,
-        "voiceover": body.voiceover,
+        "dialogue": body.spoken_text if body.spoken_text is not None else body.dialogue,
+        "spoken_text": body.spoken_text if body.spoken_text is not None else body.dialogue,
+        "voiceover": body.voiceover_text if body.voiceover_text is not None else body.voiceover,
+        "voiceover_text": body.voiceover_text if body.voiceover_text is not None else body.voiceover,
+        "subtitle_text": body.subtitle_text,
+        "subtitle": body.subtitle_text,
         "emotion": body.emotion,
-        "video_prompt": body.video_prompt,
+        "video_prompt": body.generation_prompt if body.generation_prompt is not None else body.video_prompt,
+        "generation_prompt": body.generation_prompt if body.generation_prompt is not None else body.video_prompt,
         "manual_video_prompt": body.manual_video_prompt,
         "manual_scene_ref": body.manual_scene_ref,
     }

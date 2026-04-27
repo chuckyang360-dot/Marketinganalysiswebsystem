@@ -5,7 +5,8 @@ import { createFlowSidebarSteps, defaultProjectDraft } from './data/mockShortDra
 import { ProjectCreateForm } from './components/ProjectCreateForm';
 import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { ShortDramaApiError, createShortDramaProject } from './services/shortDramaApi';
-import type { PlotStyle, ShortDramaProjectDraft } from './types/shortDrama';
+import type { NarrativeStyle, ShortDramaProjectDraft } from './types/shortDrama';
+import { normalizeTargetMarket } from './utils/projectLocales';
 import { useShortDramaProject } from './hooks/useShortDramaProject';
 import { ri, sdColors, sdFontHeading } from './utils/shortDramaHelpers';
 import { withProjectQuery } from './utils/shortDramaRoutes';
@@ -17,11 +18,8 @@ export function ShortDramaCreateProjectPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const togglePlotStyle = (v: PlotStyle) => {
-    setDraft((prev) => ({
-      ...prev,
-      plotStyles: prev.plotStyles.includes(v) ? prev.plotStyles.filter((x) => x !== v) : [...prev.plotStyles, v],
-    }));
+  const setNarrativeStyle = (v: NarrativeStyle) => {
+    setDraft((prev) => ({ ...prev, narrativeStyle: v }));
   };
 
   const user = getUser();
@@ -38,9 +36,15 @@ export function ShortDramaCreateProjectPage() {
       project_name: draft.projectName.trim(),
       duration: draft.duration,
       format: draft.format,
-      style: draft.plotStyles.length ? draft.plotStyles.join(',') : null,
+      style: draft.narrativeStyle || 'light_conflict',
       visual_style: draft.visualStyle,
       aspect_ratio: draft.aspectRatio,
+      target_market: normalizeTargetMarket(draft.targetMarket),
+      marketing_goal: draft.marketingGoal || 'brand_seeding',
+      target_audience: draft.targetAudience || '',
+      brand_tone: draft.brandTone || 'natural',
+      creative_intent: draft.creativeIntent || '',
+      creative_brief: draft.creativeBrief || '',
     };
     console.info('[S0_CREATE_REQUEST]', {
       user_id: requestBody.user_id,
@@ -49,6 +53,9 @@ export function ShortDramaCreateProjectPage() {
       format: requestBody.format,
       visual_style: requestBody.visual_style,
       aspect_ratio: requestBody.aspect_ratio,
+      target_market: requestBody.target_market,
+      marketing_goal: requestBody.marketing_goal,
+      brand_tone: requestBody.brand_tone,
     });
     setSubmitting(true);
     setSubmitError(null);
@@ -138,12 +145,24 @@ export function ShortDramaCreateProjectPage() {
             setDuration={(v) => setDraft((p) => ({ ...p, duration: v }))}
             format={draft.format}
             setFormat={(v) => setDraft((p) => ({ ...p, format: v }))}
-            plotStyles={draft.plotStyles}
-            togglePlotStyle={togglePlotStyle}
+            narrativeStyle={draft.narrativeStyle}
+            setNarrativeStyle={setNarrativeStyle}
             visualStyle={draft.visualStyle}
             setVisualStyle={(v) => setDraft((p) => ({ ...p, visualStyle: v }))}
             aspectRatio={draft.aspectRatio}
             setAspectRatio={(v) => setDraft((p) => ({ ...p, aspectRatio: v }))}
+            targetMarket={draft.targetMarket}
+            setTargetMarket={(v) => setDraft((p) => ({ ...p, targetMarket: v }))}
+            marketingGoal={draft.marketingGoal}
+            setMarketingGoal={(v) => setDraft((p) => ({ ...p, marketingGoal: v }))}
+            targetAudience={draft.targetAudience}
+            setTargetAudience={(v) => setDraft((p) => ({ ...p, targetAudience: v }))}
+            brandTone={draft.brandTone}
+            setBrandTone={(v) => setDraft((p) => ({ ...p, brandTone: v }))}
+            creativeIntent={draft.creativeIntent}
+            setCreativeIntent={(v) => setDraft((p) => ({ ...p, creativeIntent: v }))}
+            creativeBrief={draft.creativeBrief}
+            setCreativeBrief={(v) => setDraft((p) => ({ ...p, creativeBrief: v }))}
           />
 
           {!user ? (

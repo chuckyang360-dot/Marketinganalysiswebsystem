@@ -26,6 +26,25 @@ function workflowDisplayName(name: string): string {
   return map[raw.toLowerCase()] || raw;
 }
 
+function cleanDisplayText(input: string): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  const blocked = [
+    'main character',
+    'scene location',
+    'character_',
+    'scene_',
+    'product_',
+    'product-only reference asset',
+    'reusable empty location reference',
+    'clean character reference',
+    'empty reusable location background plate',
+  ];
+  if (blocked.some((t) => lower.includes(t))) return '';
+  return raw;
+}
+
 export type StepFourAssetLibraryVm = {
   characters: {
     id: number;
@@ -65,12 +84,25 @@ function metaRecord(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
+function mergedMeta(meta: unknown): Record<string, unknown> {
+  const root = metaRecord(meta);
+  const tf = root.type_fields;
+  if (tf && typeof tf === 'object' && !Array.isArray(tf)) {
+    return { ...(tf as Record<string, unknown>), ...root };
+  }
+  return root;
+}
+
 function pickString(meta: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const v = meta[key];
     if (typeof v === 'string' && v.trim()) return v.trim();
   }
   return '';
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x || '').trim()).filter(Boolean) : [];
 }
 
 function stringifyLine(value: unknown): string {
@@ -93,6 +125,9 @@ function stringifyLine(value: unknown): string {
 }
 
 function resolveDialogueSource(shot: Record<string, unknown>): Step4Shot['dialogueSource'] {
+  if (stringifyLine(shot.spoken_text)) return 'dialogue';
+  if (stringifyLine(shot.voiceover_text)) return 'voiceover';
+  if (stringifyLine(shot.subtitle_text)) return 'caption';
   if (stringifyLine(shot.dialogue)) return 'dialogue';
   if (stringifyLine(shot.voiceover)) return 'voiceover';
   if (stringifyLine(shot.narration)) return 'narration';
@@ -115,41 +150,50 @@ export function pipelineAssetsToStepFourLibraryVm(
   if (!assets) return { characters: [], scenes: [], products: [] };
 
   const characters = assets.characters.map((c) => {
-    const meta = metaRecord(c.meta);
+    const meta = mergedMeta(c.meta);
+    const displayName = cleanDisplayText(pickString(meta, ['display_name'])) || cleanDisplayText(c.name) || '都市年轻主角';
+    const displayDesc = cleanDisplayText(pickString(meta, ['display_description'])) || cleanDisplayText(c.description ?? '') || '符合目标市场与受众的角色设定。';
     return {
       id: c.id,
-      name: workflowDisplayName(c.name),
+      name: workflowDisplayName(displayName),
       role: c.role_type?.trim() || '角色',
-      desc: (c.description ?? '').trim(),
+      desc: displayDesc,
       img: getAssetThumbnailUrl(c),
-      visualPrompt: (c.visual_prompt ?? '').trim(),
+      visualPrompt: (pickString(meta, ['image_prompt']) || (c.visual_prompt ?? '')).trim(),
       imageSource: imageSourceLabel(getAssetThumbnailUrl(c), c.visual_anchor_image_id),
       voice: pickString(meta, ['voice_style', 'voiceStyle', 'voice']) || '未指定',
       meta,
     };
   });
 
-  const scenes = assets.scenes.map((s) => ({
+  const scenes = assets.scenes.map((s) => {
+    const meta = mergedMeta(s.meta);
+    const displayName = cleanDisplayText(pickString(meta, ['display_name'])) || cleanDisplayText(s.name) || '城市通勤场景';
+    const displayDesc = cleanDisplayText(pickString(meta, ['display_description'])) || cleanDisplayText(s.description ?? '') || '暂无描述';
+    return {
     id: s.id,
-    name: workflowDisplayName(s.name),
+    name: workflowDisplayName(displayName),
     type: s.scene_type?.trim() || '场景',
-    desc: (s.description ?? '').trim(),
+    desc: displayDesc,
     img: getAssetThumbnailUrl(s),
-    visualPrompt: (s.visual_prompt ?? '').trim(),
+    visualPrompt: (pickString(meta, ['image_prompt']) || (s.visual_prompt ?? '')).trim(),
     imageSource: imageSourceLabel(getAssetThumbnailUrl(s), s.visual_anchor_image_id),
     sceneForm: s.scene_form,
-    meta: metaRecord(s.meta),
-  }));
+    meta,
+    };
+  });
 
   const products = assets.products.map((p) => {
-    const meta = metaRecord(p.meta);
+    const meta = mergedMeta(p.meta);
+    const displayName = cleanDisplayText(pickString(meta, ['display_name'])) || cleanDisplayText(p.name) || '主商品资产';
+    const displayDesc = cleanDisplayText(pickString(meta, ['display_description'])) || cleanDisplayText(p.description ?? '') || '主商品资产展示。';
     return {
       id: p.id,
-      name: workflowDisplayName(p.name),
+      name: workflowDisplayName(displayName),
       type: p.product_role?.trim() || pickString(meta, ['product_type', 'productType', 'type']) || '产品',
-      desc: (p.description ?? '').trim(),
+      desc: displayDesc,
       img: getAssetThumbnailUrl(p),
-      visualPrompt: (p.visual_prompt ?? '').trim(),
+      visualPrompt: (pickString(meta, ['image_prompt']) || (p.visual_prompt ?? '')).trim(),
       imageSource: imageSourceLabel(getAssetThumbnailUrl(p), p.visual_anchor_image_id),
       meta,
     };
@@ -195,6 +239,9 @@ const EMPTY_SHOT_PLACEHOLDER: Step4Shot[] = [
     backendShotId: 'shot_1',
     desc: '—',
     action: '',
+    spokenText: '',
+    voiceoverText: '',
+    subtitleText: '',
     dialogue: '',
     emotion: '',
     duration: '—',
@@ -204,7 +251,22 @@ const EMPTY_SHOT_PLACEHOLDER: Step4Shot[] = [
 
 function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
   const shots = script.shots;
-  if (!Array.isArray(shots) || shots.length === 0) return EMPTY_SHOT_PLACEHOLDER.map((s) => ({ ...s }));
+  const legacyAction = stringifyLine(script.visual_action ?? script.action_description ?? script.goal);
+  if (!Array.isArray(shots) || shots.length === 0) {
+    return [{
+      ...EMPTY_SHOT_PLACEHOLDER[0],
+      backendShotId: 'legacy_shot_1',
+      desc: legacyAction || '旧版镜头',
+      action: legacyAction,
+      spokenText: stringifyLine(script.spoken_text ?? script.dialogue),
+      voiceoverText: stringifyLine(script.voiceover_text ?? script.voiceover ?? script.narration),
+      subtitleText: stringifyLine(script.subtitle_text ?? script.subtitle),
+      dialogue: stringifyLine(script.spoken_text ?? script.dialogue),
+      voiceover: stringifyLine(script.voiceover_text ?? script.voiceover ?? script.narration),
+      subtitle: stringifyLine(script.subtitle_text ?? script.subtitle),
+      dialogueSource: 'none',
+    }];
+  }
 
   return shots.map((raw, i) => {
     const s = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -234,31 +296,42 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       typeof s.image_prompt === 'string' && s.image_prompt.trim() ? s.image_prompt.trim() : undefined;
     const videoPrompt =
       typeof s.video_prompt === 'string' && s.video_prompt.trim() ? s.video_prompt.trim() : undefined;
+    const generationPrompt =
+      typeof s.generation_prompt === 'string' && s.generation_prompt.trim() ? s.generation_prompt.trim() : videoPrompt;
     const stringArray = (v: unknown) => (Array.isArray(v) ? v.map((x) => String(x)).filter(Boolean) : undefined);
     const sourceVisualConstraints =
       s.source_visual_constraints && typeof s.source_visual_constraints === 'object' && !Array.isArray(s.source_visual_constraints)
         ? (s.source_visual_constraints as Record<string, unknown>)
         : undefined;
-    const dialogue = stringifyLine(s.dialogue);
-    const voiceover = stringifyLine(s.voiceover) || stringifyLine(s.narration);
+    const spokenText = stringifyLine(s.spoken_text) || stringifyLine(s.dialogue);
+    const voiceoverText = stringifyLine(s.voiceover_text) || stringifyLine(s.voiceover) || stringifyLine(s.narration);
+    const subtitleText = stringifyLine(s.subtitle_text) || stringifyLine(s.subtitle);
     const legacyDialogue =
       stringifyLine(s.spoken_line) ||
       stringifyLine(s.caption) ||
       stringifyLine(s.dialogue_lines) ||
       stringifyLine(s.lines) ||
       stringifyLine(s.script);
-    const displayDialogue = dialogue || voiceover || legacyDialogue;
+    const displayDialogue = spokenText || legacyDialogue;
 
-    return {
+    const mapped: Step4Shot = {
       id: i + 1,
       backendShotId:
         (typeof s.shot_id === 'string' && s.shot_id.trim()) ||
         (typeof s.shot_id === 'number' ? String(s.shot_id) : '') ||
         `shot_${i + 1}`,
       desc,
-      action: typeof s.action_description === 'string' ? s.action_description : '',
+      shotRole: typeof s.shot_role === 'string' && s.shot_role.trim() ? s.shot_role.trim() : undefined,
+      action: (typeof s.visual_action === 'string' && s.visual_action.trim()) || (typeof s.action_description === 'string' ? s.action_description : ''),
+      spokenText,
+      voiceoverText,
+      subtitleText,
+      camera: typeof s.camera === 'string' && s.camera.trim() ? s.camera.trim() : undefined,
+      cameraMovement: typeof s.camera_movement === 'string' && s.camera_movement.trim() ? s.camera_movement.trim() : undefined,
+      framing: typeof s.framing === 'string' && s.framing.trim() ? s.framing.trim() : undefined,
       dialogue: displayDialogue,
-      voiceover,
+      voiceover: voiceoverText,
+      subtitle: subtitleText,
       dialogueSource: resolveDialogueSource(s),
       emotion: typeof s.emotion === 'string' ? s.emotion : '',
       duration: durationStr,
@@ -273,6 +346,15 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       cameraDescription,
       imagePrompt,
       videoPrompt,
+      generationPrompt,
+      visualStyleInstruction:
+        typeof s.visual_style_instruction === 'string' && s.visual_style_instruction.trim()
+          ? s.visual_style_instruction.trim()
+          : undefined,
+      marketLocalizationDetail:
+        typeof s.market_localization_detail === 'string' && s.market_localization_detail.trim()
+          ? s.market_localization_detail.trim()
+          : undefined,
       manualVideoPrompt:
         typeof s.manual_video_prompt === 'string' && s.manual_video_prompt.trim()
           ? s.manual_video_prompt.trim()
@@ -303,6 +385,25 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
           ? (s.provider_response as Record<string, unknown>)
           : undefined,
     };
+    if (import.meta.env.DEV) {
+      const missingFields: string[] = [];
+      if (!mapped.action?.trim()) missingFields.push('action');
+      if (!mapped.durationSeconds || mapped.durationSeconds <= 0) missingFields.push('duration');
+      if (!(mapped.characterRefs && mapped.characterRefs.length)) missingFields.push('characterRefs');
+      if (!mapped.sceneRef) missingFields.push('sceneRef');
+      if (!(mapped.productRefs && mapped.productRefs.length)) missingFields.push('productRefs');
+      console.info('[S4_ADAPTER_SHOT_MAPPED]', {
+        segmentId: String((script as Record<string, unknown>).segment_id || ''),
+        shotId: mapped.backendShotId,
+        actionPresent: !!mapped.action?.trim(),
+        duration: mapped.durationSeconds,
+        characterRefs: mapped.characterRefs ?? [],
+        sceneRef: mapped.sceneRef ?? '',
+        productRefs: mapped.productRefs ?? [],
+        missingFields,
+      });
+    }
+    return mapped;
   });
 }
 
@@ -312,18 +413,42 @@ export function segmentScriptDtoToStepSegmentViewModel(
   index: number,
 ): Step4SegmentItem {
   const script = row.script && typeof row.script === 'object' ? row.script : {};
+  const meta = script.meta && typeof script.meta === 'object' ? (script.meta as Record<string, unknown>) : {};
   const uiId = index + 1;
   const color = SEGMENT_COLORS[index % SEGMENT_COLORS.length];
 
   const title =
     (typeof script.title === 'string' && script.title.trim()) || `片段 ${uiId}`;
   const goal = (typeof script.goal === 'string' && script.goal.trim()) || '—';
+  const segmentRole = (typeof script.segment_role === 'string' && script.segment_role.trim()) || (typeof meta.function_label === 'string' && meta.function_label.trim()) || '';
+  const productExposure = (typeof script.product_exposure === 'string' && script.product_exposure.trim()) || '';
   const durLimit = script.duration_limit;
   let duration = '—';
   if (typeof durLimit === 'number' && durLimit > 0) duration = `${durLimit}s`;
   else if (typeof durLimit === 'string' && durLimit.trim()) duration = durLimit.trim();
 
   const shots = scriptShotsToStep4Shots(script);
+  const functionLabel =
+    (typeof meta.function_label === 'string' && meta.function_label.trim()) ||
+    (typeof script.goal === 'string' && script.goal.trim()) ||
+    '';
+  const shortLabelRaw =
+    (typeof meta.short_label === 'string' && meta.short_label.trim()) ||
+    functionLabel ||
+    (title.includes('：') ? title.split('：')[0] : title);
+  const shortLabel = String(shortLabelRaw || '').trim().slice(0, 8) || `S${uiId}`;
+
+  const inferredDurationLimit =
+    typeof durLimit === 'number' && Number.isFinite(durLimit) && durLimit > 0
+      ? durLimit
+      : shots.reduce((acc, s) => acc + (Number.isFinite(s.durationSeconds) ? s.durationSeconds : 0), 0);
+  if (duration === '—' && inferredDurationLimit > 0) duration = `${inferredDurationLimit}s`;
+
+  const firstShot = shots[0];
+  const characters = asStringArray(firstShot?.manualCharacterRefs?.length ? firstShot.manualCharacterRefs : firstShot?.characterRefs);
+  const scene = String(firstShot?.manualSceneRef || firstShot?.sceneRef || '').trim() || '—';
+  const products = asStringArray(firstShot?.manualProductRefs?.length ? firstShot.manualProductRefs : firstShot?.productRefs);
+  const placement = products.length ? products.join(' / ') : '—';
 
   return {
     id: uiId,
@@ -335,15 +460,19 @@ export function segmentScriptDtoToStepSegmentViewModel(
         ? durLimit
         : typeof durLimit === 'string' && Number.isFinite(Number(durLimit))
           ? Number(durLimit)
-          : 0,
+          : inferredDurationLimit,
     goal,
-    characters: [],
-    scene: '—',
-    placement: '—',
+    segmentRole,
+    productExposure: productExposure || placement,
+    characters,
+    scene,
+    placement,
     color,
     isNew: false,
     shots,
     backendSegmentId: row.segment_id,
+    functionLabel,
+    shortLabel,
     videoUrl: segmentRowVideoUrl(row),
   };
 }

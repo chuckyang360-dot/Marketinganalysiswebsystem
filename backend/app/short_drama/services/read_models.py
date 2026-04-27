@@ -23,6 +23,103 @@ from ..models import (
 from ..utils.enums import RenderJobStatus, RenderTargetType
 
 
+def _as_text(v: object) -> str:
+    return str(v or "").strip()
+
+
+def _first_non_empty(*values: object) -> str:
+    for v in values:
+        t = _as_text(v)
+        if t:
+            return t
+    return ""
+
+
+def _fallback_scene_form(asset_type: str, current: str) -> str:
+    if _as_text(current):
+        return _as_text(current)
+    if asset_type == "character":
+        return "主角人物资产"
+    if asset_type == "scene":
+        return "单地点生活方式场景"
+    return "主商品展示资产"
+
+
+def _fallback_plot_stage(asset_type: str, current: str) -> str:
+    if _as_text(current):
+        return _as_text(current)
+    if asset_type == "character":
+        return "情绪共鸣"
+    if asset_type == "scene":
+        return "生活场景"
+    return "产品自然出现"
+
+
+def _fallback_structure_summary(asset_type: str, scene_form: str, description: str) -> str:
+    desc = _as_text(description)
+    if asset_type == "character":
+        return _first_non_empty(
+            desc and f"{scene_form}，用于承接通勤场景中的生活化角色出镜与产品自然露出。",
+            f"{scene_form}，用于承接通勤场景中的生活化角色出镜与产品自然露出。",
+        )
+    if asset_type == "scene":
+        return _first_non_empty(
+            desc and f"{scene_form}，用于承载生活方式剧情并支持角色动作与产品露出。",
+            f"{scene_form}，用于承载生活方式剧情并支持角色动作与产品露出。",
+        )
+    return _first_non_empty(
+        desc and f"{scene_form}，用于展示商品外观、材质与使用卖点。",
+        f"{scene_form}，用于展示商品外观、材质与使用卖点。",
+    )
+
+
+def _fallback_display_description(asset_type: str, description: str, name: str) -> str:
+    d = _as_text(description)
+    if _is_weak_description(asset_type, d):
+        d = ""
+    if asset_type == "character":
+        return _first_non_empty(d, f"用于承接生活化剧情的角色资产，围绕{name or '主角'}完成自然出镜。")
+    if asset_type == "scene":
+        return _first_non_empty(d, f"用于承载生活方式剧情的单地点场景资产，支持角色动作与产品露出。")
+    return _first_non_empty(d, f"用于展示{name or '主商品'}外观、材质与穿着卖点的商品资产。")
+
+
+def _is_weak_description(asset_type: str, description: str) -> bool:
+    d = _as_text(description)
+    if not d:
+        return True
+    if asset_type == "product" and len(d) < 12:
+        return True
+    bad_terms = ["产品资产", "实物产品", "待完善", "暂无", "Product-only reference asset"]
+    return any(t in d for t in bad_terms)
+
+
+def ensure_type_fields_visible_summary(
+    *,
+    asset_type: str,
+    tf: dict,
+    name: str,
+    description: str | None,
+) -> dict:
+    out = dict(tf or {})
+    display_name = _first_non_empty(out.get("display_name"), name)
+    display_description = _first_non_empty(out.get("display_description"), _fallback_display_description(asset_type, _as_text(description), display_name))
+    if _is_weak_description(asset_type, display_description):
+        display_description = _fallback_display_description(asset_type, _as_text(description), display_name)
+    scene_form = _fallback_scene_form(asset_type, _as_text(out.get("scene_form")))
+    plot_stage = _fallback_plot_stage(asset_type, _as_text(out.get("plot_stage")))
+    structure_summary = _first_non_empty(
+        out.get("structure_summary"),
+        _fallback_structure_summary(asset_type, scene_form, display_description or _as_text(description)),
+    )
+    out["display_name"] = display_name
+    out["display_description"] = display_description
+    out["scene_form"] = scene_form
+    out["plot_stage"] = plot_stage
+    out["structure_summary"] = structure_summary
+    return out
+
+
 def latest_product_context(db: Session, project_id: int) -> Optional[ProductContextRecord]:
     return (
         db.query(ProductContextRecord)
@@ -277,7 +374,18 @@ def list_pipeline_asset_rows(
         narrative_function = str(tf.get("narrative_function")).strip() if tf.get("narrative_function") else None
         purpose = str(tf.get("purpose")).strip() if tf.get("purpose") else None
         source_asset_version = _source_asset_version(asset, tf, cover_url)
+        tf = ensure_type_fields_visible_summary(
+            asset_type=asset.asset_type,
+            tf=tf,
+            name=asset.name,
+            description=asset.description,
+        )
+        final_description = _as_text(asset.description)
+        if _is_weak_description(asset.asset_type, final_description):
+            final_description = _as_text(tf.get("display_description"))
         meta_json = dict(tf)
+        # Keep nested shape for callers expecting meta.type_fields.
+        meta_json["type_fields"] = dict(tf)
         meta_json.setdefault("source_asset_version", source_asset_version)
         if asset.asset_type == "character":
             role_type = _normalize_role_type(tf.get("role_type"))
@@ -287,7 +395,7 @@ def list_pipeline_asset_rows(
                     id=asset.id,
                     name=asset.name,
                     role_type=role_type,
-                    description=asset.description,
+                    description=final_description or asset.description,
                     visual_prompt=prompt,
                     image_url=cover_url,
                     visual_anchor_image_id=visual_anchor_image_id,
@@ -311,7 +419,7 @@ def list_pipeline_asset_rows(
                     name=asset.name,
                     scene_type=scene_type,
                     scene_form=scene_form,
-                    description=asset.description,
+                    description=final_description or asset.description,
                     visual_prompt=prompt,
                     image_url=cover_url,
                     visual_anchor_image_id=visual_anchor_image_id,
@@ -330,7 +438,7 @@ def list_pipeline_asset_rows(
                     id=asset.id,
                     name=asset.name,
                     product_role=product_role,
-                    description=asset.description,
+                    description=final_description or asset.description,
                     visual_prompt=prompt,
                     image_url=cover_url,
                     visual_anchor_image_id=visual_anchor_image_id,

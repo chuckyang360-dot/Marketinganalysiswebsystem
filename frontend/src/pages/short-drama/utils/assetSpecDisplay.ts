@@ -17,7 +17,7 @@ function asPositiveInt(v: unknown): number | null {
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-type SceneLabel = '开场' | '冲突' | '转折' | '收尾' | '未标注剧情阶段';
+type SceneLabel = '开场' | '冲突' | '转折' | '收尾' | '生活场景';
 type SceneLabelSource = 'scene_type' | 'fallback';
 export type StructureSummary = {
   sceneStage: string;
@@ -86,7 +86,7 @@ function resolveSceneLabelWithSource(row: AssetLibraryItemDto): { label: SceneLa
   const mapped = mapSceneTypeToLabel(sceneType);
   if (mapped) return { label: mapped as SceneLabel, source: 'scene_type' };
   // fallback when no valid stage-type scene_type
-  return { label: '未标注剧情阶段', source: 'fallback' };
+  return { label: '生活场景', source: 'fallback' };
 }
 
 export function resolveVisualAnchorImageUrl(row: AssetLibraryItemDto): string {
@@ -119,8 +119,8 @@ export function buildStructureSummary(row: AssetLibraryItemDto): StructureSummar
   const tf = pickTypeFields(row);
   const sceneType = readTopLevelField(row, 'scene_type') ?? tf.scene_type;
   const sceneForm = readTopLevelField(row, 'scene_form') ?? tf.scene_form;
-  const sceneStageLabel = mapSceneTypeToLabel(sceneType) || '未标注剧情阶段';
-  const sceneFormLabel = mapSceneFormToLabel(sceneForm) || '未标注场景形态';
+  const sceneStageLabel = asText(tf.plot_stage) || mapSceneTypeToLabel(sceneType) || '未标注';
+  const sceneFormLabel = asText(tf.scene_form) || mapSceneFormToLabel(sceneForm) || '未标注';
   const anchorId = asPositiveInt(readTopLevelField(row, 'visual_anchor_image_id')) ?? asPositiveInt(tf.visual_anchor_image_id);
   const variantCount = (row.images ?? []).filter((img) => Number.isInteger(img.id) && img.id > 0).length;
   return {

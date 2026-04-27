@@ -41,10 +41,29 @@ from ..services.read_models import (
 from ..services.workflow_orchestrator import orchestrator
 from ..utils.enums import ProjectStatus
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
+from ..utils.language import build_language_policy, normalize_target_market
 from ..utils.public_static_url import build_public_static_url
 from ..utils.segment_slots import normalize_segment_script_dict_for_read
 
 logger = logging.getLogger(__name__)
+
+
+_ALLOWED_STORY_STYLES = {"light_conflict", "healing", "comedy", "suspense", "emotional"}
+
+
+def _normalize_story_style(raw: object) -> str | None:
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        raw = raw[0] if raw else None
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if "," in text:
+        text = text.split(",")[0].strip()
+    if text == "conflict":
+        text = "light_conflict"
+    return text if text in _ALLOWED_STORY_STYLES else "light_conflict"
 
 
 def _persist_recover_if_failed(db: Session, project: ShortDramaProject) -> None:
@@ -115,6 +134,10 @@ def _project_cover_asset(db: Session, project_id: int) -> ProjectCoverAsset:
 def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProjectResponse:
     final_video = latest_final_video_url(db, p.id)
     step_status = normalize_step_status(p.step_status)
+    inferred_policy = build_language_policy(
+        workflow_source=p.project_name,
+        explicit_target_market=(p.target_market or "North America"),
+    )
     return ShortDramaProjectResponse(
         id=p.id,
         user_id=p.user_id,
@@ -122,9 +145,17 @@ def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProject
         status=p.status,
         duration=p.duration,
         format=p.format,
-        style=p.style,
+        style=_normalize_story_style(p.style),
         visual_style=p.visual_style,
         aspect_ratio=p.aspect_ratio,
+        target_market=normalize_target_market(p.target_market),
+        marketing_goal=(p.marketing_goal or "brand_seeding"),
+        target_audience=(p.target_audience or ""),
+        brand_tone=(p.brand_tone or "natural"),
+        creative_intent=(p.creative_intent or ""),
+        creative_brief=(p.creative_brief or ""),
+        workflow_language=(p.workflow_language or inferred_policy["workflow_language"]),
+        video_language=(p.video_language or inferred_policy["video_language"]),
         last_active_step=p.last_active_step,
         step_status=step_status,
         overall_status=compute_overall_status(db, p, final_video_url=final_video),
@@ -148,14 +179,26 @@ async def create_project(body: CreateShortDramaProjectRequest, db: Session = Dep
         if not user:
             log_api_error(logger, "POST /project", "User not found", user_id=body.user_id)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        language_policy = build_language_policy(
+            workflow_source=body.project_name,
+            explicit_target_market=(body.target_market or "North America"),
+        )
         project = ShortDramaProject(
             user_id=body.user_id,
             project_name=body.project_name,
             duration=body.duration,
             format=body.format,
-            style=body.style,
+            style=_normalize_story_style(body.style),
             visual_style=body.visual_style,
             aspect_ratio=body.aspect_ratio,
+            target_market=normalize_target_market(body.target_market or "North America"),
+            marketing_goal=(body.marketing_goal or "brand_seeding"),
+            target_audience=(body.target_audience or ""),
+            brand_tone=(body.brand_tone or "natural"),
+            creative_intent=(body.creative_intent or ""),
+            creative_brief=(body.creative_brief or ""),
+            workflow_language=body.workflow_language or language_policy["workflow_language"],
+            video_language=body.video_language or language_policy["video_language"],
             last_active_step=STEP_1,
             step_status=default_step_status(),
         )

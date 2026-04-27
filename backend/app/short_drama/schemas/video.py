@@ -9,6 +9,10 @@ class RenderJobSchema(BaseModel):
     project_id: int
     target_type: str
     target_id: str
+    render_granularity: Optional[str] = Field(
+        default="segment",
+        description="Current video render granularity is segment-level; shot-level is reserved for future use.",
+    )
     provider: Optional[str] = None
     provider_request_id: Optional[str] = None
     model: Optional[str] = None

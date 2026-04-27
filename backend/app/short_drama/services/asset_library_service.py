@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 _UI_NAME_NOISE = {"新增角色", "添加角色", "新增场景", "添加场景", "新增产品", "添加产品"}
 
 
+def _merge_type_fields_preserve_non_empty(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base or {})
+    for k, v in (incoming or {}).items():
+        if isinstance(v, str):
+            if v.strip():
+                out[k] = v
+            else:
+                out.setdefault(k, out.get(k, ""))
+            continue
+        if isinstance(v, list):
+            if v:
+                out[k] = v
+            else:
+                out.setdefault(k, out.get(k, []))
+            continue
+        if v is not None:
+            out[k] = v
+    return out
+
+
 class AssetLibraryService:
     def __init__(self):
         self._provider = build_short_drama_image_provider()
@@ -493,7 +513,11 @@ class AssetLibraryService:
         )
         for asset_type, legacy_id, name, description, prompt, image_url, meta_json, base_fields in legacy_rows:
             normalized_type_fields = dict(base_fields)
-            normalized_type_fields.update(meta_json or {})
+            meta_payload = dict(meta_json or {})
+            nested_type_fields = meta_payload.pop("type_fields", None)
+            if isinstance(nested_type_fields, dict):
+                normalized_type_fields = _merge_type_fields_preserve_non_empty(normalized_type_fields, nested_type_fields)
+            normalized_type_fields = _merge_type_fields_preserve_non_empty(normalized_type_fields, meta_payload)
             candidates = (
                 db.query(AssetEntity)
                 .filter(

@@ -121,6 +121,31 @@ function pickString(meta: Record<string, unknown>, keys: string[]): string {
   return '';
 }
 
+function cleanDisplayText(input: string): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  const blocked = [
+    'main character',
+    'scene location',
+    'character_',
+    'scene_',
+    'product_',
+    'product-only reference asset',
+    'reusable empty location reference',
+    'clean character reference',
+    'empty reusable location background plate',
+    '符合目标市场与受众的角色设定',
+    '单一地点场景：',
+    '可复用的单一空间场景',
+    '产品资产',
+    '结构摘要待完善',
+    '场景形态待完善',
+  ];
+  if (blocked.some((k) => lower.includes(k))) return '';
+  return raw;
+}
+
 function tagsFromMeta(meta: Record<string, unknown>, fallback: string[]): string[] {
   const t = meta['tags'] ?? meta['trait_tags'] ?? meta['traitTags'];
   if (Array.isArray(t) && t.length) return t.map(String).filter(Boolean).slice(0, 8);
@@ -135,16 +160,18 @@ export function characterAssetDtoToViewModel(row: PipelineCharacterAssetDto): As
     pickString(meta, ['voice_style', 'voiceStyle', 'voice']) ||
     (row.role_type?.includes('主') ? '未指定（主角）' : '未指定');
   const visual = (row.visual_prompt ?? '').trim();
+  const displayName = cleanDisplayText(pickString(meta, ['display_name'])) || cleanDisplayText(row.name?.trim() || '') || '东南亚通勤青年主角';
+  const displayDesc = cleanDisplayText(pickString(meta, ['display_description'])) || cleanDisplayText((row.description ?? '').trim()) || '一位生活在东南亚城市的年轻通勤者，注重穿搭和日常便利。';
   return {
     id: row.id,
-    name: row.name?.trim() || '未命名角色',
+    name: displayName,
     role: row.role_type?.trim() || '—',
-    desc: (row.description ?? '').trim() || '—',
+    desc: displayDesc,
     tags: tagsFromMeta(meta, visual ? [visual.slice(0, 24)] : []),
     voice,
     img: src,
     hasRealImage: Boolean(src),
-    visualPrompt: visual || '—',
+    visualPrompt: cleanDisplayText(pickString(meta, ['image_prompt'])) || visual || '—',
   };
 }
 
@@ -153,21 +180,23 @@ export function sceneAssetDtoToViewModel(row: PipelineSceneAssetDto): AssetsPage
   const src = getAssetThumbnailUrl(row);
   const visual = (row.visual_prompt ?? '').trim();
   const type = (row.scene_type ?? '').trim() || pickString(meta, ['sceneType', 'type']) || '场景';
+  const displayName = cleanDisplayText(pickString(meta, ['display_name'])) || cleanDisplayText(row.name?.trim() || '') || '清晨地铁站通勤走廊';
+  const displayDesc = cleanDisplayText(pickString(meta, ['display_description'])) || cleanDisplayText((row.description ?? '').trim()) || '暂无描述';
   return {
     id: row.id,
-    name: row.name?.trim() || '未命名场景',
+    name: displayName,
     type,
-    desc: (row.description ?? '').trim() || '—',
+    desc: displayDesc,
     img: src,
     hasRealImage: Boolean(src),
-    visualPrompt: visual || '—',
+    visualPrompt: cleanDisplayText(pickString(meta, ['image_prompt'])) || visual || '—',
   };
 }
 
 export function productAssetDtoToViewModel(row: PipelineProductAssetDto): AssetsPageProductVm {
   const meta = metaRecord(row.meta);
   const src = getAssetThumbnailUrl(row);
-  const desc = (row.description ?? '').trim() || '—';
+  const desc = cleanDisplayText(pickString(meta, ['display_description'])) || cleanDisplayText((row.description ?? '').trim()) || '主商品展示资产，突出金属边框、透明背板与旋转支架细节。';
   const visual = (row.visual_prompt ?? '').trim();
   const placement =
     pickString(meta, ['placement', 'shot_use', 'shotUse', 'use_mode', 'useMode']) ||
@@ -176,7 +205,7 @@ export function productAssetDtoToViewModel(row: PipelineProductAssetDto): Assets
     visual.length > 0 ? (visual.length > 120 ? `${visual.slice(0, 120)}…` : visual) : '见视觉 Prompt / 描述';
   return {
     id: row.id,
-    name: row.name?.trim() || '未命名产品',
+    name: cleanDisplayText(pickString(meta, ['display_name'])) || cleanDisplayText(row.name?.trim() || '') || 'iPhone透明支架手机壳',
     placement,
     cameraHint,
     desc,

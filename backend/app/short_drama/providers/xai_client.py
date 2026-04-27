@@ -40,6 +40,25 @@ def _truncate(s: str, max_len: int = 500) -> str:
     return s[:max_len] + "…"
 
 
+def _redact_image_url(raw: str) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    if not text:
+        return {
+            "image_url_type": "unknown",
+            "image_url_preview": "",
+            "image_size_chars": 0,
+        }
+    image_url_type = "data_url" if text.startswith("data:image/") else "remote_url"
+    preview = f"{text[:40]}...<redacted>"
+    if len(preview) > 120:
+        preview = preview[:120]
+    return {
+        "image_url_type": image_url_type,
+        "image_url_preview": preview,
+        "image_size_chars": len(text),
+    }
+
+
 def _summarize_input_payload_for_log(input_items: list[dict[str, Any]]) -> dict[str, Any]:
     summary: list[dict[str, Any]] = []
     for item in input_items:
@@ -48,7 +67,7 @@ def _summarize_input_payload_for_log(input_items: list[dict[str, Any]]) -> dict[
         row: dict[str, Any] = {"role": role, "content_type": type(content).__name__}
         if isinstance(content, list):
             type_counts: dict[str, int] = {}
-            image_preview: list[str] = []
+            image_preview: list[dict[str, Any]] = []
             text_lengths: list[int] = []
             for part in content:
                 if not isinstance(part, dict):
@@ -57,13 +76,20 @@ def _summarize_input_payload_for_log(input_items: list[dict[str, Any]]) -> dict[
                 type_counts[ptype] = type_counts.get(ptype, 0) + 1
                 if ptype == "input_image":
                     raw = str(part.get("image_url") or "")
-                    image_preview.append(_truncate(raw, 120))
+                    image_preview.append(_redact_image_url(raw))
                 elif ptype == "input_text":
                     text_lengths.append(len(str(part.get("text") or "")))
             row["content_len"] = len(content)
             row["content_type_counts"] = type_counts
-            row["image_url_preview"] = image_preview
-            row["input_text_lengths"] = text_lengths
+            row["image_inputs"] = {
+                "image_count": len(image_preview),
+                "items": image_preview,
+            }
+            row["input_text_summary"] = {
+                "count": len(text_lengths),
+                "total_chars": sum(text_lengths),
+                "max_chars": max(text_lengths) if text_lengths else 0,
+            }
         summary.append(row)
     return {"input": summary}
 

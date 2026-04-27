@@ -9,7 +9,9 @@ class CharacterAssetSchema(BaseModel):
     name: str
     role_type: str
     description: Optional[str] = None
+    business_profile: Dict[str, Any] = Field(default_factory=dict)
     visual_prompt: Optional[str] = None
+    technical_constraints: Dict[str, Any] = Field(default_factory=dict)
     image_url: Optional[str] = None
     visual_anchor_image_id: Optional[int] = None
     source_asset_version: str = "legacy-1"
@@ -27,7 +29,9 @@ class SceneAssetSchema(BaseModel):
     scene_type: Optional[str] = None
     scene_form: Optional[str] = None
     description: Optional[str] = None
+    business_profile: Dict[str, Any] = Field(default_factory=dict)
     visual_prompt: Optional[str] = None
+    technical_constraints: Dict[str, Any] = Field(default_factory=dict)
     image_url: Optional[str] = None
     visual_anchor_image_id: Optional[int] = None
     source_asset_version: str = "legacy-1"
@@ -44,7 +48,10 @@ class ProductAssetSchema(BaseModel):
     name: str
     product_role: Optional[str] = None
     description: Optional[str] = None
+    business_profile: Dict[str, Any] = Field(default_factory=dict)
     visual_prompt: Optional[str] = None
+    technical_constraints: Dict[str, Any] = Field(default_factory=dict)
+    immutable_structure_constraints: List[str] = Field(default_factory=list)
     image_url: Optional[str] = None
     visual_anchor_image_id: Optional[int] = None
     source_asset_version: str = "legacy-1"

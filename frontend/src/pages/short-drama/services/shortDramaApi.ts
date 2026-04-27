@@ -1,4 +1,9 @@
 import { API_BASE_URL } from '../../../config/api';
+import {
+  PRODUCT_PARSE_GENERIC_MESSAGE,
+  PRODUCT_PARSE_SERVICE_UNAVAILABLE_MESSAGE,
+  PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE,
+} from '../utils/productParseErrors';
 import type {
   AssetImageBatchResponseDto,
   CreateShortDramaProjectResponseDto,
@@ -103,9 +108,17 @@ export type CreateProjectBody = {
   project_name: string;
   duration?: string | null;
   format?: string | null;
-  style?: string | null;
+  style?: string | string[] | null;
   visual_style?: string | null;
   aspect_ratio?: string | null;
+  target_market?: string | null;
+  marketing_goal?: string | null;
+  target_audience?: string | null;
+  brand_tone?: string | null;
+  creative_intent?: string | null;
+  creative_brief?: string | null;
+  workflow_language?: string | null;
+  video_language?: string | null;
 };
 
 export async function createShortDramaProject(body: CreateProjectBody): Promise<CreateShortDramaProjectResponseDto> {
@@ -146,10 +159,30 @@ export async function parseShortDramaProduct(
   input: ProductInputPayload,
   reparseMode: 'replace_all' | 'preserve_user_edited' = 'replace_all',
 ): Promise<ParseProductResponseDto> {
-  return sdFetchJson<ParseProductResponseDto>('/api/short-drama/product/parse', {
-    method: 'POST',
-    body: JSON.stringify({ project_id: projectId, input, reparse_mode: reparseMode }),
-  });
+  try {
+    return await sdFetchJson<ParseProductResponseDto>('/api/short-drama/product/parse', {
+      method: 'POST',
+      body: JSON.stringify({ project_id: projectId, input, reparse_mode: reparseMode }),
+    });
+  } catch (e) {
+    if (!(e instanceof ShortDramaApiError)) throw e;
+    if (
+      e.status === 502 ||
+      e.status === 503 ||
+      /upstream_unavailable/i.test(e.message) ||
+      /service temporarily unavailable/i.test(e.message)
+    ) {
+      console.warn('[S1_PARSE_UPSTREAM_UNAVAILABLE]', { status: e.status, detail: e.message });
+      throw new ShortDramaApiError(PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE, e.status);
+    }
+    if (/^Product parse failed$/i.test(e.message)) {
+      throw new ShortDramaApiError(PRODUCT_PARSE_GENERIC_MESSAGE, e.status);
+    }
+    if (/Internal Server Error/i.test(e.message) || e.status === 500) {
+      throw new ShortDramaApiError(PRODUCT_PARSE_SERVICE_UNAVAILABLE_MESSAGE, e.status);
+    }
+    throw e;
+  }
 }
 
 export async function updateShortDramaProductContext(

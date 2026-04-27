@@ -5,7 +5,7 @@ import { StoryBlueprintLeftRail } from './components/StoryBlueprintLeftRail';
 import { StoryBlueprintRightRail } from './components/StoryBlueprintRightRail';
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
 import { useStoryBlueprint } from './hooks/useStoryBlueprint';
-import type { StoryBlueprintPageScriptVm, StoryBlueprintPageSegmentVm } from './utils/shortDramaAdapters';
+import type { StoryBlueprintPageSegmentVm } from './utils/shortDramaAdapters';
 import { storyBlueprintDtoToPageView } from './utils/shortDramaAdapters';
 import {
   buildStoryBlueprintLeftRailsFromPipeline,
@@ -36,7 +36,7 @@ export function ShortDramaStoryBlueprintPage() {
   } = useStoryBlueprint(projectId);
 
   const [isEditing, setIsEditing] = useState<string | null>(null);
-  const [script, setScript] = useState<StoryBlueprintPageScriptVm>(EMPTY_VM.script);
+  const [script, setScript] = useState(EMPTY_VM.script);
   const [segments, setSegments] = useState<StoryBlueprintPageSegmentVm[]>(EMPTY_VM.segments);
   const [editedSegment, setEditedSegment] = useState<number | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -71,7 +71,7 @@ export function ShortDramaStoryBlueprintPage() {
 
   const leftRails = useMemo(() => buildStoryBlueprintLeftRailsFromPipeline(pipeline), [pipeline]);
 
-  const rightAnalysis = useMemo(() => deriveStoryStructureAnalysis(pipeline?.story_blueprint?.blueprint), [pipeline]);
+  const rightAnalysis = useMemo(() => deriveStoryStructureAnalysis(pipeline), [pipeline]);
 
   const missingProject = projectId == null;
 
@@ -104,13 +104,9 @@ export function ShortDramaStoryBlueprintPage() {
     }
   };
 
-  const scriptFields: Array<{ key: keyof StoryBlueprintPageScriptVm; label: string; icon: string }> = [
+  const baseScriptFields: Array<{ key: 'title' | 'premise'; label: string; icon: string }> = [
     { key: 'title', label: '剧集标题', icon: 'ri-quill-pen-line' },
     { key: 'premise', label: '故事前提 Premise', icon: 'ri-book-open-line' },
-    { key: 'hook', label: '钩子 Hook', icon: 'ri-anchor-line' },
-    { key: 'conflict', label: '核心冲突 Conflict', icon: 'ri-sword-line' },
-    { key: 'twist', label: '反转 Twist', icon: 'ri-exchange-funds-line' },
-    { key: 'resolution', label: '结尾 Resolution', icon: 'ri-flag-line' },
   ];
 
   return (
@@ -171,7 +167,7 @@ export function ShortDramaStoryBlueprintPage() {
           {!missingProject && !pipelineLoading && !hasBlueprint ? (
             <div className="mb-6 rounded-2xl border border-[#EAEAEA] bg-[#F7F8FA] px-5 py-4 text-[13px] text-[#444444]">
               <p className="font-semibold text-[#1D1D1F]">{SHORT_DRAMA_UI.storyPage.noBlueprintTitle}</p>
-              <p className="mt-1 text-[#8E8E93]">{SHORT_DRAMA_UI.storyPage.noBlueprintBody}</p>
+              <p className="mt-1 text-[#8E8E93]">当前还没有剧本大纲，请先生成。</p>
               <button
                 type="button"
                 onClick={() => void generate()}
@@ -239,7 +235,21 @@ export function ShortDramaStoryBlueprintPage() {
           </div>
 
           <div className="mb-8 space-y-3">
-            {scriptFields.map((field) => (
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="rounded-2xl border border-[#EAEAEA] bg-white p-5">
+                <p className="mb-1 text-[12px] font-bold uppercase tracking-wider text-[#8E8E93]">剧本类型</p>
+                <p className="text-[14px] font-semibold text-[#1D1D1F]">{script.scriptStructureType}</p>
+              </div>
+              <div className="rounded-2xl border border-[#EAEAEA] bg-white p-5">
+                <p className="mb-1 text-[12px] font-bold uppercase tracking-wider text-[#8E8E93]">结构节奏</p>
+                <p className="text-[14px] font-semibold text-[#1D1D1F]">{script.structureRhythm}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-[#EAEAEA] bg-white p-5">
+              <p className="mb-1 text-[12px] font-bold uppercase tracking-wider text-[#8E8E93]">设计原因</p>
+              <p className="text-[13.5px] leading-relaxed text-[#444444]">{script.structureReason}</p>
+            </div>
+            {baseScriptFields.map((field) => (
               <div
                 key={field.key}
                 className="rounded-2xl p-5 transition-all duration-200"
@@ -299,6 +309,60 @@ export function ShortDramaStoryBlueprintPage() {
                 )}
               </div>
             ))}
+            {script.sections.map((section, idx) => (
+              <div
+                key={section.key}
+                className="rounded-2xl p-5 transition-all duration-200"
+                style={{
+                  background: '#ffffff',
+                  border: isEditing === section.key ? '1.5px solid #1D1D1F' : '1px solid #EAEAEA',
+                }}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#F5F5F7]">
+                      <i className={`${section.icon} text-[12px] text-[#1D1D1F]`} aria-hidden />
+                    </div>
+                    <span className="text-[12px] font-bold uppercase tracking-wider text-[#8E8E93]">{section.label}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(isEditing === section.key ? null : section.key)}
+                    className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md transition-all duration-150 text-[#AEAEB2]"
+                    onMouseEnter={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = '#F5F5F7';
+                      (e.currentTarget as HTMLButtonElement).style.color = '#1D1D1F';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                      (e.currentTarget as HTMLButtonElement).style.color = '#AEAEB2';
+                    }}
+                  >
+                    <i className="ri-edit-line text-[12px]" aria-hidden />
+                  </button>
+                </div>
+                {isEditing === section.key ? (
+                  <textarea
+                    value={section.content}
+                    onChange={(e) => {
+                      const nextContent = e.target.value;
+                      setScript((prev) => ({
+                        ...prev,
+                        sections: prev.sections.map((item, itemIdx) =>
+                          itemIdx === idx ? { ...item, content: nextContent } : item,
+                        ),
+                      }));
+                      setIsDirty(true);
+                    }}
+                    rows={3}
+                    className="w-full resize-none rounded-lg px-3 py-2.5 text-[13.5px] text-[#1D1D1F] outline-none transition-all"
+                    style={{ background: '#F7F8FA', border: '1px solid #EAEAEA' }}
+                  />
+                ) : (
+                  <p className="text-[13.5px] leading-relaxed text-[#444444]">{section.content}</p>
+                )}
+              </div>
+            ))}
           </div>
 
           <div className="mb-8">
@@ -306,7 +370,7 @@ export function ShortDramaStoryBlueprintPage() {
               <div className="flex h-5 w-5 items-center justify-center rounded-md bg-[#F5F5F7]">
                 <i className="ri-layout-row-line text-[12px] text-[#1D1D1F]" aria-hidden />
               </div>
-              <h3 className="text-[13px] font-bold uppercase tracking-wider text-[#444444]">Segment Plan</h3>
+              <h3 className="text-[13px] font-bold uppercase tracking-wider text-[#444444]">段落计划</h3>
             </div>
             <div className="space-y-3">
               {segments.map((seg) => (
@@ -336,6 +400,7 @@ export function ShortDramaStoryBlueprintPage() {
                       </div>
                       <div>
                         <span className="text-[14px] font-bold text-[#1D1D1F]">{seg.name}</span>
+                        <span className="ml-2 rounded-full bg-[#F5F5F7] px-2 py-0.5 text-[10px] text-[#6E6E73]">{seg.stageName}</span>
                         <span className="ml-2 text-[11px] text-[#8E8E93]">{seg.duration}</span>
                       </div>
                     </div>
@@ -346,7 +411,11 @@ export function ShortDramaStoryBlueprintPage() {
                     />
                   </div>
                   {editedSegment === seg.id ? (
-                    <div className="mt-4 grid grid-cols-3 gap-3 text-[12px]">
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-[12px] lg:grid-cols-3">
+                      <div>
+                        <p className="mb-1 text-[#8E8E93]">阶段名</p>
+                        <p className="leading-snug text-[#444444]">{seg.stageName}</p>
+                      </div>
                       <div>
                         <p className="mb-1 text-[#8E8E93]">目标</p>
                         <p className="leading-snug text-[#444444]">{seg.goal}</p>
@@ -358,8 +427,28 @@ export function ShortDramaStoryBlueprintPage() {
                         </p>
                       </div>
                       <div>
+                        <p className="mb-1 text-[#8E8E93]">关键信息</p>
+                        <p className="leading-snug text-[#444444]">{seg.keyMessage}</p>
+                      </div>
+                      <div>
                         <p className="mb-1 text-[#8E8E93]">剧情概要</p>
                         <p className="leading-snug text-[#444444]">{seg.synopsis}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-[#8E8E93]">段落职责</p>
+                        <p className="leading-snug text-[#444444]">{seg.segmentRole}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-[#8E8E93]">情绪状态</p>
+                        <p className="leading-snug text-[#444444]">{seg.emotionalState}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-[#8E8E93]">预期资产</p>
+                        <p className="leading-snug text-[#444444]">{seg.expectedAssets.length ? seg.expectedAssets.join('、') : '—'}</p>
+                      </div>
+                      <div className="lg:col-span-3">
+                        <p className="mb-1 text-[#8E8E93]">转场到下一段</p>
+                        <p className="leading-snug text-[#444444]">{seg.transitionToNext}</p>
                       </div>
                     </div>
                   ) : null}
@@ -401,9 +490,7 @@ export function ShortDramaStoryBlueprintPage() {
         </main>
 
         <StoryBlueprintRightRail
-          items={rightAnalysis.items}
-          verdictTitle={rightAnalysis.verdictTitle}
-          verdictBody={rightAnalysis.verdictBody}
+          sections={rightAnalysis.sections}
         />
       </div>
     </div>

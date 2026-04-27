@@ -517,6 +517,61 @@ class TestStoryPlannerMock(unittest.TestCase):
         self.assertIn("通勤白领", bp_users.premise)
         self.assertIn("反转型", bp_angles.core_conflict)
 
+    def test_brand_seeding_rewrites_legacy_conflict_keywords(self):
+        from app.short_drama.schemas.product import ProductContextSchema
+        from app.short_drama.schemas.story import SegmentPlanItemSchema, StoryBlueprintSchema
+        from app.short_drama.services.story_planner_service import _normalize_blueprint_for_execution
+
+        product = ProductContextSchema(
+            product_name="金色手机壳",
+            core_selling_points=["金属质感", "轻薄贴合"],
+            target_users=["通勤白领"],
+            visual_features=["金色边框", "细腻纹理"],
+        )
+        poisoned = StoryBlueprintSchema(
+            title="测试",
+            premise="测试",
+            hook="手机摔坏引发焦虑",
+            core_conflict="风险放大，立即购买",
+            twist="解决痛点",
+            resolution="强CTA抢购",
+            segment_plan=[
+                SegmentPlanItemSchema(segment_id="seg_1", goal="痛点暴露", summary="手机摔坏"),
+                SegmentPlanItemSchema(segment_id="seg_2", goal="风险放大", summary="保护焦虑"),
+                SegmentPlanItemSchema(segment_id="seg_3", goal="立即购买", summary="强CTA"),
+            ],
+        )
+        normalized = _normalize_blueprint_for_execution(
+            poisoned,
+            product,
+            {"marketing_goal": "brand_seeding", "workflow_language": "zh-CN"},
+        )
+        blob = " ".join(
+            [
+                normalized.hook,
+                normalized.core_conflict,
+                normalized.twist,
+                normalized.resolution,
+                normalized.story_structure.get("hook", ""),
+                normalized.story_structure.get("conflict", ""),
+                normalized.story_structure.get("twist", ""),
+                normalized.story_structure.get("resolution", ""),
+            ]
+        )
+        self.assertFalse(any(word in blob for word in ["摔坏", "痛点", "焦虑", "立即购买", "CTA"]))
+        self.assertEqual(normalized.story_framework.get("type"), "brand_seeding")
+        self.assertEqual(
+            normalized.story_framework.get("structure"),
+            ["生活场景", "情绪共鸣", "产品自然出现", "氛围强化", "记忆点"],
+        )
+
+    def test_story_style_conflict_normalized_to_light_conflict(self):
+        from app.short_drama.services.story_planner_service import _normalize_story_style
+
+        self.assertEqual(_normalize_story_style("conflict"), "light_conflict")
+        self.assertEqual(_normalize_story_style(["conflict", "comedy"]), "light_conflict")
+        self.assertEqual(_normalize_story_style("healing,comedy"), "healing")
+
 
 class TestAssetSpecMock(unittest.TestCase):
     def test_image_url_none(self):

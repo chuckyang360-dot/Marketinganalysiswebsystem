@@ -1,5 +1,6 @@
 import type { ProductInputDraft, ProductPreviewSummary } from '../types/shortDrama';
 import type { ProductContextDto, ProductInputPayload, StoryBlueprintDto } from '../types/shortDramaApi';
+import { marketingGoalZhLabel } from './projectLocales';
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -86,8 +87,10 @@ export function productContextToPreview(ctx: ProductContextDto): ProductPreviewS
     keyFunctions: ctx.key_functions ?? [],
     emotionalValue: ctx.emotional_value ?? [],
     suitableStoryAngles: ctx.suitable_story_angles ?? [],
+    userPainPoints: ctx.user_pain_points ?? [],
     visualRiskNotes: ctx.visual_risk_notes ?? [],
     consistencyNotes: ctx.consistency_notes ?? [],
+    immutableStructureConstraints: ctx.immutable_structure_constraints ?? [],
     extractedFromImages: ctx.extracted_from_images ?? [],
     parseConfidence: typeof ctx.parse_confidence === 'number' ? ctx.parse_confidence : 0,
     sourceTrace: (ctx.source_trace ?? {}) as Record<string, string>,
@@ -116,8 +119,10 @@ export function previewToProductContextPayload(preview: ProductPreviewSummary): 
     key_functions: preview.keyFunctions,
     emotional_value: preview.emotionalValue,
     suitable_story_angles: preview.suitableStoryAngles,
+    user_pain_points: preview.userPainPoints,
     visual_risk_notes: preview.visualRiskNotes,
     consistency_notes: preview.consistencyNotes,
+    immutable_structure_constraints: preview.immutableStructureConstraints,
     extracted_from_images: preview.extractedFromImages,
     parse_confidence: preview.parseConfidence,
     source_trace: preview.sourceTrace,
@@ -130,18 +135,29 @@ const SEGMENT_COLORS = ['#B45309', '#DC2626', '#047857', '#334155', '#9333EA', '
 export type StoryBlueprintPageScriptVm = {
   title: string;
   premise: string;
-  hook: string;
-  conflict: string;
-  twist: string;
-  resolution: string;
+  scriptStructureType: string;
+  structureRhythm: string;
+  structureReason: string;
+  sections: Array<{
+    key: string;
+    label: string;
+    icon: string;
+    content: string;
+  }>;
 };
 
 export type StoryBlueprintPageSegmentVm = {
   id: number;
   name: string;
+  stageName: string;
   goal: string;
   duration: string;
   productPlacement: string;
+  segmentRole: string;
+  emotionalState: string;
+  keyMessage: string;
+  expectedAssets: string[];
+  transitionToNext: string;
   synopsis: string;
   color: string;
 };
@@ -160,30 +176,106 @@ function formatSegmentDuration(seconds: number | undefined): string {
   return `~${Math.round(seconds)}s`;
 }
 
+function sanitizeDisplayLabel(value: unknown): string {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const mapped = marketingGoalZhLabel(text);
+  if (mapped !== text) return mapped;
+  return text
+    .replace(/^brand_seeding[，,:：\s-]*/i, '')
+    .replace(/^single_ad[，,:：\s-]*/i, '')
+    .replace(/^light_conflict[，,:：\s-]*/i, '')
+    .replace(/^cinematic[，,:：\s-]*/i, '')
+    .trim();
+}
+
 export function storyBlueprintDtoToPageView(dto: StoryBlueprintDto | undefined | null): StoryBlueprintPageViewModel {
   const b = dto ?? {};
+  const structure = b.story_structure ?? {};
+  const creativeStrategy =
+    b.creative_brief && typeof b.creative_brief === 'object' && !Array.isArray(b.creative_brief)
+      ? ((b.creative_brief as Record<string, unknown>).creative_strategy as Record<string, unknown> | undefined)
+      : undefined;
+  const briefStages = Array.isArray(creativeStrategy?.stage_display_names)
+    ? creativeStrategy?.stage_display_names.map(String).filter(Boolean)
+    : [];
+  const frameworkSteps = briefStages.length ? briefStages : (Array.isArray(b.story_framework?.structure) ? b.story_framework?.structure ?? [] : []);
+  const legacySections = [
+    { key: 'hook', label: '钩子 Hook', icon: 'ri-anchor-line', content: structure.hook?.trim() || b.hook?.trim() || '—' },
+    {
+      key: 'conflict',
+      label: '核心冲突 Conflict',
+      icon: 'ri-sword-line',
+      content: structure.conflict?.trim() || (b.core_conflict ?? '').trim() || '—',
+    },
+    { key: 'twist', label: '反转 Twist', icon: 'ri-exchange-funds-line', content: structure.twist?.trim() || b.twist?.trim() || '—' },
+    {
+      key: 'resolution',
+      label: '结尾 Resolution',
+      icon: 'ri-flag-line',
+      content: structure.resolution?.trim() || b.resolution?.trim() || '—',
+    },
+  ];
+  const frameworkContentByIndex = [
+    structure.hook?.trim() || b.hook?.trim() || '',
+    structure.conflict?.trim() || (b.core_conflict ?? '').trim() || '',
+    structure.twist?.trim() || b.twist?.trim() || '',
+    structure.resolution?.trim() || b.resolution?.trim() || '',
+    Array.isArray(structure.emotional_arc) ? structure.emotional_arc.map((x) => String(x)).join('；') : '',
+  ];
+  const frameworkSections = frameworkSteps.map((step, idx) => ({
+    key: `framework_${idx + 1}`,
+    label: String(step).trim() || `段落 ${idx + 1}`,
+    icon: ['ri-home-4-line', 'ri-heart-3-line', 'ri-gift-2-line', 'ri-magic-line', 'ri-bookmark-3-line'][idx] || 'ri-layout-row-line',
+    content: (frameworkContentByIndex[idx] || frameworkContentByIndex[3] || '').trim() || '—',
+  }));
+  const useFrameworkSections = frameworkSections.length > 0;
   const script: StoryBlueprintPageScriptVm = {
-    title: b.title?.trim() || '未命名剧本',
-    premise: b.premise?.trim() || '—',
-    hook: b.hook?.trim() || '—',
-    conflict: (b.core_conflict ?? '').trim() || '—',
-    twist: b.twist?.trim() || '—',
-    resolution: b.resolution?.trim() || '—',
+    title: structure.title?.trim() || b.script_title?.trim() || b.title?.trim() || '未命名剧本',
+    premise: structure.premise?.trim() || b.premise?.trim() || '—',
+    scriptStructureType:
+      sanitizeDisplayLabel(b.script_type_display) ||
+      sanitizeDisplayLabel(creativeStrategy?.script_type_display) ||
+      sanitizeDisplayLabel(b.story_framework?.name) ||
+      '短视频广告',
+    structureRhythm:
+      sanitizeDisplayLabel(b.structure_type_display) ||
+      sanitizeDisplayLabel(creativeStrategy?.structure_type_display) ||
+      frameworkSteps.join(' → ') ||
+      '—',
+    structureReason: b.structure_reason_for_user?.trim() || b.structure_reason?.trim() || String(creativeStrategy?.structure_reason_for_user || '').trim() || '—',
+    sections: useFrameworkSections ? frameworkSections : legacySections,
   };
 
   const plan = b.segment_plan ?? [];
+  const shotPlanSegments = Array.isArray(b.shot_plan?.segments) ? b.shot_plan?.segments ?? [] : [];
   const segments: StoryBlueprintPageSegmentVm[] = plan.map((item, idx) => {
     const id = idx + 1;
+    const shotSeg = shotPlanSegments[idx];
+    const shotSegName =
+      shotSeg && typeof shotSeg === 'object' && !Array.isArray(shotSeg)
+        ? String((shotSeg as Record<string, unknown>).name || '').trim()
+        : '';
     const name =
+      item.segment_title?.trim() ||
+      shotSegName ||
+      (frameworkSteps[idx] && String(frameworkSteps[idx]).trim()) ||
       (item.story_beat && String(item.story_beat).trim()) ||
       (item.segment_id && String(item.segment_id).trim()) ||
       `Segment ${id}`;
+    const stageName = item.stage_name?.trim() || (frameworkSteps[idx] && String(frameworkSteps[idx]).trim()) || item.story_beat?.trim() || `阶段 ${id}`;
     return {
       id,
       name,
-      goal: item.goal?.trim() || '—',
-      duration: formatSegmentDuration(item.duration_seconds),
-      productPlacement: item.product_exposure_mode?.trim() || '—',
+      stageName,
+      goal: item.segment_goal?.trim() || item.goal?.trim() || '—',
+      duration: formatSegmentDuration(item.duration_sec ?? item.duration_seconds),
+      productPlacement: item.product_exposure?.trim() || item.product_exposure_mode?.trim() || '—',
+      segmentRole: item.segment_role?.trim() || stageName || '—',
+      emotionalState: item.emotional_state?.trim() || '—',
+      keyMessage: item.key_message?.trim() || item.source_selling_point?.trim() || '—',
+      expectedAssets: item.required_assets ?? item.expected_assets ?? item.required_visual_elements ?? [],
+      transitionToNext: item.transition_to_next?.trim() || '—',
       synopsis: item.summary?.trim() || '—',
       color: SEGMENT_COLORS[idx % SEGMENT_COLORS.length],
     };
@@ -193,9 +285,15 @@ export function storyBlueprintDtoToPageView(dto: StoryBlueprintDto | undefined |
     segments.push({
       id: 1,
       name: 'Segment 1',
+      stageName: '阶段 1',
       goal: '—',
       duration: '—',
       productPlacement: '—',
+      segmentRole: '—',
+      emotionalState: '—',
+      keyMessage: '—',
+      expectedAssets: [],
+      transitionToNext: '—',
       synopsis: '后端未返回 segment_plan，可尝试重新生成剧本。',
       color: SEGMENT_COLORS[0],
     });

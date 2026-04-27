@@ -7,9 +7,17 @@ export type ShortDramaProjectDto = {
   status: string;
   duration?: string | null;
   format?: string | null;
-  style?: string | null;
+  style?: string | string[] | null;
   visual_style?: string | null;
   aspect_ratio?: string | null;
+  target_market?: string | null;
+  marketing_goal?: string | null;
+  target_audience?: string | null;
+  brand_tone?: string | null;
+  creative_intent?: string | null;
+  creative_brief?: string | null;
+  workflow_language?: string | null;
+  video_language?: string | null;
   last_active_step?: 'step_0' | 'step_1' | 'step_2' | 'step_3' | 'step_4' | 'overview' | null;
   step_status?: Record<string, string>;
   overall_status?: 'draft' | 'stale' | 'generating' | 'completed' | 'failed' | null;
@@ -80,8 +88,10 @@ export type ProductContextDto = {
   key_functions?: string[];
   emotional_value?: string[];
   suitable_story_angles?: string[];
+  user_pain_points?: string[];
   visual_risk_notes?: string[];
   consistency_notes?: string[];
+  immutable_structure_constraints?: string[];
   extracted_from_images?: string[];
   parse_confidence?: number;
   source_trace?: Record<string, string>;
@@ -128,22 +138,45 @@ export type UpdateProductContextResponseDto = {
 
 export type SegmentPlanItemDto = {
   segment_id?: string;
+  stage_name?: string;
+  title?: string;
+  segment_title?: string;
+  segment_goal?: string;
+  duration_sec?: number;
+  key_message?: string;
   goal?: string;
   duration_seconds?: number;
   story_beat?: string;
+  segment_role?: string;
+  emotional_state?: string;
   summary?: string;
   product_exposure_mode?: string;
+  product_exposure?: string;
   source_selling_point?: string;
   product_feature_to_show?: string;
   target_user_trigger?: string;
   required_visual_elements?: string[];
+  required_assets?: string[];
+  expected_assets?: string[];
+  transition_to_next?: string;
 };
 
 export type StoryBlueprintDto = {
   title?: string;
+  script_title?: string;
   format?: string;
-  style?: string;
+  style?: string | string[];
   premise?: string;
+  target_audience?: string;
+  core_pain?: string;
+  emotional_trigger?: string;
+  product_promise?: string;
+  conversion_goal?: string;
+  script_structure_type?: string;
+  script_type_display?: string;
+  structure_type_display?: string;
+  structure_reason?: string;
+  structure_reason_for_user?: string;
   hook?: string;
   core_conflict?: string;
   twist?: string;
@@ -156,6 +189,39 @@ export type StoryBlueprintDto = {
   dialogue_tone?: string;
   must_show_elements?: string[];
   must_avoid_elements?: string[];
+  language_policy?: {
+    workflow_language?: string;
+    video_language?: string;
+    target_market?: string;
+  };
+  marketing_strategy?: Record<string, unknown>;
+  story_structure?: {
+    title?: string;
+    premise?: string;
+    hook?: string;
+    conflict?: string;
+    twist?: string;
+    resolution?: string;
+    emotional_arc?: string[];
+  };
+  story_framework?: {
+    type?: string;
+    name?: string;
+    structure?: string[];
+    reason?: string;
+  };
+  asset_requirements?: {
+    characters?: unknown[];
+    scenes?: unknown[];
+    products?: unknown[];
+  };
+  shot_plan?: {
+    segments?: unknown[];
+  };
+  spoken_strategy?: Record<string, unknown>;
+  creative_brief?: Record<string, unknown>;
+  market_visual_constraints?: Record<string, unknown>;
+  visual_style_constraints?: Record<string, unknown>;
   meta?: Record<string, unknown>;
 };
 
@@ -320,9 +386,13 @@ export type UpdateSegmentShotBody = {
   duration_limit?: number;
   action_description?: string;
   dialogue?: string;
+  spoken_text?: string;
   voiceover?: string;
+  voiceover_text?: string;
+  subtitle_text?: string;
   emotion?: string;
   video_prompt?: string;
+  generation_prompt?: string;
   must_show?: string[];
   must_avoid?: string[];
   duration_seconds?: number;

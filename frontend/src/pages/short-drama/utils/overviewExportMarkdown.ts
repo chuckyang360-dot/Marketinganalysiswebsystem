@@ -76,7 +76,9 @@ export function buildOverviewScriptMarkdown(pipeline: PipelineSummaryDto | null)
       if (shot.sceneDescription) lines.push(`- **场景**：${shot.sceneDescription}`);
       if (shot.subjectDescription) lines.push(`- **角色 / 主体**：${shot.subjectDescription}`);
       if (shot.action) lines.push(`- **动作**：${shot.action}`);
-      if (shot.dialogue) lines.push(`- **台词 / 旁白**：${shot.dialogue}`);
+      lines.push(`- **角色口播**：${shot.spokenText || '无角色口播'}`);
+      lines.push(`- **旁白/画外音**：${shot.voiceoverText || '无旁白'}`);
+      lines.push(`- **字幕文案**：${shot.subtitleText || '无字幕'}`);
       lines.push(`- **情绪**：${shot.emotion || '—'}`);
       lines.push(`- **时长**：${shot.duration}`);
       if (shot.cameraDescription) lines.push(`- **镜头运动**：${shot.cameraDescription}`);

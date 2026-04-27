@@ -28,19 +28,21 @@ export function StoryBlueprintLeftRail({ settings, globalFields, className = '' 
         </div>
       </div>
 
-      <div>
-        <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-[#AEAEB2]">全局设定</p>
-        <div className="space-y-3 rounded-xl bg-white p-3" style={{ border: `1px solid ${sdColors.border}` }}>
-          {globalFields.map((item) => (
-            <div key={item.label}>
-              <p className="mb-0.5 text-[10px]" style={{ color: '#AEAEB2' }}>
-                {item.label}
-              </p>
-              <p className="text-[12px] font-medium leading-snug text-[#444444]">{item.value}</p>
-            </div>
-          ))}
+      {globalFields.length ? (
+        <div>
+          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-[#AEAEB2]">AI 创作设定</p>
+          <div className="space-y-3 rounded-xl bg-white p-3" style={{ border: `1px solid ${sdColors.border}` }}>
+            {globalFields.map((item) => (
+              <div key={item.label}>
+                <p className="mb-0.5 text-[10px]" style={{ color: '#AEAEB2' }}>
+                  {item.label}
+                </p>
+                <p className="text-[12px] font-medium leading-snug text-[#444444]">{item.value}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : null}
     </aside>
   );
 }

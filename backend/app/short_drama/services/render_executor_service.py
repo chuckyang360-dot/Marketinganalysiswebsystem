@@ -300,6 +300,8 @@ class RenderExecutorService:
             )
 
             payload = {
+                "render_granularity": plan.render_granularity,
+                "future_shot_level_reserved": plan.future_shot_level_reserved,
                 "prompt_preview": plan.segment_video_prompt[:500],
                 "reference_image_count": len(ref_for_api),
                 "duration_seconds": plan.duration_seconds,
@@ -328,8 +330,13 @@ class RenderExecutorService:
             model_name = effective_xai_video_model()
             final_prompt = plan.segment_video_prompt or ""
             for shot in seg.shots:
-                dialogue_text = str(getattr(shot, "dialogue", "") or "").strip()
-                voiceover_text = str(getattr(shot, "voiceover", "") or getattr(shot, "narration", "") or "").strip()
+                dialogue_text = str(getattr(shot, "spoken_text", "") or getattr(shot, "dialogue", "") or "").strip()
+                voiceover_text = str(
+                    getattr(shot, "voiceover_text", "")
+                    or getattr(shot, "voiceover", "")
+                    or getattr(shot, "narration", "")
+                    or ""
+                ).strip()
                 if not dialogue_text and not voiceover_text:
                     continue
                 logger.info(

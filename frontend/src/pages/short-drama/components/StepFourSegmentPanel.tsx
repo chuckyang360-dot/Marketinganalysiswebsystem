@@ -107,7 +107,11 @@ export function StepFourSegmentPanel({
                       >
                         <div>
                           <span style={{ color: "#8E8E93" }}>产品露出：</span>
-                          <span style={{ color: seg.color, fontWeight: 600 }}>{seg.placement}</span>
+                          <span style={{ color: seg.color, fontWeight: 600 }}>{seg.productExposure || seg.placement}</span>
+                        </div>
+                        <div>
+                          <span style={{ color: "#8E8E93" }}>段落职责：</span>
+                          <span style={{ color: "#444444" }}>{seg.segmentRole || "—"}</span>
                         </div>
                       </div>
 
@@ -138,6 +142,11 @@ export function StepFourSegmentPanel({
                                   <i className="ri-close-circle-fill text-[11px]" style={{ color: "#DC2626" }} />
                                 )}
                                 <span className="text-[12.5px]" style={{ color: "#444444" }}>{shot.desc}</span>
+                                {shot.shotRole && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "#F5F5F7", color: "#6E6E73" }}>
+                                    {shot.shotRole}
+                                  </span>
+                                )}
                                 <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "#EAEAEA", color: "#6E6E73" }}>
                                   {shot.duration}
                                 </span>
@@ -154,19 +163,31 @@ export function StepFourSegmentPanel({
                                     <p style={{ color: "#444444" }} className="leading-snug">{shot.action}</p>
                                   </div>
                                   <div>
-                                    <p className="mb-1" style={{ color: "#AEAEB2" }}>台词 / 旁白</p>
-                                    <p style={{ color: "#444444" }} className="leading-snug">{shot.dialogue}</p>
+                                    <p className="mb-1" style={{ color: "#AEAEB2" }}>角色口播</p>
+                                    <p style={{ color: "#444444" }} className="leading-snug">{shot.spokenText || "无角色口播"}</p>
+                                  </div>
+                                  <div>
+                                    <p className="mb-1" style={{ color: "#AEAEB2" }}>旁白/画外音</p>
+                                    <p style={{ color: "#444444" }} className="leading-snug">{shot.voiceoverText || "无旁白"}</p>
+                                  </div>
+                                  <div>
+                                    <p className="mb-1" style={{ color: "#AEAEB2" }}>字幕文案</p>
+                                    <p style={{ color: "#444444" }} className="leading-snug">{shot.subtitleText || "无字幕"}</p>
                                   </div>
                                   <div>
                                     <p className="mb-1" style={{ color: "#AEAEB2" }}>情绪</p>
                                     <p style={{ color: seg.color, fontWeight: 600 }}>{shot.emotion}</p>
                                   </div>
+                                  <div>
+                                    <p className="mb-1" style={{ color: "#AEAEB2" }}>镜头 / 构图 / 运动</p>
+                                    <p style={{ color: "#444444" }} className="leading-snug">{[shot.camera, shot.framing, shot.cameraMovement].filter(Boolean).join(" / ") || "—"}</p>
+                                  </div>
                                 </div>
                                 {(shot.sceneDescription ||
                                   shot.subjectDescription ||
                                   shot.cameraDescription ||
-                                  shot.imagePrompt ||
-                                  shot.videoPrompt ||
+                                  shot.visualStyleInstruction ||
+                                  shot.generationPrompt ||
                                   shot.sourceSellingPoint ||
                                   shot.mustShow?.length ||
                                   shot.mustAvoid?.length) && (
@@ -185,19 +206,25 @@ export function StepFourSegmentPanel({
                                         <p><span style={{ color: "#AEAEB2" }}>镜头 </span>{shot.cameraDescription}</p>
                                       )}
                                       {shot.imagePrompt && (
-                                        <p><span style={{ color: "#AEAEB2" }}>image_prompt </span>{shot.imagePrompt}</p>
+                                        <p><span style={{ color: "#AEAEB2" }}>画面提示词 </span>{shot.imagePrompt}</p>
                                       )}
-                                      {shot.videoPrompt && (
-                                        <p><span style={{ color: "#AEAEB2" }}>video_prompt </span>{shot.videoPrompt}</p>
+                                      {shot.visualStyleInstruction && (
+                                        <p><span style={{ color: "#AEAEB2" }}>视觉风格 </span>{shot.visualStyleInstruction}</p>
+                                      )}
+                                      {shot.marketLocalizationDetail && (
+                                        <p><span style={{ color: "#AEAEB2" }}>市场本地化 </span>{shot.marketLocalizationDetail}</p>
+                                      )}
+                                      {shot.generationPrompt && (
+                                        <p><span style={{ color: "#AEAEB2" }}>生成提示词 </span>{shot.generationPrompt}</p>
                                       )}
                                       {shot.sourceSellingPoint && (
-                                        <p><span style={{ color: "#AEAEB2" }}>source_selling_point </span>{shot.sourceSellingPoint}</p>
+                                        <p><span style={{ color: "#AEAEB2" }}>产品卖点 </span>{shot.sourceSellingPoint}</p>
                                       )}
                                       {shot.mustShow?.length ? (
-                                        <p><span style={{ color: "#AEAEB2" }}>must_show </span>{shot.mustShow.join('；')}</p>
+                                        <p><span style={{ color: "#AEAEB2" }}>必须出现 </span>{shot.mustShow.join('；')}</p>
                                       ) : null}
                                       {shot.mustAvoid?.length ? (
-                                        <p><span style={{ color: "#AEAEB2" }}>must_avoid </span>{shot.mustAvoid.join('；')}</p>
+                                        <p><span style={{ color: "#AEAEB2" }}>避免出现 </span>{shot.mustAvoid.join('；')}</p>
                                       ) : null}
                                     </div>
                                   </details>
