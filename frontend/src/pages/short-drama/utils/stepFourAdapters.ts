@@ -45,6 +45,100 @@ function cleanDisplayText(input: string): string {
   return raw;
 }
 
+const ENGINEERING_PREFIX_PATTERNS: RegExp[] = [
+  /^\s*emotional_value\s*[:：]\s*/i,
+  /^\s*user_pain_points\s*[:：]\s*/i,
+  /^\s*core_selling_points\s*[:：]\s*/i,
+  /^\s*source_selling_point\s*[:：]\s*/i,
+  /^\s*product_presence\s*[:：]\s*/i,
+  /^\s*product_purpose\s*[:：]\s*/i,
+  /^\s*visual_action\s*[:：]\s*/i,
+  /^\s*action_description\s*[:：]\s*/i,
+  /^\s*scene_direction\s*[:：]\s*/i,
+  /^\s*camera_direction\s*[:：]\s*/i,
+  /^\s*character_action\s*[:：]\s*/i,
+  /^\s*viewer_takeaway\s*[:：]\s*/i,
+  /^\s*story_intent\s*[:：]\s*/i,
+  /^\s*commercial_intent\s*[:：]\s*/i,
+];
+
+const ENGINEERING_KEYS = [
+  'emotional_value',
+  'core_selling_points',
+  'user_pain_points',
+  'product_purpose',
+  'product_presence',
+  'source_selling_point',
+  'visual_action',
+  'action_description',
+  'scene_direction',
+  'camera_direction',
+  'character_action',
+  'viewer_takeaway',
+  'story_intent',
+  'commercial_intent',
+] as const;
+
+const PRODUCT_PRESENCE_MAP: Record<string, string> = {
+  none: '商品暂不出现',
+  implied: '暗示商品相关',
+  background: '商品作为背景出现',
+  visible: '商品可见',
+  explicit: '商品明确出现',
+  hero: '商品作为主角展示',
+};
+
+const REMAINING_ENGINEERING_TOKEN_RE = new RegExp(ENGINEERING_KEYS.join('|'), 'i');
+
+function prettifyValue(value: string): string {
+  let out = value.replace(/，/g, '、').replace(/\s+/g, ' ').trim();
+  // 主展示不直接确认品牌名，统一弱化品牌识别结果
+  out = out.replace(/\bMCM\b\s*品牌?/gi, '品牌质感');
+  out = out.replace(/\bMCM\b/gi, '品牌风格');
+  return out;
+}
+
+function convertKeyValueSegment(segment: string): string {
+  const m = segment.match(/^\s*([a-z_]+)\s*[:：]\s*(.*?)\s*$/i);
+  if (!m) return prettifyValue(segment);
+  const key = m[1].toLowerCase();
+  const rawValue = String(m[2] || '').trim();
+  if (!rawValue) return '';
+  if (key === 'product_presence') {
+    const mapped = PRODUCT_PRESENCE_MAP[rawValue.toLowerCase()];
+    return mapped || prettifyValue(rawValue);
+  }
+  if ((ENGINEERING_KEYS as readonly string[]).includes(key)) {
+    return prettifyValue(rawValue);
+  }
+  return prettifyValue(segment);
+}
+
+function normalizeDisplayText(input: unknown): string {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+
+  const parts = raw
+    .split(/[;\n；]+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .map(convertKeyValueSegment)
+    .filter(Boolean);
+  let text = parts.join('；').trim();
+  if (!text) return '';
+
+  for (const p of ENGINEERING_PREFIX_PATTERNS) {
+    text = text.replace(p, '');
+  }
+  text = prettifyValue(text);
+  // 兜底：若仍残留工程字段名，不原样展示 key
+  if (REMAINING_ENGINEERING_TOKEN_RE.test(text)) {
+    text = text.replace(new RegExp(`\\b(${ENGINEERING_KEYS.join('|')})\\b\\s*[:：]?`, 'gi'), '').trim();
+    text = prettifyValue(text);
+  }
+  return text;
+}
+
 export type StepFourAssetLibraryVm = {
   characters: {
     id: number;
@@ -250,7 +344,57 @@ const EMPTY_SHOT_PLACEHOLDER: Step4Shot[] = [
 ];
 
 function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
+  const presentationShots = Array.isArray(script.presentation_shots) ? script.presentation_shots : [];
   const shots = script.shots;
+  if (presentationShots.length > 0) {
+    return presentationShots.map((raw, i) => {
+      const s = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+      const durationSec = Number(s.duration_sec ?? 0);
+      const duration = Number.isFinite(durationSec) && durationSec > 0 ? `${durationSec}s` : '—';
+      const dialogueText = normalizeDisplayText(stringifyLine(s.dialogue_text));
+      const voiceoverText = normalizeDisplayText(stringifyLine(s.voiceover_text));
+      const subtitleText = normalizeDisplayText(stringifyLine(s.subtitle_text));
+      const shotRole = normalizeDisplayText(typeof s.shot_role === 'string' ? s.shot_role.trim() : '');
+      const visualDirection = normalizeDisplayText(stringifyLine(s.visual_direction));
+      const characterDirection = normalizeDisplayText(stringifyLine(s.character_action));
+      return {
+        id: i + 1,
+        backendShotId:
+          (typeof s.shot_id === 'string' && s.shot_id.trim()) ||
+          (typeof s.shot_id === 'number' ? String(s.shot_id) : '') ||
+          `shot_${i + 1}`,
+        desc: visualDirection || characterDirection || `镜头 ${i + 1}`,
+        shotRole: shotRole || undefined,
+        action: characterDirection || visualDirection,
+        spokenText: dialogueText,
+        voiceoverText,
+        subtitleText,
+        dialogue: dialogueText,
+        voiceover: voiceoverText,
+        subtitle: subtitleText,
+        dialogueSource: resolveDialogueSource({
+          spoken_text: dialogueText,
+          voiceover_text: voiceoverText,
+          subtitle_text: subtitleText,
+        }),
+        emotion: normalizeDisplayText(stringifyLine(s.audio_intent)),
+        duration,
+        durationSeconds: Number.isFinite(durationSec) ? durationSec : 0,
+        characterRefs: asStringArray(s.character_refs),
+        sceneRef: asStringArray(s.scene_refs)[0],
+        productRefs: asStringArray(s.product_refs),
+        viewerTakeaway: normalizeDisplayText(stringifyLine(s.viewer_takeaway)) || undefined,
+        visualDirection: visualDirection || undefined,
+        characterDirection: characterDirection || undefined,
+        productPresence: normalizeDisplayText(stringifyLine(s.product_presence)) || undefined,
+        productPurpose: normalizeDisplayText(stringifyLine(s.product_purpose)) || undefined,
+        sceneDirection: normalizeDisplayText(stringifyLine(s.scene_direction)) || undefined,
+        cameraDirection: normalizeDisplayText(stringifyLine(s.camera_direction)) || undefined,
+        dialogueText: dialogueText || undefined,
+        audioIntent: normalizeDisplayText(stringifyLine(s.audio_intent)) || undefined,
+      };
+    });
+  }
   const legacyAction = stringifyLine(script.visual_action ?? script.action_description ?? script.goal);
   if (!Array.isArray(shots) || shots.length === 0) {
     return [{
@@ -303,16 +447,18 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       s.source_visual_constraints && typeof s.source_visual_constraints === 'object' && !Array.isArray(s.source_visual_constraints)
         ? (s.source_visual_constraints as Record<string, unknown>)
         : undefined;
-    const spokenText = stringifyLine(s.spoken_text) || stringifyLine(s.dialogue);
-    const voiceoverText = stringifyLine(s.voiceover_text) || stringifyLine(s.voiceover) || stringifyLine(s.narration);
-    const subtitleText = stringifyLine(s.subtitle_text) || stringifyLine(s.subtitle);
+    const spokenText = normalizeDisplayText(stringifyLine(s.spoken_text) || stringifyLine(s.dialogue));
+    const voiceoverText = normalizeDisplayText(
+      stringifyLine(s.voiceover_text) || stringifyLine(s.voiceover) || stringifyLine(s.narration),
+    );
+    const subtitleText = normalizeDisplayText(stringifyLine(s.subtitle_text) || stringifyLine(s.subtitle));
     const legacyDialogue =
       stringifyLine(s.spoken_line) ||
       stringifyLine(s.caption) ||
       stringifyLine(s.dialogue_lines) ||
       stringifyLine(s.lines) ||
       stringifyLine(s.script);
-    const displayDialogue = spokenText || legacyDialogue;
+    const displayDialogue = normalizeDisplayText(spokenText || legacyDialogue);
 
     const mapped: Step4Shot = {
       id: i + 1,
@@ -321,8 +467,14 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
         (typeof s.shot_id === 'number' ? String(s.shot_id) : '') ||
         `shot_${i + 1}`,
       desc,
-      shotRole: typeof s.shot_role === 'string' && s.shot_role.trim() ? s.shot_role.trim() : undefined,
-      action: (typeof s.visual_action === 'string' && s.visual_action.trim()) || (typeof s.action_description === 'string' ? s.action_description : ''),
+      shotRole:
+        typeof s.shot_role === 'string' && s.shot_role.trim()
+          ? normalizeDisplayText(s.shot_role.trim())
+          : undefined,
+      action: normalizeDisplayText(
+        (typeof s.visual_action === 'string' && s.visual_action.trim()) ||
+          (typeof s.action_description === 'string' ? s.action_description : ''),
+      ),
       spokenText,
       voiceoverText,
       subtitleText,
@@ -333,7 +485,7 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       voiceover: voiceoverText,
       subtitle: subtitleText,
       dialogueSource: resolveDialogueSource(s),
-      emotion: typeof s.emotion === 'string' ? s.emotion : '',
+      emotion: normalizeDisplayText(typeof s.emotion === 'string' ? s.emotion : ''),
       duration: durationStr,
       durationSeconds:
         typeof dur === 'number' && Number.isFinite(dur)
@@ -369,7 +521,10 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
       mustShow: stringArray(s.must_show),
       mustAvoid: stringArray(s.must_avoid),
       sourceSegmentId: typeof s.source_segment_id === 'string' ? s.source_segment_id : undefined,
-      sourceSellingPoint: typeof s.source_selling_point === 'string' ? s.source_selling_point : undefined,
+      sourceSellingPoint:
+        typeof s.source_selling_point === 'string'
+          ? normalizeDisplayText(s.source_selling_point)
+          : undefined,
       sourceVisualConstraints,
       executionInput:
         s.execution_input && typeof s.execution_input === 'object' && !Array.isArray(s.execution_input)

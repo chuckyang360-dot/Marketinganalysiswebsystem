@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import Any
 
 from ...config import settings
@@ -9,6 +10,31 @@ from ..schemas.product import ProductImageUnderstandingSchema, ProductRawInputSc
 from ..utils.prompts import PRODUCT_IMAGE_UNDERSTANDING_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _build_s1_image_understanding_text_payload(raw_input: ProductRawInputSchema) -> dict[str, Any]:
+    image_items: list[dict[str, Any]] = []
+    for row in raw_input.product_images:
+        image_items.append(
+            {
+                "image_order": int(row.image_order or 0),
+                "is_main_image": bool(row.is_main_image),
+            }
+        )
+    return {
+        "product_name_raw": raw_input.product_name_raw,
+        "product_category_raw": raw_input.product_category_raw,
+        "brand_raw": raw_input.brand_raw,
+        "price_raw": raw_input.price_raw,
+        "target_users_raw": raw_input.target_users_raw,
+        "selling_points_raw": list(raw_input.selling_points_raw or []),
+        "usage_scenarios_raw": list(raw_input.usage_scenarios_raw or []),
+        "extra_notes_raw": raw_input.extra_notes_raw,
+        "product_images_summary": {
+            "image_count": len(image_items),
+            "items": image_items,
+        },
+    }
 
 
 class ProductImageUnderstandingService:
@@ -35,9 +61,28 @@ class ProductImageUnderstandingService:
             )
             logger.info("[S1_IMAGE_UNDERSTANDING_RESULT] project_id=%s result=%s", project_id, out.model_dump())
             return out
+        text_payload = _build_s1_image_understanding_text_payload(raw_input)
+        text_payload_json = json.dumps(text_payload, ensure_ascii=False)
+        contains_data_url_in_text = "data:image" in text_payload_json.lower()
+        contains_base64_marker_in_text = "base64," in text_payload_json.lower()
+        logger.info(
+            "[S1_IMAGE_PAYLOAD_SANITIZED] project_id=%s image_count=%s image_input_count=%s text_chars=%s contains_data_url_in_text=%s contains_base64_marker_in_text=%s",
+            project_id,
+            len(image_urls),
+            len(image_urls),
+            len(text_payload_json),
+            contains_data_url_in_text,
+            contains_base64_marker_in_text,
+        )
+        if contains_data_url_in_text:
+            logger.warning(
+                "[S1_IMAGE_PAYLOAD_TEXT_CONTAINS_DATA_URL] project_id=%s image_count=%s",
+                project_id,
+                len(image_urls),
+            )
         payload: dict[str, Any] = {
             "project_id": project_id,
-            "raw_input": raw_input.model_dump(),
+            "raw_input": text_payload,
         }
         data = self._text.generate_structured_json(
             project_id=project_id,

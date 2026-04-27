@@ -49,6 +49,8 @@ export function useStepFourPage() {
   const [phase, setPhase] = useState<StepFourPhase>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [segmentScriptsError, setSegmentScriptsError] = useState<string | null>(null);
+  const [segmentScriptsErrorRaw, setSegmentScriptsErrorRaw] = useState<string | null>(null);
+  const [segmentScriptsBusyError, setSegmentScriptsBusyError] = useState(false);
   const [segmentScriptsBlocked, setSegmentScriptsBlocked] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [mergeError, setMergeError] = useState<string | null>(null);
@@ -63,6 +65,19 @@ export function useStepFourPage() {
   /** 右侧预览：当前片段视频 vs 最终成片 */
   const [previewTarget, setPreviewTarget] = useState<'segment' | 'final'>('segment');
   const [isDirty] = useState(false);
+
+  const isBusyGenerationError = useCallback((err: unknown): boolean => {
+    const msg =
+      err instanceof ShortDramaApiError
+        ? `${err.message} ${err.status}`
+        : err instanceof Error
+          ? err.message
+          : String(err ?? '');
+    return (
+      err instanceof ShortDramaApiError &&
+      err.status === 503
+    ) || /service is currently unavailable|model is at capacity|currently cannot serve this request|please try again later|xai responses api http 503|http 503/i.test(msg);
+  }, []);
 
   const refreshPipeline = useCallback(async () => {
     if (projectId == null) return null;
@@ -202,6 +217,8 @@ export function useStepFourPage() {
         setPipeline(null);
         setLoadError(null);
         setSegmentScriptsError(null);
+        setSegmentScriptsErrorRaw(null);
+        setSegmentScriptsBusyError(false);
         setSegmentScriptsBlocked(null);
         return;
       }
@@ -209,6 +226,8 @@ export function useStepFourPage() {
       setPhase('loading');
       setLoadError(null);
       setSegmentScriptsError(null);
+      setSegmentScriptsErrorRaw(null);
+      setSegmentScriptsBusyError(false);
       setSegmentScriptsBlocked(null);
 
       try {
@@ -230,13 +249,18 @@ export function useStepFourPage() {
               setPipeline(p);
               touchProjectNameFromPipeline(projectId, p.project?.project_name);
               if (!pipelineHasSegmentScripts(p)) {
-                setSegmentScriptsError(SHORT_DRAMA_UI.stepFour.segmentScriptsFailed);
+                setSegmentScriptsBusyError(false);
+                setSegmentScriptsError('生成失败，请稍后重试。');
+                setSegmentScriptsErrorRaw('segment scripts missing after generation');
               }
             } catch (e) {
               if (cancelled) return;
-              const msg =
-                e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.stepFour.segmentScriptsFailed;
-              setSegmentScriptsError(msg);
+              const busy = isBusyGenerationError(e);
+              setSegmentScriptsBusyError(busy);
+              setSegmentScriptsError(busy ? '当前服务繁忙，请稍后重试。' : '生成失败，请稍后重试。');
+              setSegmentScriptsErrorRaw(
+                e instanceof ShortDramaApiError ? `status=${e.status}; ${e.message}` : e instanceof Error ? e.message : String(e),
+              );
               try {
                 const refreshed = await getShortDramaPipeline(projectId);
                 if (!cancelled) {
@@ -266,7 +290,35 @@ export function useStepFourPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, isBusyGenerationError]);
+
+  const handleRetryGenerateSegments = useCallback(async () => {
+    if (projectId == null) return;
+    setSegmentScriptsError(null);
+    setSegmentScriptsErrorRaw(null);
+    setSegmentScriptsBusyError(false);
+    setPhase('generating_segments');
+    try {
+      await generateShortDramaSegmentScripts(projectId);
+      const p = await getShortDramaPipeline(projectId);
+      setPipeline(p);
+      touchProjectNameFromPipeline(projectId, p.project?.project_name);
+      if (!pipelineHasSegmentScripts(p)) {
+        setSegmentScriptsError('生成失败，请稍后重试。');
+        setSegmentScriptsErrorRaw('segment scripts missing after retry generation');
+      }
+    } catch (e) {
+      const busy = isBusyGenerationError(e);
+      setSegmentScriptsBusyError(busy);
+      setSegmentScriptsError(busy ? '当前服务繁忙，请稍后重试。' : '生成失败，请稍后重试。');
+      setSegmentScriptsErrorRaw(
+        e instanceof ShortDramaApiError ? `status=${e.status}; ${e.message}` : e instanceof Error ? e.message : String(e),
+      );
+      await refreshPipeline();
+    } finally {
+      setPhase('ready');
+    }
+  }, [projectId, isBusyGenerationError, refreshPipeline]);
 
   useEffect(() => {
     if (!pipeline || projectId == null) return;
@@ -597,6 +649,8 @@ export function useStepFourPage() {
     phase,
     loadError,
     segmentScriptsError,
+    segmentScriptsErrorRaw,
+    segmentScriptsBusyError,
     segmentScriptsBlocked,
     generateError,
     mergeError,
@@ -620,6 +674,7 @@ export function useStepFourPage() {
     handleGenerateAll,
     handleGenerateVideo,
     handleRegenerate,
+    handleRetryGenerateSegments,
     handleSaveSegmentShot,
     mergeFinalVideo,
     mergePrimaryActionsEnabled,

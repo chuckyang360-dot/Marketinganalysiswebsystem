@@ -9,9 +9,21 @@ from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderEr
 from ..utils.flow_logging import log_ai_error, log_ai_response
 from ..utils.json_parser import try_parse_json_object
 from ..utils.prompts import JSON_REPAIR_SYSTEM_PROMPT
-from .xai_client import XAIClient, effective_xai_text_model, extract_assistant_text
+from .xai_client import (
+    XAIClient,
+    effective_xai_text_model,
+    extract_assistant_text,
+    summarize_output_message_content_types,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _preview(text: str, *, max_len: int = 500) -> str:
+    cleaned = str(text or "").replace("\n", " ").strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    return cleaned[:max_len] + "…"
 
 
 def _build_user_content_parts(user_text: str, image_urls: list[str] | None) -> list[dict[str, Any]]:
@@ -61,9 +73,40 @@ class XAITextProvider:
                 },
             )
             text = extract_assistant_text(raw)
+            extracted_text_len = len(text or "")
+            response_status = raw.get("status")
+            response_incomplete_details = raw.get("incomplete_details")
+            output_content_types = summarize_output_message_content_types(raw)
+            logger.info(
+                "[STRUCTURED_OUTPUT_EXTRACTED] project_id=%s service_name=%s stage=%s extracted_text_len=%s extracted_text_preview=%s response_status=%s response_incomplete_details=%s output_message_content_types=%s",
+                project_id,
+                service_name,
+                stage,
+                extracted_text_len,
+                _preview(text),
+                response_status,
+                response_incomplete_details,
+                output_content_types,
+            )
+            if response_incomplete_details:
+                logger.warning(
+                    "[STRUCTURED_OUTPUT_INCOMPLETE] project_id=%s service_name=%s stage=%s incomplete_details=%s",
+                    project_id,
+                    service_name,
+                    stage,
+                    response_incomplete_details,
+                )
             duration_ms = int((time.perf_counter() - t0) * 1000)
-            if not text.strip():
-                raise ShortDramaInvalidModelOutputError("Empty assistant text from xAI")
+            if _is_empty_or_too_short_structured_text(text):
+                logger.warning(
+                    "[STRUCTURED_OUTPUT_EMPTY_OR_TOO_SHORT] project_id=%s service_name=%s stage=%s extracted_text_len=%s extracted_text_preview=%s",
+                    project_id,
+                    service_name,
+                    stage,
+                    extracted_text_len,
+                    _preview(text),
+                )
+                raise ShortDramaInvalidModelOutputError("structured output empty or too short")
             data = self._parse_with_optional_repair(
                 text=text,
                 project_id=project_id,
@@ -117,6 +160,16 @@ class XAITextProvider:
         expected_schema_name: str,
     ) -> dict[str, Any]:
         """Original output + up to 2 repair passes (3 model outputs total for JSON text)."""
+        if _is_empty_or_too_short_structured_text(text):
+            logger.warning(
+                "[STRUCTURED_OUTPUT_EMPTY_OR_TOO_SHORT] project_id=%s service_name=%s stage=%s extracted_text_len=%s extracted_text_preview=%s",
+                project_id,
+                service_name,
+                stage,
+                len(text or ""),
+                _preview(text),
+            )
+            raise ShortDramaInvalidModelOutputError("structured output empty or too short")
         parsed = try_parse_json_object(text)
         if parsed is not None and parsed.get("error") != "unrecoverable":
             return parsed
@@ -159,6 +212,15 @@ def _truncate_for_repair(text: str, max_chars: int = 24000) -> str:
     if len(text) <= max_chars:
         return text
     return text[:max_chars] + "\n…(truncated)…"
+
+
+def _is_empty_or_too_short_structured_text(text: str | None) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return True
+    if cleaned in {"{}", "[]"}:
+        return True
+    return len(cleaned) < 20
 
 
 _xai_text_provider_singleton: XAITextProvider | None = None

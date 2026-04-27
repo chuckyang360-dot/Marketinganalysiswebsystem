@@ -137,6 +137,30 @@ def extract_assistant_text(response_json: dict[str, Any]) -> str:
     return ""
 
 
+def summarize_output_message_content_types(response_json: dict[str, Any]) -> list[str]:
+    """Return concise output message content type list for logging."""
+    output = response_json.get("output")
+    if not isinstance(output, list):
+        return []
+    out: list[str] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") != "message" and item.get("role") != "assistant":
+            continue
+        content = item.get("content")
+        if isinstance(content, str):
+            out.append("str")
+            continue
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    out.append(str(block.get("type") or "dict"))
+                else:
+                    out.append(type(block).__name__)
+    return out[:20]
+
+
 class XAIClient:
     """Thin synchronous HTTP client for POST /v1/responses."""
 

@@ -221,6 +221,18 @@ def _build_compact_shot_prompt(shot) -> tuple[str, dict]:
     mood = _sanitize_prompt_text(str(_get_shot_value(shot, "mood", "") or _get_shot_value(shot, "emotion", "") or ""))
     style_instruction = _sanitize_prompt_text(str(_get_shot_value(shot, "visual_style_instruction", "") or ""))
     market_detail = _sanitize_prompt_text(str(_get_shot_value(shot, "market_localization_detail", "") or ""))
+    dialogue_text = _sanitize_prompt_text(
+        str(_get_shot_value(shot, "dialogue_text", "") or _get_shot_value(shot, "spoken_text", "") or _get_shot_value(shot, "dialogue", "") or "")
+    )
+    voiceover_text = _sanitize_prompt_text(
+        str(_get_shot_value(shot, "voiceover_text", "") or _get_shot_value(shot, "voiceover", "") or _get_shot_value(shot, "narration", "") or "")
+    )
+    subtitle_text = _sanitize_prompt_text(
+        str(_get_shot_value(shot, "subtitle_text", "") or _get_shot_value(shot, "subtitle", "") or "")
+    )
+    audio_intent = _sanitize_prompt_text(str(_get_shot_value(shot, "audio_intent", "") or ""))
+    audio_required = bool(_get_shot_value(shot, "audio_required", False) or dialogue_text or voiceover_text)
+    subtitle_required = bool(_get_shot_value(shot, "subtitle_required", False) or subtitle_text)
     shot_category = _shot_category(shot)
     explicit_product = _shot_has_explicit_product_action(shot, product_refs_all)
     include_product_refs = shot_category == "product_showcase" or explicit_product or shot_category == "result_feedback"
@@ -260,6 +272,16 @@ def _build_compact_shot_prompt(shot) -> tuple[str, dict]:
         parts.append(_safe_join("Must show", "; ".join(must_show)))
     if must_avoid:
         parts.append(_safe_join("Must avoid", "; ".join(must_avoid)))
+    if dialogue_text:
+        parts.append(_safe_join("Dialogue", dialogue_text))
+    if voiceover_text:
+        parts.append(_safe_join("Voiceover", voiceover_text))
+    if subtitle_text:
+        parts.append(_safe_join("Subtitle", subtitle_text))
+    if audio_intent:
+        parts.append(_safe_join("Audio intent", audio_intent))
+    parts.append(_safe_join("Audio required", "yes" if audio_required else "no"))
+    parts.append(_safe_join("Subtitle required", "yes" if subtitle_required else "no"))
     compact = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip()
     compact = _drop_repetitive_boilerplate(compact)
     if len(compact) > _SHOT_MAX_CHARS:
@@ -544,6 +566,57 @@ def build_segment_video_plan(
                 for s in segment.shots
                 if _get_shot_value(s, "source_visual_constraints", {})
             ],
+            "dialogue_texts": [
+                str(
+                    _get_shot_value(s, "dialogue_text", "")
+                    or _get_shot_value(s, "spoken_text", "")
+                    or _get_shot_value(s, "dialogue", "")
+                    or ""
+                ).strip()
+                for s in segment.shots
+                if str(
+                    _get_shot_value(s, "dialogue_text", "")
+                    or _get_shot_value(s, "spoken_text", "")
+                    or _get_shot_value(s, "dialogue", "")
+                    or ""
+                ).strip()
+            ],
+            "voiceover_texts": [
+                str(
+                    _get_shot_value(s, "voiceover_text", "")
+                    or _get_shot_value(s, "voiceover", "")
+                    or _get_shot_value(s, "narration", "")
+                    or ""
+                ).strip()
+                for s in segment.shots
+                if str(
+                    _get_shot_value(s, "voiceover_text", "")
+                    or _get_shot_value(s, "voiceover", "")
+                    or _get_shot_value(s, "narration", "")
+                    or ""
+                ).strip()
+            ],
+            "subtitle_texts": [
+                str(_get_shot_value(s, "subtitle_text", "") or _get_shot_value(s, "subtitle", "") or "").strip()
+                for s in segment.shots
+                if str(_get_shot_value(s, "subtitle_text", "") or _get_shot_value(s, "subtitle", "") or "").strip()
+            ],
+            "audio_required": any(
+                bool(
+                    _get_shot_value(s, "audio_required", False)
+                    or str(_get_shot_value(s, "dialogue_text", "") or _get_shot_value(s, "spoken_text", "") or _get_shot_value(s, "dialogue", "") or "").strip()
+                    or str(_get_shot_value(s, "voiceover_text", "") or _get_shot_value(s, "voiceover", "") or _get_shot_value(s, "narration", "") or "").strip()
+                )
+                for s in segment.shots
+            ),
+            "subtitle_required": any(
+                bool(
+                    _get_shot_value(s, "subtitle_required", False)
+                    or str(_get_shot_value(s, "subtitle_text", "") or _get_shot_value(s, "subtitle", "") or "").strip()
+                )
+                for s in segment.shots
+            ),
+            "audio_status": "pending_tts_or_dubbing",
             "aspect_ratio": ar,
             "reference_image_urls": ref_urls,
             "prompt_budget": budget,

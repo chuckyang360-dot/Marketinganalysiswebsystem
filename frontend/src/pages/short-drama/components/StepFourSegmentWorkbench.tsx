@@ -6,6 +6,14 @@ import type { StepFourAssetLibraryVm } from "../utils/stepFourAdapters";
 type RefKind = "characters" | "scene" | "products";
 
 type ShotDraft = {
+  shotRole: string;
+  viewerTakeaway: string;
+  visualDirection: string;
+  characterDirection: string;
+  productPresence: string;
+  productPurpose: string;
+  sceneDirection: string;
+  cameraDirection: string;
   action: string;
   spokenText: string;
   voiceoverText: string;
@@ -156,6 +164,21 @@ export function StepFourSegmentWorkbench({
           must_show: splitList(sd.mustShowText),
           must_avoid: splitList(sd.mustAvoidText),
           duration_seconds: sd.durationSeconds,
+          duration_sec: sd.durationSeconds,
+          shot_role: sd.shotRole,
+          viewer_takeaway: sd.viewerTakeaway,
+          visual_direction: sd.visualDirection,
+          character_direction: sd.characterDirection,
+          product_presence: sd.productPresence,
+          product_purpose: sd.productPurpose,
+          scene_direction: sd.sceneDirection,
+          camera_direction: sd.cameraDirection,
+          dialogue_text: sd.spokenText,
+          subtitle_text_presentation: sd.subtitleText,
+          audio_intent: sd.emotion,
+          character_refs: sd.characterRefs,
+          scene_refs: sd.sceneRef ? [sd.sceneRef] : [],
+          product_refs: sd.productRefs,
           manual_character_refs: sd.characterRefs,
           manual_scene_ref: sd.sceneRef,
           manual_product_refs: sd.productRefs,
@@ -331,6 +354,14 @@ function makeSegmentDraft(seg: Step4SegmentItem): SegmentDraft {
 
 function makeShotDraft(shot?: Step4Shot): ShotDraft {
   return {
+    shotRole: shot?.shotRole ?? "",
+    viewerTakeaway: shot?.viewerTakeaway ?? "",
+    visualDirection: shot?.visualDirection ?? shot?.action ?? "",
+    characterDirection: shot?.characterDirection ?? shot?.action ?? "",
+    productPresence: shot?.productPresence ?? "",
+    productPurpose: shot?.productPurpose ?? "",
+    sceneDirection: shot?.sceneDirection ?? shot?.sceneDescription ?? "",
+    cameraDirection: shot?.cameraDirection ?? shot?.cameraDescription ?? "",
     action: shot?.action ?? "",
     spokenText: shot?.spokenText ?? shot?.dialogue ?? "",
     voiceoverText: shot?.voiceoverText ?? shot?.voiceover ?? "",
@@ -350,6 +381,110 @@ function makeShotDraft(shot?: Step4Shot): ShotDraft {
 
 function splitList(text: string): string[] {
   return text.split(/[；;\n]/).map((x) => x.trim()).filter(Boolean);
+}
+
+const displayPrefixPatterns: RegExp[] = [
+  /^\s*emotional_value\s*[:：]\s*/i,
+  /^\s*user_pain_points\s*[:：]\s*/i,
+  /^\s*core_selling_points\s*[:：]\s*/i,
+  /^\s*source_selling_point\s*[:：]\s*/i,
+  /^\s*product_presence\s*[:：]\s*/i,
+  /^\s*product_purpose\s*[:：]\s*/i,
+  /^\s*visual_action\s*[:：]\s*/i,
+  /^\s*action_description\s*[:：]\s*/i,
+  /^\s*scene_direction\s*[:：]\s*/i,
+  /^\s*camera_direction\s*[:：]\s*/i,
+  /^\s*character_action\s*[:：]\s*/i,
+  /^\s*viewer_takeaway\s*[:：]\s*/i,
+  /^\s*story_intent\s*[:：]\s*/i,
+  /^\s*commercial_intent\s*[:：]\s*/i,
+];
+
+const displayEngineeringKeys = [
+  "emotional_value",
+  "core_selling_points",
+  "user_pain_points",
+  "product_purpose",
+  "product_presence",
+  "source_selling_point",
+  "visual_action",
+  "action_description",
+  "scene_direction",
+  "camera_direction",
+  "character_action",
+  "viewer_takeaway",
+  "story_intent",
+  "commercial_intent",
+] as const;
+
+const displayProductPresenceMap: Record<string, string> = {
+  none: "商品暂不出现",
+  implied: "暗示商品相关",
+  background: "商品作为背景出现",
+  visible: "商品可见",
+  explicit: "商品明确出现",
+  hero: "商品作为主角展示",
+};
+
+function normalizeDisplayText(input: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+
+  const parseOne = (segment: string): string => {
+    const m = segment.match(/^\s*([a-z_]+)\s*[:：]\s*(.*?)\s*$/i);
+    if (!m) return segment;
+    const key = m[1].toLowerCase();
+    const value = String(m[2] || "").trim();
+    if (!value) return "";
+    if (key === "product_presence") return displayProductPresenceMap[value.toLowerCase()] || value;
+    if ((displayEngineeringKeys as readonly string[]).includes(key)) return value;
+    return segment;
+  };
+
+  let text = raw
+    .split(/[;\n；]+/)
+    .map((x) => parseOne(x.trim()))
+    .filter(Boolean)
+    .join("；")
+    .trim();
+  if (!text) return "";
+  for (const p of displayPrefixPatterns) text = text.replace(p, "");
+  text = text.replace(/，/g, "、").replace(/\s+/g, " ").trim();
+  text = text.replace(/\bMCM\b\s*品牌?/gi, "品牌质感").replace(/\bMCM\b/gi, "品牌风格");
+  // 兜底：不允许主展示残留工程 key 名
+  const remained = new RegExp(`\\b(${displayEngineeringKeys.join("|")})\\b\\s*[:：]?`, "gi");
+  text = text.replace(remained, "").replace(/\s+/g, " ").trim();
+  return text;
+}
+
+function productPresenceLabel(value: string): string {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return "未指定";
+  return displayProductPresenceMap[key] || normalizeDisplayText(value);
+}
+
+function shotRoleLabel(value: string): string {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return "未指定";
+  const map: Record<string, string> = {
+    hook: "开场吸引",
+    build: "情节推进",
+    reveal: "信息揭示",
+    payoff: "结果收束",
+  };
+  return map[key] || normalizeDisplayText(value);
+}
+
+function audioStatusLabel(value: string): string {
+  const key = String(value || "").trim().toLowerCase();
+  if (!key) return "待处理";
+  const map: Record<string, string> = {
+    pending_tts_or_dubbing: "待配音",
+    none: "无需音频",
+    done: "已完成",
+    failed: "处理失败",
+  };
+  return map[key] || normalizeDisplayText(value);
 }
 
 function Field({ label, value, editing, multiline = false, onChange }: { label: string; value: string; editing: boolean; multiline?: boolean; onChange: (value: string) => void }) {
@@ -399,21 +534,41 @@ function ShotFields({
   onChange: (patch: Partial<ShotDraft>) => void;
   onSelect: (kind: RefKind) => void;
 }) {
-  const languageSuffix =
-    videoLanguage === 'en-US'
-      ? '（视频语言：英语）'
-      : videoLanguage === 'zh-CN'
-        ? '（视频语言：中文）'
-        : '';
+  const languageOnce =
+    videoLanguage === "en-US"
+      ? "英语"
+      : videoLanguage === "zh-CN"
+        ? "中文"
+        : "";
+  const hasDialogue = !!normalizeDisplayText(draft.spokenText);
+  const hasVoiceover = !!normalizeDisplayText(draft.voiceoverText);
+  const hasSubtitle = !!normalizeDisplayText(draft.subtitleText);
   return (
     <div className="space-y-4">
       <div className="rounded-xl p-3 space-y-3" style={{ background: "#fff", border: "1px solid #EAEAEA" }}>
-        <Field label="画面动作" value={draft.action} editing={editing} multiline onChange={(v) => onChange({ action: v })} />
-        <Field label={`角色口播${languageSuffix}`} value={draft.spokenText} editing={editing} multiline onChange={(v) => onChange({ spokenText: v })} />
-        <Field label={`旁白/画外音${languageSuffix}`} value={draft.voiceoverText} editing={editing} multiline onChange={(v) => onChange({ voiceoverText: v })} />
-        <Field label={`字幕文案${languageSuffix}`} value={draft.subtitleText} editing={editing} multiline onChange={(v) => onChange({ subtitleText: v })} />
+        {!!languageOnce && <p className="text-[11px]" style={{ color: "#8E8E93" }}>语言：{languageOnce}</p>}
+        <Field label="镜头作用" value={editing ? draft.shotRole : shotRoleLabel(draft.shotRole)} editing={editing} onChange={(v) => onChange({ shotRole: v })} />
+        <Field label="观众要看懂什么" value={normalizeDisplayText(draft.viewerTakeaway)} editing={editing} multiline onChange={(v) => onChange({ viewerTakeaway: v })} />
+        <Field label="画面导演" value={normalizeDisplayText(draft.visualDirection)} editing={editing} multiline onChange={(v) => onChange({ visualDirection: v, action: v })} />
+        <Field label="角色动作" value={normalizeDisplayText(draft.characterDirection)} editing={editing} multiline onChange={(v) => onChange({ characterDirection: v, action: v })} />
+        <Field label="商品出现方式" value={editing ? draft.productPresence : productPresenceLabel(draft.productPresence)} editing={editing} onChange={(v) => onChange({ productPresence: v })} />
+        <Field label="商品出现目的" value={normalizeDisplayText(draft.productPurpose) || "未指定"} editing={editing} onChange={(v) => onChange({ productPurpose: v })} />
+        <Field label="场景导演" value={normalizeDisplayText(draft.sceneDirection)} editing={editing} multiline onChange={(v) => onChange({ sceneDirection: v })} />
+        <Field label="镜头导演" value={normalizeDisplayText(draft.cameraDirection)} editing={editing} multiline onChange={(v) => onChange({ cameraDirection: v })} />
+        {(editing || hasDialogue) && (
+          <Field label="角色口播" value={normalizeDisplayText(draft.spokenText)} editing={editing} multiline onChange={(v) => onChange({ spokenText: v })} />
+        )}
+        {(editing || hasVoiceover) && (
+          <Field label="旁白" value={normalizeDisplayText(draft.voiceoverText)} editing={editing} multiline onChange={(v) => onChange({ voiceoverText: v })} />
+        )}
+        {(editing || hasSubtitle) && (
+          <Field label="字幕" value={normalizeDisplayText(draft.subtitleText)} editing={editing} multiline onChange={(v) => onChange({ subtitleText: v })} />
+        )}
+        {!editing && !hasDialogue && !hasVoiceover && !hasSubtitle && (
+          <p className="text-[11.5px]" style={{ color: "#6E6E73" }}>本镜头暂无台词/旁白。</p>
+        )}
         <div className="grid grid-cols-2 gap-3">
-          <Field label="情绪状态" value={draft.emotion} editing={editing} onChange={(v) => onChange({ emotion: v })} />
+          <Field label="声音意图" value={normalizeDisplayText(draft.emotion)} editing={editing} onChange={(v) => onChange({ emotion: v })} />
           <NumberField label="镜头时长" value={draft.durationSeconds} editing={editing} onChange={(v) => onChange({ durationSeconds: v })} />
         </div>
       </div>
@@ -442,10 +597,6 @@ function ShotFields({
         />
       </div>
 
-      <div className="rounded-xl p-3 space-y-3" style={{ background: "#fff", border: "1px solid #EAEAEA" }}>
-        <Field label="必须出现" value={draft.mustShowText} editing={editing} multiline onChange={(v) => onChange({ mustShowText: v })} />
-        <Field label="避免出现" value={draft.mustAvoidText} editing={editing} multiline onChange={(v) => onChange({ mustAvoidText: v })} />
-      </div>
     </div>
   );
 }
@@ -529,6 +680,7 @@ function AdvancedSettings({
           <p className="text-[12px] font-semibold" style={{ color: "#1D1D1F" }}>生成约束</p>
           <p><span style={{ color: "#AEAEB2" }}>必须出现 </span>{draft.mustShowText || "—"}</p>
           <p><span style={{ color: "#AEAEB2" }}>避免出现 </span>{draft.mustAvoidText || "—"}</p>
+          <p><span style={{ color: "#AEAEB2" }}>音频状态 </span>{audioStatusLabel(shot.audioStatus || "pending_tts_or_dubbing")}</p>
         </section>
 
         <details className="rounded-lg px-3 py-2" style={{ background: "#F7F8FA", border: "1px solid #EAEAEA" }}>

@@ -319,6 +319,18 @@ export interface Step4Shot {
   promptBudget?: Record<string, unknown>;
   providerError?: string;
   providerResponse?: Record<string, unknown>;
+  viewerTakeaway?: string;
+  visualDirection?: string;
+  characterDirection?: string;
+  productPresence?: string;
+  productPurpose?: string;
+  sceneDirection?: string;
+  cameraDirection?: string;
+  dialogueText?: string;
+  audioIntent?: string;
+  audioStatus?: string;
+  audioRequired?: boolean;
+  subtitleRequired?: boolean;
 }
 
 export interface Step4SegmentItem {

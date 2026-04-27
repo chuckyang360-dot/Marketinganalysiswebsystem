@@ -163,6 +163,73 @@ def _prompt_summary(text: str, max_len: int = 180) -> str:
     return cleaned[:max_len]
 
 
+def _safe_short_text(value: Any, *, max_len: int = 160) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:max_len]
+
+
+def _trim_story_blueprint_for_segment_director(blueprint: StoryBlueprintSchema) -> dict[str, Any]:
+    return {
+        "title": blueprint.title,
+        "premise": blueprint.premise,
+        "hook": blueprint.hook,
+        "core_conflict": blueprint.core_conflict,
+        "twist": blueprint.twist,
+        "resolution": blueprint.resolution,
+        "visual_requirements": list(blueprint.visual_requirements or [])[:12],
+        "must_show_elements": list(blueprint.must_show_elements or [])[:12],
+        "must_avoid_elements": list(blueprint.must_avoid_elements or [])[:12],
+        "segment_plan": [
+            {
+                "segment_id": item.segment_id,
+                "stage_name": item.stage_name,
+                "segment_title": item.segment_title,
+                "segment_goal": item.segment_goal,
+                "duration_sec": item.duration_sec,
+                "product_exposure": item.product_exposure,
+                "emotional_state": item.emotional_state,
+                "key_message": item.key_message,
+                "required_assets": list(item.required_assets or [])[:8],
+            }
+            for item in (blueprint.segment_plan or [])
+        ],
+    }
+
+
+def _trim_asset_specs_for_segment_director(assets: AssetSpecsBundleSchema) -> dict[str, Any]:
+    def _asset_rows(rows: list[Any], *, kind: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            image_url = str(getattr(row, "image_url", "") or "").strip()
+            thumb = ""
+            meta = getattr(row, "meta", None)
+            if isinstance(meta, dict):
+                thumb = str(meta.get("thumbnail_url") or "").strip()
+            out.append(
+                {
+                    "id": getattr(row, "id", None),
+                    "type": kind,
+                    "name": str(getattr(row, "name", "") or "").strip(),
+                    "role": str(
+                        getattr(row, "role_type", "")
+                        or getattr(row, "scene_type", "")
+                        or getattr(row, "product_role", "")
+                        or ""
+                    ).strip(),
+                    "description": _safe_short_text(getattr(row, "description", "") or getattr(row, "visual_prompt", "")),
+                    "image_url": image_url or thumb or None,
+                    "thumbnail_url": thumb or None,
+                }
+            )
+        return out
+
+    return {
+        "characters": _asset_rows(list(assets.characters or []), kind="character"),
+        "scenes": _asset_rows(list(assets.scenes or []), kind="scene"),
+        "products": _asset_rows(list(assets.products or []), kind="product"),
+    }
+
+
 def _normalize_ref_token(text: str) -> str:
     return re.sub(r"[\W_]+", "", str(text or "").lower())
 
@@ -635,9 +702,9 @@ class XAISegmentDirectorProvider:
                         "language_prompt_rules": project_config.get("language_prompt_rules", ""),
                         "creative_context": blueprint.creative_brief,
                         "creative_intent": project_config.get("effective_creative_intent", ""),
-                        "story_blueprint": blueprint.model_dump(),
+                        "story_blueprint": _trim_story_blueprint_for_segment_director(blueprint),
                         "s2_execution_blueprint": s2_execution_blueprint,
-                        "asset_specs": assets.model_dump(),
+                        "asset_specs": _trim_asset_specs_for_segment_director(assets),
                         "quality_retry": attempt > 0,
                     },
                     image_urls=None,
@@ -800,9 +867,11 @@ def segments_from_story_shot_plan(
     blueprint: StoryBlueprintSchema,
     assets: AssetSpecsBundleSchema | None = None,
     project_config: Dict[str, Any] | None = None,
+    *,
+    force_from_shot_plan: bool = False,
 ) -> list[SegmentScriptSchema] | None:
     shot_plan = blueprint.shot_plan if isinstance(blueprint.shot_plan, dict) else {}
-    if blueprint.creative_brief and blueprint.segment_plan:
+    if (not force_from_shot_plan) and blueprint.creative_brief and blueprint.segment_plan:
         # New projects must use the segment director provider so the model authors shots.
         # This helper is kept only for legacy shot_plan compatibility.
         return None

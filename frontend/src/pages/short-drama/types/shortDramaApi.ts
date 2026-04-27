@@ -400,6 +400,21 @@ export type UpdateSegmentShotBody = {
   manual_scene_ref?: string;
   manual_product_refs?: string[];
   manual_video_prompt?: string;
+  shot_role?: string;
+  viewer_takeaway?: string;
+  visual_direction?: string;
+  character_direction?: string;
+  product_presence?: string;
+  product_purpose?: string;
+  scene_direction?: string;
+  camera_direction?: string;
+  dialogue_text?: string;
+  subtitle_text_presentation?: string;
+  audio_intent?: string;
+  character_refs?: string[];
+  scene_refs?: string[];
+  product_refs?: string[];
+  duration_sec?: number;
 };
 
 export type UpdateSegmentShotResponseDto = {

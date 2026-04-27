@@ -56,6 +56,20 @@ def _to_http_exception(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=msg)
     if isinstance(exc, ShortDramaProviderError):
         msg = str(exc)
+        low = msg.lower()
+        if (
+            "http 503" in low
+            or "did not respond" in low
+            or "service temporarily unavailable" in low
+            or "upstream_unavailable" in low
+        ):
+            return HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "error": "short_drama_provider_unavailable",
+                    "user_message": "当前服务繁忙，请稍后重试。",
+                },
+            )
         if "XAI_API_KEY" in msg or "not configured" in msg.lower():
             return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
         if "timeout" in msg.lower() or "timed out" in msg.lower():

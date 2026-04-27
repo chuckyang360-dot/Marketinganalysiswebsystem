@@ -6,7 +6,7 @@ export type UserFriendlyParseError = {
 
 export const PRODUCT_IMAGE_TOO_LARGE_ERROR: UserFriendlyParseError = {
   title: '图片过大，暂时无法解析',
-  message: '当前上传的图片体积过大，已超过 AI 图片理解接口的处理限制，因此本次产品解析失败。请压缩图片后重新上传，或更换一张尺寸更小、主体更清晰的产品图。',
+  message: '当前上传的图片体积过大，暂时无法完成识别。请压缩图片后重新上传，或更换一张尺寸更小、主体更清晰的产品图。',
   suggestions: [
     '使用截图或压缩后的商品图重新上传；',
     '尽量使用单张清晰主图，避免上传超高清原图；',
@@ -16,7 +16,7 @@ export const PRODUCT_IMAGE_TOO_LARGE_ERROR: UserFriendlyParseError = {
 };
 
 export const PRODUCT_IMAGE_TOO_LARGE_SHORT_MESSAGE =
-  '图片过大，已超过 AI 图片理解接口限制。请压缩图片或更换较小尺寸的产品图后重试。';
+  '图片过大，暂时无法完成识别。请压缩图片或更换较小尺寸的产品图后重试。';
 
 export const PRODUCT_PARSE_GENERIC_MESSAGE =
   '产品解析失败，请检查输入内容或稍后重试。';
@@ -24,9 +24,9 @@ export const PRODUCT_PARSE_GENERIC_MESSAGE =
 export const PRODUCT_PARSE_SERVICE_UNAVAILABLE_MESSAGE =
   '产品解析服务暂时异常，请稍后重试。';
 
-export const PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_TITLE = 'AI 解析服务暂时不可用';
+export const PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_TITLE = '解析暂时失败';
 export const PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE =
-  '当前 AI 解析服务繁忙，暂时无法完成产品图片识别。你可以稍后重试，或先手动填写产品信息并保存草稿，后续再继续生成剧本。';
+  '当前服务繁忙，请稍后重试。你也可以先手动填写产品信息并保存草稿。';
 
 const PRODUCT_IMAGE_TOO_LARGE_PATTERNS = [
   /maximum prompt length/i,
@@ -60,7 +60,7 @@ export function normalizeProductParseError(error: unknown): string {
     return PRODUCT_PARSE_SERVICE_UNAVAILABLE_MESSAGE;
   }
   if (!message.trim()) return PRODUCT_PARSE_GENERIC_MESSAGE;
-  return message;
+  return PRODUCT_PARSE_GENERIC_MESSAGE;
 }
 
 export function getUserFriendlyParseError(message: string): UserFriendlyParseError {
@@ -76,5 +76,5 @@ export function getUserFriendlyParseError(message: string): UserFriendlyParseErr
   if (message === 'Internal Server Error' || message === '500') {
     return { message: PRODUCT_PARSE_SERVICE_UNAVAILABLE_MESSAGE };
   }
-  return { message };
+  return { message: PRODUCT_PARSE_GENERIC_MESSAGE };
 }

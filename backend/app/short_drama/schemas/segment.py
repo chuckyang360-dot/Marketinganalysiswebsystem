@@ -204,6 +204,21 @@ class UpdateSegmentShotRequest(BaseModel):
     manual_scene_ref: Optional[str] = None
     manual_product_refs: Optional[List[str]] = None
     manual_video_prompt: Optional[str] = None
+    shot_role: Optional[str] = None
+    viewer_takeaway: Optional[str] = None
+    visual_direction: Optional[str] = None
+    character_direction: Optional[str] = None
+    product_presence: Optional[str] = None
+    product_purpose: Optional[str] = None
+    scene_direction: Optional[str] = None
+    camera_direction: Optional[str] = None
+    dialogue_text: Optional[str] = None
+    subtitle_text_presentation: Optional[str] = None
+    audio_intent: Optional[str] = None
+    character_refs: Optional[List[str]] = None
+    scene_refs: Optional[List[str]] = None
+    product_refs: Optional[List[str]] = None
+    duration_sec: Optional[float] = None
 
 
 class UpdateSegmentShotResponse(BaseModel):

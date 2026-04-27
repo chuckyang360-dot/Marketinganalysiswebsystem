@@ -169,6 +169,25 @@ class TestProductParserXAI(unittest.TestCase):
         self.assertEqual(ctx.product_name, "面膜")
         self.assertEqual(client.post_responses.call_count, 3)
 
+    def test_structured_output_too_short_skips_repair(self):
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.providers.xai_text_provider import XAITextProvider
+
+        client = MagicMock()
+        client.post_responses.side_effect = [self._resp("{}", "a")]
+        provider = XAITextProvider(client=client)
+        with self.assertRaises(ShortDramaInvalidModelOutputError) as ctx:
+            provider.generate_structured_json(
+                project_id=1,
+                service_name="segment_director",
+                system_prompt="sys",
+                user_payload={"k": "v"},
+                expected_schema_name="SegmentScriptsBundle",
+                stage="SEGMENT_GENERATION",
+            )
+        self.assertIn("too short", str(ctx.exception))
+        self.assertEqual(client.post_responses.call_count, 1)
+
 
 class TestEffectiveXAITextModel(unittest.TestCase):
     def test_fallback_grok_41_fast(self):
@@ -484,6 +503,41 @@ class TestXAIClientTimeout(unittest.TestCase):
                 )
 
 
+class TestS1ImagePayload(unittest.TestCase):
+    def test_s1_image_payload_does_not_put_data_url_in_text(self):
+        from app.config import settings
+        from app.short_drama.schemas.product import ProductImageInputSchema, ProductRawInputSchema
+        from app.short_drama.services.image_understanding_service import ProductImageUnderstandingService
+
+        data_url = "data:image/png;base64," + ("A" * 4096)
+        raw = ProductRawInputSchema(
+            product_name_raw="测试品",
+            product_images=[
+                ProductImageInputSchema(
+                    image_url=data_url,
+                    image_order=1,
+                    is_main_image=True,
+                )
+            ],
+        )
+        captured: dict = {}
+
+        class _FakeTextProvider:
+            def generate_structured_json(self, **kwargs):
+                captured["kwargs"] = kwargs
+                return {}
+
+        with patch.object(settings, "SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER", False):
+            ProductImageUnderstandingService(text_provider=_FakeTextProvider()).understand(1, raw)
+        kwargs = captured["kwargs"]
+        self.assertEqual(kwargs["image_urls"], [data_url])
+        payload = kwargs["user_payload"]
+        text_json = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("data:image", text_json.lower())
+        self.assertNotIn("base64", text_json.lower())
+        self.assertLess(len(text_json), len(data_url))
+
+
 class TestStoryPlannerMock(unittest.TestCase):
     def test_three_segments(self):
         from app.short_drama.schemas.product import ProductContextSchema
@@ -746,6 +800,54 @@ class TestShortDramaPipelineIntegration(unittest.TestCase):
         shot0 = script0["shots"][0]
         self.assertIn("scene_description", shot0)
         self.assertTrue((shot0.get("image_prompt") or "").strip())
+
+    def test_s1_provider_503_returns_busy_message(self):
+        from fastapi.testclient import TestClient
+
+        from app.database import SessionLocal
+        from app.main import app
+        from app.models import User
+        from app.short_drama.exceptions import ShortDramaProviderError
+
+        db = SessionLocal()
+        u = db.query(User).first()
+        if not u:
+            u = User(
+                username="sd_phase2_s1_503",
+                name="SD Phase2 503",
+                email="sd_phase2_s1_503@test.local",
+                password_hash="x" * 64,
+                is_active=True,
+            )
+            db.add(u)
+            db.commit()
+            db.refresh(u)
+        uid = u.id
+        db.close()
+
+        c = TestClient(app)
+        r = c.post("/api/short-drama/project", json={"user_id": uid, "project_name": "phase2_s1_503"})
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["project"]["id"]
+
+        with patch(
+            "app.short_drama.routes.product.product_parser_service.parse",
+            side_effect=ShortDramaProviderError(
+                'xAI Responses API HTTP 503: {"code":"The service is currently unavailable","error":"Service temporarily unavailable. The model did not respond to this request."}'
+            ),
+        ):
+            rp = c.post(
+                "/api/short-drama/product/parse",
+                json={"project_id": pid, "input": {"title": "测试品", "image_urls": []}},
+            )
+        self.assertEqual(rp.status_code, 502, rp.text)
+        detail = rp.json().get("detail") or {}
+        self.assertEqual(detail.get("error"), "short_drama_provider_unavailable")
+        self.assertEqual(detail.get("user_message"), "当前服务繁忙，请稍后重试。")
+        blob = json.dumps(rp.json(), ensure_ascii=False).lower()
+        self.assertNotIn("service temporarily unavailable", blob)
+        self.assertNotIn("did not respond", blob)
+        self.assertNotIn("http 503", blob)
 
 
 if __name__ == "__main__":

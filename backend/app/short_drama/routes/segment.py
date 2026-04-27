@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -50,6 +51,127 @@ def _clean_string_list(values: list[str] | None) -> list[str]:
         seen.add(item)
         out.append(item)
     return out
+
+
+def _safe_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _presentation_text(value: Any) -> str:
+    text = _safe_text(value)
+    blocked = (
+        "MARKET VISUAL CONSTRAINTS",
+        "STYLE CONSTRAINTS",
+        "brand_raw",
+        "conflict:",
+        "detected_brand",
+        "用户输入",
+        "尽管输入",
+    )
+    out = text
+    for token in blocked:
+        out = out.replace(token, "")
+    return re.sub(r"\s+", " ", out).strip()
+
+
+def _presentation_shot_from_execution(shot: dict[str, Any], *, shot_index: int) -> dict[str, Any]:
+    return {
+        "shot_id": _safe_text(shot.get("shot_id") or f"shot_{shot_index}"),
+        "shot_index": shot_index,
+        "shot_role": _safe_text(shot.get("shot_role") or shot.get("shot_title")),
+        "viewer_takeaway": _presentation_text(shot.get("source_selling_point") or shot.get("action_description")),
+        "visual_direction": _presentation_text(shot.get("visual_action") or shot.get("action_description")),
+        "character_action": _presentation_text(shot.get("action_description") or shot.get("visual_action")),
+        "product_presence": "explicit" if (shot.get("product_refs") or []) else "none",
+        "product_purpose": _safe_text(shot.get("source_selling_point")),
+        "scene_direction": _presentation_text(shot.get("scene_description") or shot.get("scene_ref")),
+        "camera_direction": _presentation_text(
+            shot.get("camera_direction")
+            or shot.get("camera_description")
+            or " / ".join(
+                [
+                    _safe_text(shot.get("camera_framing") or shot.get("framing")),
+                    _safe_text(shot.get("camera_movement")),
+                ]
+            )
+        ),
+        "duration_sec": float(shot.get("duration_seconds") or shot.get("duration_sec") or 0.0),
+        "character_refs": [str(x) for x in (shot.get("character_refs") or []) if str(x).strip()],
+        "scene_refs": [str(shot.get("scene_ref") or "").strip()] if str(shot.get("scene_ref") or "").strip() else [],
+        "product_refs": [str(x) for x in (shot.get("product_refs") or []) if str(x).strip()],
+        "dialogue_text": _presentation_text(shot.get("spoken_text") or shot.get("dialogue")),
+        "voiceover_text": _presentation_text(shot.get("voiceover_text") or shot.get("voiceover") or shot.get("narration")),
+        "subtitle_text": _presentation_text(shot.get("subtitle_text") or shot.get("subtitle")),
+        "audio_intent": _presentation_text(shot.get("audio_intent") or shot.get("mood") or shot.get("emotion")),
+    }
+
+
+def _execution_shot_from_presentation(presentation: dict[str, Any], existing_execution: dict[str, Any] | None = None) -> dict[str, Any]:
+    base = dict(existing_execution or {})
+    shot_id = _safe_text(presentation.get("shot_id") or base.get("shot_id"))
+    visual_direction = _safe_text(presentation.get("visual_direction") or base.get("visual_action") or base.get("action_description"))
+    character_action = _safe_text(presentation.get("character_action") or visual_direction)
+    dialogue_text = _safe_text(presentation.get("dialogue_text") or base.get("spoken_text") or base.get("dialogue"))
+    voiceover_text = _safe_text(presentation.get("voiceover_text") or base.get("voiceover_text") or base.get("voiceover"))
+    subtitle_text = _safe_text(presentation.get("subtitle_text") or base.get("subtitle_text") or base.get("subtitle"))
+    character_refs = [str(x) for x in (presentation.get("character_refs") or base.get("character_refs") or []) if str(x).strip()]
+    scene_refs = [str(x) for x in (presentation.get("scene_refs") or []) if str(x).strip()]
+    product_refs = [str(x) for x in (presentation.get("product_refs") or base.get("product_refs") or []) if str(x).strip()]
+    scene_ref = scene_refs[0] if scene_refs else _safe_text(base.get("scene_ref"))
+    duration_sec = float(presentation.get("duration_sec") or base.get("duration_seconds") or base.get("duration_sec") or 0.0)
+    audio_intent = _safe_text(presentation.get("audio_intent") or base.get("audio_intent"))
+    camera_direction = _safe_text(presentation.get("camera_direction"))
+    subtitle_required = bool(subtitle_text)
+    audio_required = bool(dialogue_text or voiceover_text)
+
+    base.update(
+        {
+            "shot_id": shot_id,
+            "shot_role": _safe_text(presentation.get("shot_role") or base.get("shot_role")),
+            "shot_title": _safe_text(base.get("shot_title") or presentation.get("shot_role")),
+            "visual_action": visual_direction,
+            "action_description": character_action or visual_direction,
+            "scene_ref": scene_ref,
+            "character_refs": character_refs,
+            "product_refs": product_refs,
+            "duration_seconds": duration_sec,
+            "duration_sec": duration_sec,
+            "spoken_text": dialogue_text,
+            "dialogue": dialogue_text,
+            "voiceover_text": voiceover_text,
+            "voiceover": voiceover_text,
+            "subtitle_text": subtitle_text,
+            "subtitle": subtitle_text,
+            "audio_intent": audio_intent,
+            "dialogue_text": dialogue_text,
+            "subtitle_text_presentation": subtitle_text,
+            "camera_direction": camera_direction,
+            "scene_description": _safe_text(presentation.get("scene_direction") or base.get("scene_description")),
+            "camera_description": camera_direction or _safe_text(base.get("camera_description")),
+            "source_selling_point": _safe_text(presentation.get("product_purpose") or base.get("source_selling_point")),
+            "audio_required": audio_required,
+            "subtitle_required": subtitle_required,
+            "audio_status": "pending_tts_or_dubbing" if audio_required else "none",
+        }
+    )
+    return base
+
+
+def _build_layered_script_payload(seg: SegmentScriptSchema) -> dict[str, Any]:
+    raw = seg.model_dump()
+    execution_shots = [dict(s) for s in (raw.get("shots") or []) if isinstance(s, dict)]
+    presentation_shots = [
+        _presentation_shot_from_execution(shot, shot_index=idx + 1)
+        for idx, shot in enumerate(execution_shots)
+    ]
+    meta = dict(raw.get("meta") or {})
+    meta.setdefault("render_status", "clean")
+    raw["meta"] = meta
+    raw["presentation_shots"] = presentation_shots
+    raw["execution_shots"] = execution_shots
+    # Keep backward compatibility for S5 and legacy readers.
+    raw["shots"] = execution_shots
+    return raw
 
 
 def _purpose_rank(v: str | None) -> int:
@@ -270,7 +392,32 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             segments = None if blueprint.creative_brief else segments_from_story_shot_plan(blueprint, assets=assets, project_config=project_config)
             source = "story_blueprint.shot_plan" if segments is not None else "segment_director_provider"
             if segments is None:
-                segments = segment_director_service.generate(body.project_id, blueprint, assets, project_config)
+                try:
+                    segments = segment_director_service.generate(body.project_id, blueprint, assets, project_config)
+                except ShortDramaInvalidModelOutputError as e:
+                    logger.warning(
+                        "[S4_SEGMENT_GENERATION_FALLBACK_TRIGGERED] project_id=%s error_type=%s error=%s",
+                        body.project_id,
+                        type(e).__name__,
+                        str(e),
+                    )
+                    fallback_segments = segments_from_story_shot_plan(
+                        blueprint,
+                        assets=assets,
+                        project_config=project_config,
+                        force_from_shot_plan=True,
+                    )
+                    if fallback_segments:
+                        source = "fallback_story_blueprint_shot_plan"
+                        segments = []
+                        for seg in fallback_segments:
+                            seg_meta = dict(seg.meta or {})
+                            seg_meta["source"] = "fallback_story_blueprint_shot_plan"
+                            seg_meta["generation_warning"] = "structured_generation_failed_fallback_used"
+                            seg_meta["original_error_type"] = type(e).__name__
+                            segments.append(seg.model_copy(update={"meta": seg_meta}))
+                    else:
+                        raise
             shot_count = sum(len(s.shots) for s in segments)
             story_framework = blueprint.story_framework if isinstance(blueprint.story_framework, dict) else {}
             original_structure = story_framework.get("structure") if isinstance(story_framework.get("structure"), list) else []
@@ -375,7 +522,7 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             row = SegmentScriptRecord(
                 project_id=body.project_id,
                 segment_id=seg.segment_id,
-                script_json=seg.model_copy(update={"meta": meta}).model_dump(),
+                script_json=_build_layered_script_payload(seg.model_copy(update={"meta": meta})),
                 version=batch_ver,
             )
             db.add(row)
@@ -439,9 +586,14 @@ async def update_segment_shot(
     shots = script.get("shots")
     if not isinstance(shots, list):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Segment has no editable shots")
+    execution_shots = script.get("execution_shots") if isinstance(script.get("execution_shots"), list) else shots
+    presentation_shots = script.get("presentation_shots") if isinstance(script.get("presentation_shots"), list) else [
+        _presentation_shot_from_execution(s if isinstance(s, dict) else {}, shot_index=idx + 1)
+        for idx, s in enumerate(execution_shots)
+    ]
 
     target_index = -1
-    for idx, raw in enumerate(shots):
+    for idx, raw in enumerate(execution_shots):
         shot = raw if isinstance(raw, dict) else {}
         sid = str(shot.get("shot_id") or f"shot_{idx + 1}")
         if sid == shot_id or str(idx + 1) == shot_id:
@@ -457,7 +609,12 @@ async def update_segment_shot(
     if body.duration_limit is not None:
         script["duration_limit"] = float(body.duration_limit or 0)
 
-    shot = dict(shots[target_index]) if isinstance(shots[target_index], dict) else {}
+    shot = dict(execution_shots[target_index]) if isinstance(execution_shots[target_index], dict) else {}
+    p_shot = (
+        dict(presentation_shots[target_index])
+        if target_index < len(presentation_shots) and isinstance(presentation_shots[target_index], dict)
+        else _presentation_shot_from_execution(shot, shot_index=target_index + 1)
+    )
     text_updates = {
         "action_description": body.action_description,
         "dialogue": body.spoken_text if body.spoken_text is not None else body.dialogue,
@@ -485,16 +642,59 @@ async def update_segment_shot(
         shot["manual_character_refs"] = _clean_string_list(body.manual_character_refs)
     if body.manual_product_refs is not None:
         shot["manual_product_refs"] = _clean_string_list(body.manual_product_refs)
+    if body.shot_role is not None:
+        p_shot["shot_role"] = _safe_text(body.shot_role)
+    if body.viewer_takeaway is not None:
+        p_shot["viewer_takeaway"] = _safe_text(body.viewer_takeaway)
+    if body.visual_direction is not None:
+        p_shot["visual_direction"] = _safe_text(body.visual_direction)
+    if body.character_direction is not None:
+        p_shot["character_action"] = _safe_text(body.character_direction)
+    if body.product_presence is not None:
+        p_shot["product_presence"] = _safe_text(body.product_presence)
+    if body.product_purpose is not None:
+        p_shot["product_purpose"] = _safe_text(body.product_purpose)
+    if body.scene_direction is not None:
+        p_shot["scene_direction"] = _safe_text(body.scene_direction)
+    if body.camera_direction is not None:
+        p_shot["camera_direction"] = _safe_text(body.camera_direction)
+    if body.dialogue_text is not None:
+        p_shot["dialogue_text"] = _safe_text(body.dialogue_text)
+    if body.voiceover_text is not None:
+        p_shot["voiceover_text"] = _safe_text(body.voiceover_text)
+    if body.subtitle_text_presentation is not None:
+        p_shot["subtitle_text"] = _safe_text(body.subtitle_text_presentation)
+    elif body.subtitle_text is not None:
+        p_shot["subtitle_text"] = _safe_text(body.subtitle_text)
+    if body.audio_intent is not None:
+        p_shot["audio_intent"] = _safe_text(body.audio_intent)
+    if body.character_refs is not None:
+        p_shot["character_refs"] = _clean_string_list(body.character_refs)
+    if body.scene_refs is not None:
+        p_shot["scene_refs"] = _clean_string_list(body.scene_refs)
+    if body.product_refs is not None:
+        p_shot["product_refs"] = _clean_string_list(body.product_refs)
+    if body.duration_sec is not None:
+        p_shot["duration_sec"] = float(body.duration_sec or 0)
     shot.setdefault("shot_id", shot_id)
     shot["manual_updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    shots[target_index] = shot
-    script["shots"] = shots
+    p_shot["shot_id"] = shot.get("shot_id") or p_shot.get("shot_id") or shot_id
+    p_shot["shot_index"] = p_shot.get("shot_index") or (target_index + 1)
+    merged_execution = _execution_shot_from_presentation(p_shot, shot)
+    execution_shots[target_index] = merged_execution
+    if target_index < len(presentation_shots):
+        presentation_shots[target_index] = p_shot
+    else:
+        presentation_shots.append(p_shot)
+    script["presentation_shots"] = presentation_shots
+    script["execution_shots"] = execution_shots
+    script["shots"] = execution_shots
     meta = dict(script.get("meta") or {})
     meta["needs_regeneration"] = True
     meta["dirty_segment_id"] = segment_id
     meta["dirty_shot_id"] = shot_id
     meta["manual_updated_at"] = shot["manual_updated_at"]
+    meta["render_status"] = "dirty"
     script["meta"] = meta
 
     rec.script_json = script
@@ -515,6 +715,6 @@ async def update_segment_shot(
         segment_id=segment_id,
         shot_id=shot_id,
         segment=script,
-        shot=shot,
+        shot=p_shot,
         needs_regeneration=True,
     )
