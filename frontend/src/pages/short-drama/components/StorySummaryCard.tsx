@@ -19,6 +19,29 @@ type Props = {
   blueprint: StoryBlueprint;
 };
 
+const formatSummaryValue = (value: unknown): string => {
+  if (value == null) return '—';
+  if (typeof value === 'string') return value || '—';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    return (
+      value
+        .map((item) => formatSummaryValue(item))
+        .filter((item) => item && item !== '—')
+        .join('、') || '—'
+    );
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    if (typeof record.display === 'string') return record.display;
+    if (typeof record.label === 'string') return record.label;
+    if (typeof record.content === 'string') return record.content;
+    if (typeof record.description === 'string') return record.description;
+    return '—';
+  }
+  return '—';
+};
+
 export function StorySummaryCard({ blueprint }: Props) {
   return (
     <div
@@ -59,7 +82,7 @@ export function StorySummaryCard({ blueprint }: Props) {
                   fontFamily: b.isTitle ? sdFontHeading.fontFamily : 'inherit',
                 }}
               >
-                {text}
+                {formatSummaryValue(text)}
               </p>
             </div>
           );

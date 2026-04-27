@@ -1,6 +1,7 @@
 import type {
   PipelineSummaryDto,
   SegmentPlanItemDto,
+  StoryBlueprintDto,
 } from '../types/shortDramaApi';
 import type {
   StoryBlueprintAnalysisSection,
@@ -81,40 +82,6 @@ function readableValue(value: unknown, fallback = '—'): string {
   return fallback;
 }
 
-/** 叙事节奏标签：段数（左栏「叙事节奏」与右栏「叙事节奏」共用） */
-export function deriveNarrativePaceLabel(planLen: number): string {
-  if (planLen <= 2) return '慢';
-  if (planLen === 3) return '标准';
-  return '紧凑';
-}
-
-function deriveHookStrengthLabel(hook: string | undefined): string {
-  const len = (hook ?? '').trim().length;
-  if (len > 80) return '强';
-  if (len > 40) return '中';
-  return '弱';
-}
-
-function deriveAdDensityLabel(plan: SegmentPlanItemDto[]): string {
-  if (plan.length === 0) return '低';
-  const withExposure = plan.filter((p) => (p.product_exposure_mode ?? '').trim().length > 2);
-  const ratio = withExposure.length / plan.length;
-  if (withExposure.length >= 2 || ratio >= 0.5) return '高';
-  if (withExposure.length === 1) return '中';
-  return '低';
-}
-
-function deriveEmotionArcLabel(blueprint: StoryBlueprintDto | null | undefined): string {
-  const c = (blueprint?.core_conflict ?? '').trim();
-  const t = (blueprint?.twist ?? '').trim();
-  if (c.length > 8 && t.length > 8) return '起伏明显';
-  const premise = (blueprint?.premise ?? '').trim();
-  const res = (blueprint?.resolution ?? '').trim();
-  if (premise.length > 8 && res.length > 8 && c.length < 4 && t.length < 4) return '平滑';
-  if (c.length > 8 || t.length > 8) return '单一转折';
-  return '弱';
-}
-
 /**
  * 左侧：项目设置 + 全局设定（真实 pipeline + 可推导字段）
  */
@@ -182,7 +149,6 @@ export function deriveStoryStructureAnalysis(
   }
 
   const plan = segmentPlanFromBlueprint(blueprint);
-  const creativeStrategy = creativeStrategyFromBlueprint(blueprint);
   const spoken = blueprint.spoken_strategy ?? {};
   const assets = blueprint.asset_requirements ?? {};
   const assetNeeds = `${Array.isArray(assets.characters) ? assets.characters.length : 0} 角色 / ${Array.isArray(assets.scenes) ? assets.scenes.length : 0} 场景 / ${Array.isArray(assets.products) ? assets.products.length : 0} 产品`;

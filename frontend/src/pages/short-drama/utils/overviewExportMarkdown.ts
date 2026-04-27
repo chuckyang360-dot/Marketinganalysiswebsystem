@@ -23,12 +23,17 @@ function segmentPlanForIndex(
 
 function formatProductExposure(plan: SegmentPlanItemDto | undefined): string | undefined {
   if (!plan) return undefined;
-  const m = plan.product_exposure_mode?.trim();
+  const m = toMarkdownText(plan.product_exposure_mode);
   if (m) return m;
-  const s = plan.summary?.trim();
+  const s = toMarkdownText(plan.summary);
   if (s) return s;
   return undefined;
 }
+
+const toMarkdownText = (value: string | string[] | undefined | null): string => {
+  if (Array.isArray(value)) return value.filter(Boolean).join('、');
+  return typeof value === 'string' ? value.trim() : '';
+};
 
 /** 无数据时返回 null，由调用方提示「数据不完整」 */
 export function buildOverviewScriptMarkdown(pipeline: PipelineSummaryDto | null): string | null {
@@ -46,7 +51,7 @@ export function buildOverviewScriptMarkdown(pipeline: PipelineSummaryDto | null)
   lines.push('## 项目信息');
   lines.push(`- **项目名**：${name}`);
   lines.push(`- **格式**：${p.format?.trim() || '—'}`);
-  lines.push(`- **风格**：${p.style?.trim() || '—'}`);
+  lines.push(`- **风格**：${toMarkdownText(p.style) || '—'}`);
   lines.push(`- **视听风格**：${p.visual_style?.trim() || '—'}`);
   lines.push(`- **比例**：${p.aspect_ratio?.trim() || '—'}`);
   lines.push(`- **时长**：${p.duration?.trim() || '—'}`);
