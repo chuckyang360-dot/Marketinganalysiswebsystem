@@ -69,13 +69,6 @@ function segmentPlanFromBlueprint(blueprint: StoryBlueprintDto | null | undefine
   return blueprint?.segment_plan ?? [];
 }
 
-function creativeStrategyFromBlueprint(blueprint: StoryBlueprintDto | null | undefined): Record<string, unknown> {
-  const brief = blueprint?.creative_brief;
-  if (!brief || typeof brief !== 'object' || Array.isArray(brief)) return {};
-  const strategy = (brief as Record<string, unknown>).creative_strategy;
-  return strategy && typeof strategy === 'object' && !Array.isArray(strategy) ? (strategy as Record<string, unknown>) : {};
-}
-
 function readableValue(value: unknown, fallback = '—'): string {
   if (Array.isArray(value)) return value.map(String).filter(Boolean).join(' → ') || fallback;
   if (typeof value === 'string' && value.trim()) return value.trim();
