@@ -4,6 +4,8 @@ export const TARGET_MARKET_OPTIONS: Array<{ value: TargetMarketOption; zhLabel: 
   { value: 'North America', zhLabel: '北美' },
   { value: 'Europe', zhLabel: '欧洲' },
   { value: 'Japan', zhLabel: '日本' },
+  { value: 'Korea', zhLabel: '韩国' },
+  { value: 'Thailand', zhLabel: '泰国' },
   { value: 'Southeast Asia', zhLabel: '东南亚' },
   { value: 'China', zhLabel: '中国' },
   { value: 'Global', zhLabel: '全球' },
@@ -15,6 +17,8 @@ const LANGUAGE_ZH_LABEL: Record<string, string> = {
   'zh-CN': '中文',
   'en-US': '英文',
   'ja-JP': '日文',
+  'ko-KR': '韩文',
+  'th-TH': '泰文',
 };
 const FORMAT_ZH_LABEL: Record<string, string> = {
   single_ad: '单条广告',
@@ -82,8 +86,10 @@ export function normalizeTargetMarket(value: unknown): TargetMarketOption {
   if (low.includes('north america') || text.includes('北美')) return 'North America';
   if (low.includes('europe') || text.includes('欧洲')) return 'Europe';
   if (low.includes('japan') || text.includes('日本')) return 'Japan';
+  if (low.includes('korea') || text.includes('韩国')) return 'Korea';
+  if (low.includes('thailand') || low.includes('thai') || text.includes('泰国')) return 'Thailand';
   if (low.includes('southeast asia') || text.includes('东南亚')) return 'Southeast Asia';
-  if (low.includes('china') || text.includes('中国')) return 'China';
+  if (low.includes('china') || text.includes('中国') || text.includes('中国大陆')) return 'China';
   if (low.includes('global') || text.includes('全球')) return 'Global';
   if (low.includes('custom') || text.includes('自定义')) return 'Custom';
   return 'North America';
@@ -95,7 +101,7 @@ export function targetMarketZhLabel(value: unknown): string {
 
 export function languageZhLabel(value: unknown): string {
   const key = String(value || '').trim();
-  if (!key) return '英文';
+  if (!key) return '—';
   return LANGUAGE_ZH_LABEL[key] || key;
 }
 

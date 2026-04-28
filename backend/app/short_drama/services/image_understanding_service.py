@@ -11,6 +11,66 @@ from ..utils.prompts import PRODUCT_IMAGE_UNDERSTANDING_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
+_S1_IMAGE_UNDERSTANDING_LIST_FIELDS = (
+    "detected_visual_features",
+    "detected_materials",
+    "detected_colors",
+    "detected_usage_context",
+    "detected_people_type",
+    "detected_pose_or_usage",
+    "detected_packaging",
+    "detected_brand_clues",
+    "detected_quality_risks",
+    "image_conflicts",
+    "per_image_notes",
+)
+
+
+def _normalize_image_understanding_list_fields(project_id: int, data: dict[str, Any]) -> dict[str, Any]:
+    out = dict(data or {})
+    for field in _S1_IMAGE_UNDERSTANDING_LIST_FIELDS:
+        if field not in out:
+            continue
+        value = out.get(field)
+        original_type = type(value).__name__
+        if value is None:
+            out[field] = []
+            logger.warning(
+                "[S1_IMAGE_UNDERSTANDING_FIELD_NORMALIZED] project_id=%s field=%s original_type=%s normalized_type=%s reason=%s",
+                project_id,
+                field,
+                original_type,
+                "list",
+                "none_to_empty_list",
+            )
+            continue
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                out[field] = []
+                logger.warning(
+                    "[S1_IMAGE_UNDERSTANDING_FIELD_NORMALIZED] project_id=%s field=%s original_type=%s normalized_type=%s reason=%s",
+                    project_id,
+                    field,
+                    original_type,
+                    "list",
+                    "blank_string_to_empty_list",
+                )
+            else:
+                out[field] = [text]
+                logger.warning(
+                    "[S1_IMAGE_UNDERSTANDING_FIELD_NORMALIZED] project_id=%s field=%s original_type=%s normalized_type=%s reason=%s",
+                    project_id,
+                    field,
+                    original_type,
+                    "list",
+                    "string_wrapped_to_list",
+                )
+            continue
+        if isinstance(value, list):
+            continue
+    return out
+
 
 def _build_s1_image_understanding_text_payload(raw_input: ProductRawInputSchema) -> dict[str, Any]:
     image_items: list[dict[str, Any]] = []
@@ -93,6 +153,7 @@ class ProductImageUnderstandingService:
             expected_schema_name="ProductImageUnderstanding",
             stage="PRODUCT_IMAGE_UNDERSTANDING",
         )
+        data = _normalize_image_understanding_list_fields(project_id, data)
         out = ProductImageUnderstandingSchema.model_validate(data)
         logger.info("[S1_IMAGE_UNDERSTANDING_RESULT] project_id=%s result=%s", project_id, out.model_dump())
         return out

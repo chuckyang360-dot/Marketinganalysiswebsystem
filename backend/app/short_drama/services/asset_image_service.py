@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,6 +17,31 @@ from ..utils.image_storage import mime_to_ext, save_image_bytes
 from .workflow_orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
+
+_CHARACTER_PROMPT_CORE_GUARDS = [
+    "one single person only",
+    "one character reference image",
+    "single subject centered",
+    "full body or half body portrait",
+    "no multiple people",
+    "no collage",
+    "no grid",
+    "no contact sheet",
+    "no lineup",
+]
+
+
+def _enforce_character_prompt_constraints(prompt: str, *, project_id: int, asset_id: int) -> str:
+    base = str(prompt or "").strip()
+    missing = [rule for rule in _CHARACTER_PROMPT_CORE_GUARDS if rule.lower() not in base.lower()]
+    if not missing:
+        return base
+    fixed = re.sub(r"\s+", " ", f"{base}. {'; '.join(missing)}").strip(" .;")
+    logger.info(
+        "[S3_CHARACTER_PROMPT_CONSTRAINTS_ENFORCED] %s",
+        {"project_id": project_id, "asset_id": asset_id, "added_constraints": missing},
+    )
+    return fixed
 
 
 @dataclass
@@ -73,7 +99,12 @@ class AssetImageService:
 
         def job(row: CharacterAsset) -> tuple[int, str | None, GeneratedImage | None, Exception | None]:
             try:
-                prompt = prepare_image_prompt(row.visual_prompt)
+                audited_prompt = _enforce_character_prompt_constraints(
+                    row.visual_prompt or "",
+                    project_id=project_id,
+                    asset_id=row.id,
+                )
+                prompt = prepare_image_prompt(audited_prompt)
                 meta = dict(row.meta_json or {})
                 seed = meta.get("generation_seed")
                 gen = self._provider.generate_from_text(

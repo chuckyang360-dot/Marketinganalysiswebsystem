@@ -264,6 +264,11 @@ class XAIStoryPlannerProvider:
             )
             blueprint = StoryBlueprintSchema.model_validate(data)
             blueprint = _normalize_blueprint_for_execution(blueprint, product, project_config)
+            _warn_workflow_language_mismatch(
+                project_id=project_id,
+                blueprint=blueprint,
+                workflow_language=str(project_config.get("workflow_language") or "zh-CN"),
+            )
             _validate_story_content_quality(blueprint, product)
             logger.info(
                 "STORY_GENERATION_SUCCEEDED %s",
@@ -293,7 +298,17 @@ class StoryPlannerService:
         product: ProductContextSchema,
         project_config: Dict[str, Any],
     ) -> StoryBlueprintSchema:
-        return _normalize_blueprint_for_execution(self._provider.plan(project_id, product, project_config), product, project_config)
+        blueprint = _normalize_blueprint_for_execution(
+            self._provider.plan(project_id, product, project_config),
+            product,
+            project_config,
+        )
+        _warn_workflow_language_mismatch(
+            project_id=project_id,
+            blueprint=blueprint,
+            workflow_language=str(project_config.get("workflow_language") or "zh-CN"),
+        )
+        return blueprint
 
 
 def _duration_budget_seconds(raw: Any) -> float:
@@ -344,6 +359,58 @@ def _segment_durations(total: float, count: int) -> list[float]:
 def _contains_terms(text: str, terms: tuple[str, ...]) -> bool:
     blob = str(text or "")
     return any(term in blob for term in terms)
+
+
+def _looks_english_like_text(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    letters = re.findall(r"[A-Za-z]", text)
+    if len(letters) < 6:
+        return False
+    zh_chars = re.findall(r"[\u4e00-\u9fff]", text)
+    return len(letters) >= max(6, len(zh_chars) * 2)
+
+
+def _collect_workflow_language_mismatch_fields(blueprint: StoryBlueprintSchema, workflow_language: str) -> list[str]:
+    if not str(workflow_language or "").strip().lower().startswith("zh"):
+        return []
+    mismatches: list[str] = []
+    top_fields = (
+        "title",
+        "premise",
+        "script_type_display",
+        "structure_type_display",
+        "structure_reason_for_user",
+    )
+    for field in top_fields:
+        if _looks_english_like_text(getattr(blueprint, field, "")):
+            mismatches.append(field)
+    for idx, item in enumerate(blueprint.segment_plan or []):
+        field_map = {
+            "stage_name": item.stage_name,
+            "segment_title": item.segment_title or item.title,
+            "segment_goal": item.segment_goal or item.goal,
+            "summary": item.summary,
+        }
+        for key, value in field_map.items():
+            if _looks_english_like_text(value):
+                mismatches.append(f"segment_plan[{idx}].{key}")
+    return mismatches
+
+
+def _warn_workflow_language_mismatch(project_id: int, blueprint: StoryBlueprintSchema, workflow_language: str) -> None:
+    mismatches = _collect_workflow_language_mismatch_fields(blueprint, workflow_language)
+    if not mismatches:
+        return
+    logger.warning(
+        "[S2_WORKFLOW_LANGUAGE_MISMATCH] %s",
+        {
+            "project_id": project_id,
+            "workflow_language": workflow_language,
+            "fields": mismatches,
+        },
+    )
 
 
 def _sanitize_brand_seeding_text(text: str, fallback: str) -> str:

@@ -267,6 +267,7 @@ export const mockProductAssets: MockProductAsset[] = [
 export const mockProductPreview: ProductPreviewSummary = {
   productName: '',
   productCategory: '',
+  brandName: '',
   productSummary: '演示占位摘要。提交产品解析后，此处将显示真实提炼结果。',
   coreSellingPoints: ['卖点一（示例）', '卖点二（示例）'],
   targetUsers: [],

@@ -6,6 +6,8 @@ from typing import Any
 _TARGET_MARKET_TO_VIDEO_LANGUAGE = {
     "north america": "en-US",
     "japan": "ja-JP",
+    "korea": "ko-KR",
+    "thailand": "th-TH",
     "china": "zh-CN",
     "europe": "en-US",
     "southeast asia": "en-US",
@@ -21,9 +23,16 @@ _TARGET_MARKET_ALIASES = {
     "欧洲": "europe",
     "japan": "japan",
     "日本": "japan",
+    "korea": "korea",
+    "south korea": "korea",
+    "韩国": "korea",
+    "thailand": "thailand",
+    "thai": "thailand",
+    "泰国": "thailand",
     "southeast asia": "southeast asia",
     "东南亚": "southeast asia",
     "china": "china",
+    "中国大陆": "china",
     "中国": "china",
     "global": "global",
     "全球": "global",
@@ -62,6 +71,10 @@ def normalize_target_market(value: Any) -> str:
                 return "Europe"
             if normalized == "japan":
                 return "Japan"
+            if normalized == "korea":
+                return "Korea"
+            if normalized == "thailand":
+                return "Thailand"
             if normalized == "southeast asia":
                 return "Southeast Asia"
             if normalized == "china":

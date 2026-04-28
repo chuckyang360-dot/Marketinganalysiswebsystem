@@ -13,6 +13,8 @@ export type TargetMarketOption =
   | 'North America'
   | 'Europe'
   | 'Japan'
+  | 'Korea'
+  | 'Thailand'
   | 'Southeast Asia'
   | 'China'
   | 'Global'
@@ -55,6 +57,8 @@ export type ParseStatus = 'idle' | 'parsing' | 'ready' | 'error';
 export interface ParsedProductContextDraft {
   productName: string;
   productCategory: string;
+  /** 归一化品牌名（与后端 product_context.brand_name 对齐） */
+  brandName: string;
   productSummary: string;
   coreSellingPoints: string[];
   targetUsers: string[];

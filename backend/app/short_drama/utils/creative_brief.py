@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from ..schemas.product import ProductContextSchema
+from .language import infer_video_language
 
 
 def _text(value: Any) -> str:
@@ -289,9 +290,12 @@ def build_creative_brief(project_config: dict[str, Any], product: ProductContext
         "visual_style": visual_style,
         "aspect_ratio": _text(project_config.get("aspect_ratio")) or "9:16",
         "target_market": market_key,
-        "video_language": _text(project_config.get("video_language")) or "en-US",
         "working_language": _text(project_config.get("working_language") or project_config.get("workflow_language")) or "zh-CN",
     }
+    project_settings["video_language"] = _text(project_config.get("video_language")) or infer_video_language(
+        project_settings["working_language"],
+        market_key,
+    )
     product_context = {
         "category": product.product_category,
         "name": product.product_name,

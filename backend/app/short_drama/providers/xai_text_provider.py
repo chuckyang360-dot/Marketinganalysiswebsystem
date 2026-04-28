@@ -52,6 +52,7 @@ class XAITextProvider:
         image_urls: list[str] | None = None,
         expected_schema_name: str,
         stage: str,
+        max_output_tokens: int = 8192,
     ) -> dict[str, Any]:
         model = effective_xai_text_model()
         user_text = json.dumps(user_payload, ensure_ascii=False)
@@ -64,6 +65,7 @@ class XAITextProvider:
                 system_prompt=system_prompt,
                 user_content=user_content,
                 store=False,
+                max_output_tokens=max_output_tokens,
                 log_context={
                     "project_id": project_id,
                     "service_name": service_name,
@@ -96,6 +98,17 @@ class XAITextProvider:
                     stage,
                     response_incomplete_details,
                 )
+                reason = ""
+                if isinstance(response_incomplete_details, dict):
+                    reason = str(response_incomplete_details.get("reason") or "").strip().lower()
+                if reason == "max_output_tokens":
+                    logger.warning(
+                        "[STRUCTURED_OUTPUT_MAX_TOKENS_EXHAUSTED] project_id=%s service_name=%s stage=%s reason=%s",
+                        project_id,
+                        service_name,
+                        stage,
+                        reason,
+                    )
             duration_ms = int((time.perf_counter() - t0) * 1000)
             if _is_empty_or_too_short_structured_text(text):
                 logger.warning(

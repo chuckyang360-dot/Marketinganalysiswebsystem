@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Short Drama / xAI text (Responses API); base URL falls back to XAI_API_URL when unset
     XAI_BASE_URL: Optional[str] = Field(default=None, env="XAI_BASE_URL")
     XAI_TEXT_MODEL: Optional[str] = Field(default=None, env="XAI_TEXT_MODEL")
+    SHORT_DRAMA_XAI_TEXT_TIMEOUT_SECONDS: int = Field(default=180, env="SHORT_DRAMA_XAI_TEXT_TIMEOUT_SECONDS")
+    SHORT_DRAMA_SEGMENT_DIRECTOR_MAX_OUTPUT_TOKENS: int = Field(
+        default=16384, env="SHORT_DRAMA_SEGMENT_DIRECTOR_MAX_OUTPUT_TOKENS"
+    )
     XAI_TIMEOUT_SECONDS: int = Field(default=60, env="XAI_TIMEOUT_SECONDS")
     XAI_MAX_RETRIES: int = Field(default=2, env="XAI_MAX_RETRIES")
     SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER: bool = Field(default=False, env="SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER")

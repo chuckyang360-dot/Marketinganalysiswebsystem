@@ -78,6 +78,7 @@ export function productContextToPreview(ctx: ProductContextDto): ProductPreviewS
   return {
     productName: ctx.product_name || '',
     productCategory: ctx.product_category || '',
+    brandName: ctx.brand_name?.trim() || '',
     productSummary: ctx.product_summary || '',
     coreSellingPoints: ctx.core_selling_points ?? [],
     targetUsers: ctx.target_users ?? [],
@@ -110,6 +111,7 @@ export function previewToProductContextPayload(preview: ProductPreviewSummary): 
   return {
     product_name: preview.productName,
     product_category: preview.productCategory,
+    brand_name: preview.brandName.trim() || undefined,
     product_summary: preview.productSummary,
     core_selling_points: preview.coreSellingPoints,
     target_users: preview.targetUsers,
@@ -131,6 +133,14 @@ export function previewToProductContextPayload(preview: ProductPreviewSummary): 
 }
 
 const SEGMENT_COLORS = ['#B45309', '#DC2626', '#047857', '#334155', '#9333EA', '#0F766E'];
+const STORY_ENUM_DISPLAY_MAP: Record<string, string> = {
+  'Story Drama': '剧情短剧',
+  'Light Conflict Transformation': '轻冲突转化',
+  Hook: '开场钩子',
+  Build: '情节推进',
+  Reveal: '信息揭示',
+  Payoff: '结果收束',
+};
 
 export type StoryBlueprintPageScriptVm = {
   title: string;
@@ -179,6 +189,7 @@ function formatSegmentDuration(seconds: number | undefined): string {
 function sanitizeDisplayLabel(value: unknown): string {
   const text = String(value || '').trim();
   if (!text) return '';
+  if (STORY_ENUM_DISPLAY_MAP[text]) return STORY_ENUM_DISPLAY_MAP[text];
   const mapped = marketingGoalZhLabel(text);
   if (mapped !== text) return mapped;
   return text
@@ -225,7 +236,7 @@ export function storyBlueprintDtoToPageView(dto: StoryBlueprintDto | undefined |
   ];
   const frameworkSections = frameworkSteps.map((step, idx) => ({
     key: `framework_${idx + 1}`,
-    label: String(step).trim() || `段落 ${idx + 1}`,
+    label: sanitizeDisplayLabel(String(step).trim()) || `段落 ${idx + 1}`,
     icon: ['ri-home-4-line', 'ri-heart-3-line', 'ri-gift-2-line', 'ri-magic-line', 'ri-bookmark-3-line'][idx] || 'ri-layout-row-line',
     content: (frameworkContentByIndex[idx] || frameworkContentByIndex[3] || '').trim() || '—',
   }));
@@ -257,13 +268,17 @@ export function storyBlueprintDtoToPageView(dto: StoryBlueprintDto | undefined |
         ? String((shotSeg as Record<string, unknown>).name || '').trim()
         : '';
     const name =
-      item.segment_title?.trim() ||
-      shotSegName ||
-      (frameworkSteps[idx] && String(frameworkSteps[idx]).trim()) ||
-      (item.story_beat && String(item.story_beat).trim()) ||
+      sanitizeDisplayLabel(item.segment_title?.trim()) ||
+      sanitizeDisplayLabel(shotSegName) ||
+      (frameworkSteps[idx] && sanitizeDisplayLabel(String(frameworkSteps[idx]).trim())) ||
+      (item.story_beat && sanitizeDisplayLabel(String(item.story_beat).trim())) ||
       (item.segment_id && String(item.segment_id).trim()) ||
       `Segment ${id}`;
-    const stageName = item.stage_name?.trim() || (frameworkSteps[idx] && String(frameworkSteps[idx]).trim()) || item.story_beat?.trim() || `阶段 ${id}`;
+    const stageName =
+      sanitizeDisplayLabel(item.stage_name?.trim()) ||
+      (frameworkSteps[idx] && sanitizeDisplayLabel(String(frameworkSteps[idx]).trim())) ||
+      sanitizeDisplayLabel(item.story_beat?.trim()) ||
+      `阶段 ${id}`;
     return {
       id,
       name,

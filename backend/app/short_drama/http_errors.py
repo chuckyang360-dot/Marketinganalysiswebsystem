@@ -58,6 +58,18 @@ def _to_http_exception(exc: Exception) -> HTTPException:
         msg = str(exc)
         low = msg.lower()
         if (
+            "short_drama_provider_timeout" in low
+            or "timeout" in low
+            or "timed out" in low
+        ):
+            return HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail={
+                    "error": "short_drama_provider_timeout",
+                    "user_message": "当前服务繁忙，请稍后重试。",
+                },
+            )
+        if (
             "http 503" in low
             or "did not respond" in low
             or "service temporarily unavailable" in low
@@ -72,8 +84,6 @@ def _to_http_exception(exc: Exception) -> HTTPException:
             )
         if "XAI_API_KEY" in msg or "not configured" in msg.lower():
             return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=msg)
-        if "timeout" in msg.lower() or "timed out" in msg.lower():
-            return HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=msg)
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=msg)
     if isinstance(exc, ShortDramaVideoInputError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

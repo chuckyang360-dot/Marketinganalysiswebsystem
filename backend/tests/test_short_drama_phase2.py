@@ -190,14 +190,36 @@ class TestProductParserXAI(unittest.TestCase):
 
 
 class TestEffectiveXAITextModel(unittest.TestCase):
-    def test_fallback_grok_41_fast(self):
+    def test_model_precedence_and_default(self):
         from unittest.mock import patch
 
         from app.config import settings
         from app.short_drama.providers.xai_client import effective_xai_text_model
 
+        with patch.object(settings, "XAI_TEXT_MODEL", "grok-4.20"), patch.object(settings, "XAI_MODEL", "legacy-grok"):
+            self.assertEqual(effective_xai_text_model(), "grok-4.20")
+
+        with patch.object(settings, "XAI_TEXT_MODEL", None), patch.object(settings, "XAI_MODEL", "xai-model-from-env"):
+            self.assertEqual(effective_xai_text_model(), "xai-model-from-env")
+
         with patch.object(settings, "XAI_TEXT_MODEL", None), patch.object(settings, "XAI_MODEL", None):
-            self.assertEqual(effective_xai_text_model(), "grok-4.1-fast-non-reasoning")
+            self.assertEqual(effective_xai_text_model(), "grok-4.20")
+
+
+class TestShortDramaXAITextTimeoutConfig(unittest.TestCase):
+    def test_xai_text_timeout_default_is_180(self):
+        from app.config import Settings
+
+        with patch.dict(os.environ, {}, clear=True):
+            defaults = Settings()
+        self.assertEqual(defaults.SHORT_DRAMA_XAI_TEXT_TIMEOUT_SECONDS, 180)
+
+    def test_xai_text_timeout_env_override(self):
+        from app.config import Settings
+
+        with patch.dict(os.environ, {"SHORT_DRAMA_XAI_TEXT_TIMEOUT_SECONDS": "240"}, clear=False):
+            override = Settings()
+        self.assertEqual(override.SHORT_DRAMA_XAI_TEXT_TIMEOUT_SECONDS, 240)
 
 
 class TestShotPromptQuality(unittest.TestCase):
@@ -232,6 +254,81 @@ class TestShotPromptQuality(unittest.TestCase):
             shot_id="s1",
             segment_id="seg_1",
         )
+
+
+class TestSegmentDirectorTokenAndIncomplete(unittest.TestCase):
+    def test_segment_director_uses_configured_max_output_tokens(self):
+        from app.config import settings
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.schemas.asset import AssetSpecsBundleSchema
+        from app.short_drama.schemas.story import StoryBlueprintSchema
+        from app.short_drama.services.segment_director_service import XAISegmentDirectorProvider
+
+        class _FakeTextProvider:
+            def __init__(self):
+                self.kwargs = None
+
+            def generate_structured_json(self, **kwargs):
+                self.kwargs = kwargs
+                raise ShortDramaInvalidModelOutputError("stop")
+
+        fake = _FakeTextProvider()
+        provider = XAISegmentDirectorProvider(fake)
+        with patch.object(settings, "SHORT_DRAMA_SEGMENT_DIRECTOR_MAX_OUTPUT_TOKENS", 16384):
+            with self.assertRaises(ShortDramaInvalidModelOutputError):
+                provider.direct(
+                    project_id=1,
+                    blueprint=StoryBlueprintSchema(segment_plan=[]),
+                    assets=AssetSpecsBundleSchema(),
+                    project_config={},
+                )
+        self.assertEqual(fake.kwargs.get("max_output_tokens"), 16384)
+
+    def test_structured_output_incomplete_max_tokens_logged(self):
+        from app.short_drama.exceptions import ShortDramaInvalidModelOutputError
+        from app.short_drama.providers.xai_text_provider import XAITextProvider
+
+        def _raw(text: str, *, status: str = "completed", incomplete_details=None):
+            return (
+                {
+                    "id": "resp_1",
+                    "status": status,
+                    "incomplete_details": incomplete_details,
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": text}],
+                        }
+                    ],
+                },
+                "resp_1",
+                100,
+            )
+
+        client = MagicMock()
+        client.post_responses.side_effect = [
+            _raw(
+                '{"segments": [',
+                status="incomplete",
+                incomplete_details={"reason": "max_output_tokens"},
+            ),
+            _raw("still invalid json"),
+            _raw("still invalid json 2"),
+        ]
+        provider = XAITextProvider(client=client)
+        with patch("app.short_drama.providers.xai_text_provider.logger.warning") as warn_log:
+            with self.assertRaises(ShortDramaInvalidModelOutputError):
+                provider.generate_structured_json(
+                    project_id=1,
+                    service_name="segment_director",
+                    system_prompt="sys",
+                    user_payload={"k": "v"},
+                    expected_schema_name="SegmentScriptsBundle",
+                    stage="SEGMENT_GENERATION",
+                )
+        warn_msgs = [str(call.args[0]) for call in warn_log.call_args_list if call.args]
+        self.assertTrue(any("[STRUCTURED_OUTPUT_MAX_TOKENS_EXHAUSTED]" in msg for msg in warn_msgs))
 
 
 def _minimal_assets_bundle():
@@ -479,6 +576,7 @@ class TestXAIClientTimeout(unittest.TestCase):
         self.assertIsInstance(second_image_part["image_url"], str)
         self.assertEqual(text_part["type"], "input_text")
         self.assertNotIn("instructions", body["input"][0])
+        self.assertNotIn("reasoning_effort", body)
 
     def test_timeout_raises_provider_error(self):
         from app.short_drama.exceptions import ShortDramaProviderError
@@ -501,6 +599,35 @@ class TestXAIClientTimeout(unittest.TestCase):
                     user_content="u",
                     log_context={"project_id": 1},
                 )
+
+    def test_ai_request_log_includes_timeout_seconds(self):
+        from app.short_drama.providers.xai_client import XAIClient
+
+        client = XAIClient(api_key="test-key", base_url="https://example.invalid", timeout_seconds=180)
+        log_fields = {}
+
+        class FakeResp:
+            status_code = 200
+            headers = {"x-request-id": "req_1"}
+
+            def json(self):
+                return {"id": "resp_1", "output": []}
+
+        with patch("app.short_drama.providers.xai_client.log_ai_request") as log_req:
+            with patch("httpx.Client") as MockClient:
+                inst = MagicMock()
+                inst.__enter__.return_value = inst
+                inst.post.return_value = FakeResp()
+                MockClient.return_value = inst
+                client.post_responses(
+                    model="m",
+                    system_prompt="s",
+                    user_content=[{"type": "input_text", "text": "{}"}],
+                    log_context={"project_id": 1},
+                )
+            log_fields.update(log_req.call_args.kwargs)
+
+        self.assertEqual(log_fields.get("timeout_seconds"), 180.0)
 
 
 class TestS1ImagePayload(unittest.TestCase):
@@ -536,6 +663,60 @@ class TestS1ImagePayload(unittest.TestCase):
         self.assertNotIn("data:image", text_json.lower())
         self.assertNotIn("base64", text_json.lower())
         self.assertLess(len(text_json), len(data_url))
+
+    def test_product_image_understanding_empty_string_list_field_normalized(self):
+        from app.config import settings
+        from app.short_drama.schemas.product import ProductImageInputSchema, ProductRawInputSchema
+        from app.short_drama.services.image_understanding_service import ProductImageUnderstandingService
+
+        raw = ProductRawInputSchema(
+            product_name_raw="测试品",
+            product_images=[ProductImageInputSchema(image_url="https://cdn.example.com/a.png")],
+        )
+
+        class _FakeTextProvider:
+            def generate_structured_json(self, **kwargs):
+                return {"detected_packaging": ""}
+
+        with patch.object(settings, "SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER", False):
+            out = ProductImageUnderstandingService(text_provider=_FakeTextProvider()).understand(1, raw)
+        self.assertEqual(out.detected_packaging, [])
+
+    def test_product_image_understanding_string_list_field_wrapped(self):
+        from app.config import settings
+        from app.short_drama.schemas.product import ProductImageInputSchema, ProductRawInputSchema
+        from app.short_drama.services.image_understanding_service import ProductImageUnderstandingService
+
+        raw = ProductRawInputSchema(
+            product_name_raw="测试品",
+            product_images=[ProductImageInputSchema(image_url="https://cdn.example.com/a.png")],
+        )
+
+        class _FakeTextProvider:
+            def generate_structured_json(self, **kwargs):
+                return {"detected_packaging": "None visible"}
+
+        with patch.object(settings, "SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER", False):
+            out = ProductImageUnderstandingService(text_provider=_FakeTextProvider()).understand(1, raw)
+        self.assertEqual(out.detected_packaging, ["None visible"])
+
+    def test_product_image_understanding_none_list_field_normalized(self):
+        from app.config import settings
+        from app.short_drama.schemas.product import ProductImageInputSchema, ProductRawInputSchema
+        from app.short_drama.services.image_understanding_service import ProductImageUnderstandingService
+
+        raw = ProductRawInputSchema(
+            product_name_raw="测试品",
+            product_images=[ProductImageInputSchema(image_url="https://cdn.example.com/a.png")],
+        )
+
+        class _FakeTextProvider:
+            def generate_structured_json(self, **kwargs):
+                return {"detected_quality_risks": None}
+
+        with patch.object(settings, "SHORT_DRAMA_USE_MOCK_TEXT_PROVIDER", False):
+            out = ProductImageUnderstandingService(text_provider=_FakeTextProvider()).understand(1, raw)
+        self.assertEqual(out.detected_quality_risks, [])
 
 
 class TestStoryPlannerMock(unittest.TestCase):
@@ -627,6 +808,32 @@ class TestStoryPlannerMock(unittest.TestCase):
         self.assertEqual(_normalize_story_style("healing,comedy"), "healing")
 
 
+class TestStoryPromptBoundaries(unittest.TestCase):
+    def test_story_prompt_language_boundary(self):
+        from app.short_drama.utils.prompts import STORY_PLANNER_SYSTEM_PROMPT
+
+        prompt = STORY_PLANNER_SYSTEM_PROMPT.lower()
+        self.assertIn("workflow_language", prompt)
+        self.assertIn("planning/display fields", prompt)
+        self.assertIn("video_language", prompt)
+        self.assertIn("dialogue", prompt)
+        self.assertIn("voiceover", prompt)
+        self.assertIn("subtitle", prompt)
+        self.assertIn("cta", prompt)
+        self.assertIn("never assume video_language is english", prompt)
+
+
+class TestLanguagePolicyDefaults(unittest.TestCase):
+    def test_video_language_defaults_follow_target_market(self):
+        from app.short_drama.utils.language import infer_video_language
+
+        self.assertEqual(infer_video_language("zh-CN", "North America"), "en-US")
+        self.assertEqual(infer_video_language("zh-CN", "Japan"), "ja-JP")
+        self.assertEqual(infer_video_language("zh-CN", "Korea"), "ko-KR")
+        self.assertEqual(infer_video_language("zh-CN", "Thailand"), "th-TH")
+        self.assertEqual(infer_video_language("en-US", "中国大陆"), "zh-CN")
+
+
 class TestAssetSpecMock(unittest.TestCase):
     def test_image_url_none(self):
         from app.short_drama.schemas.product import ProductContextSchema
@@ -687,6 +894,56 @@ class TestAssetSpecMock(unittest.TestCase):
         self.assertIn("character_reference", out.characters[0].meta["asset_boundary"])
         self.assertNotIn("Gym Scene", out.products[0].name)
         self.assertIn("product_only", out.products[0].meta["asset_boundary"])
+
+    def test_character_asset_prompt_enforces_single_person(self):
+        from app.short_drama.schemas.asset import CharacterAssetSchema
+        from app.short_drama.services.asset_spec_service import _character_prompt_blueprint
+
+        row = CharacterAssetSchema(
+            name="主角A",
+            role_type="main",
+            description="diverse group style character",
+            visual_prompt="young hero in city street",
+        )
+        prompt = _character_prompt_blueprint(
+            row=row,
+            target_market="North America",
+            target_audience="urban youth",
+            style_terms="cinematic",
+            animation_terms=[],
+            market_terms=[],
+            negative=[],
+        ).lower()
+        self.assertIn("single person", prompt)
+        self.assertIn("one character", prompt)
+        self.assertIn("no multiple people", prompt)
+        self.assertIn("no collage", prompt)
+        self.assertIn("no grid", prompt)
+        self.assertIn("no contact sheet", prompt)
+        self.assertIn("no lineup", prompt)
+
+    def test_scene_asset_prompt_not_changed_unnecessarily(self):
+        from app.short_drama.schemas.asset import SceneAssetSchema
+        from app.short_drama.services.asset_spec_service import _scene_prompt_blueprint
+
+        row = SceneAssetSchema(
+            name="通勤站台",
+            scene_type="hook",
+            description="城市地铁站台，清晨通勤氛围",
+            visual_prompt="single location, no collage, no grid",
+        )
+        prompt = _scene_prompt_blueprint(
+            row=row,
+            target_market="China",
+            style_terms="cinematic",
+            market_terms=[],
+            negative=[],
+        ).lower()
+        self.assertNotIn("one single person only", prompt)
+        self.assertNotIn("one character reference image", prompt)
+        self.assertIn("single location", prompt)
+        self.assertIn("no collage", prompt)
+        self.assertIn("no grid", prompt)
 
 
 class TestSegmentDirectorMock(unittest.TestCase):
@@ -848,6 +1105,20 @@ class TestShortDramaPipelineIntegration(unittest.TestCase):
         self.assertNotIn("service temporarily unavailable", blob)
         self.assertNotIn("did not respond", blob)
         self.assertNotIn("http 503", blob)
+
+    def test_text_timeout_returns_clean_user_message(self):
+        from app.short_drama.exceptions import ShortDramaProviderError
+        from app.short_drama.http_errors import _to_http_exception
+
+        http_exc = _to_http_exception(ShortDramaProviderError("short_drama_provider_timeout"))
+        self.assertEqual(http_exc.status_code, 504)
+        detail = http_exc.detail or {}
+        self.assertEqual(detail.get("error"), "short_drama_provider_timeout")
+        self.assertEqual(detail.get("user_message"), "当前服务繁忙，请稍后重试。")
+        blob = json.dumps({"user_message": detail.get("user_message")}, ensure_ascii=False).lower()
+        self.assertNotIn("timeout", blob)
+        self.assertNotIn("xai", blob)
+        self.assertNotIn("http", blob)
 
 
 if __name__ == "__main__":

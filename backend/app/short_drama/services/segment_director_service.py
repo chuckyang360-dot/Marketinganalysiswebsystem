@@ -710,6 +710,7 @@ class XAISegmentDirectorProvider:
                     image_urls=None,
                     expected_schema_name="SegmentScriptsBundle",
                     stage="SEGMENT_GENERATION",
+                    max_output_tokens=max(1024, int(settings.SHORT_DRAMA_SEGMENT_DIRECTOR_MAX_OUTPUT_TOKENS)),
                 )
                 try:
                     segments = _validate_segments(

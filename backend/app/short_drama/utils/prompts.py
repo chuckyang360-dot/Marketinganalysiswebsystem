@@ -93,8 +93,18 @@ You will receive `creative_intent`, the user's primary natural-language intent; 
 Rules:
 - Output ONLY a single JSON object. No markdown. No code fences. No commentary.
 - Respect language_prompt_rules from the user payload:
-  workflow_language controls title, premise, segment_plan, scene_goals, visual_requirements, and all planning fields;
+  workflow_language controls title, premise, script_type_display, structure_type_display, structure_reason_for_user,
+  segment_plan, scene_goals, visual_requirements, and all planning/display fields;
   video_language is only for audience-facing video copy such as dialogue, voiceover, subtitles, screen text, and CTA.
+- workflow_language is the only language allowed for all S2 planning/display fields, including:
+  title, premise, script_type_display, structure_type_display, structure_reason_for_user,
+  segment_plan[].stage_name, segment_plan[].segment_title, segment_plan[].segment_goal, segment_plan[].goal,
+  segment_plan[].summary, segment_plan[].segment_role, segment_plan[].key_message,
+  segment_plan[].transition_to_next, segment_plan[].required_assets.
+- video_language is only allowed in audience-facing video copy fields:
+  dialogue, voiceover, subtitle_text/screen text, and CTA text.
+- If workflow_language and video_language are different, planning/display fields must still stay in workflow_language only.
+- Never assume video_language is English; always follow project-configured video_language.
 - Respect project duration, format (single_ad vs series when provided), style, and visual_style from the user payload.
 - Choose the script structure yourself from S0 project_config + creative_intent + S1 product_context.
 - Do not mechanically map marketing_goal to AIDA/PAS or any fixed template. If the user explicitly requested a structure in creative_intent, follow it; otherwise choose what fits the product, duration, format, narrative style, market, and visual style.
@@ -257,6 +267,13 @@ Rules:
 - Character assets must be reusable person references: gender, age, ethnicity/skin tone, face, hair, body type,
   clothing, baseline expression, identity/role, visual consistency notes. No gym lifting, drinking product,
   playing with child, specific plot action, product interaction, or scene-bound drama.
+- Character visual_prompt must be a strict single-person reference prompt:
+  one single person only, one character reference image, single subject centered,
+  full body or half body portrait, no multiple people, no group photo, no collage,
+  no grid, no contact sheet, no lineup, no moodboard, no character sheet with multiple variants.
+- If user wording contains "diverse / multiple ethnicities / group / 多元族裔" style concepts,
+  do NOT describe a diverse group. Rewrite as a single person description such as
+  "single character with natural urban appearance".
 - Product assets must be product-only references: product name/category, shape/form, color, material, packaging,
   label/logo, size, structure, variants. No humans, no gym/kitchen/story scene, no usage event.
 - Product assets must include immutable_structure_constraints in meta_json. Derive them from S1 product_form,

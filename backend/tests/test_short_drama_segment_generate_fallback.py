@@ -133,3 +133,29 @@ def test_segment_generate_returns_422_only_when_ai_and_fallback_both_fail():
     ):
         resp = client.post("/api/short-drama/segment/generate", json={"project_id": pid})
     assert resp.status_code == 422
+
+
+def test_segment_generate_fallback_logs_reason_when_empty():
+    client = TestClient(app)
+    pid = _bootstrap_project_with_specs(client)
+    with patch(
+        "app.short_drama.routes.segment.segment_director_service.generate",
+        side_effect=ShortDramaInvalidModelOutputError("structured output empty or too short"),
+    ):
+        with patch("app.short_drama.routes.segment.logger.warning") as warn_log:
+            resp = client.post("/api/short-drama/segment/generate", json={"project_id": pid})
+    assert resp.status_code == 422
+    hit = None
+    for call in warn_log.call_args_list:
+        if not call.args:
+            continue
+        if "[S4_SEGMENT_GENERATION_FALLBACK_FAILED]" in str(call.args[0]):
+            hit = call
+            break
+    assert hit is not None
+    payload = hit.args[1] if len(hit.args) > 1 and isinstance(hit.args[1], dict) else {}
+    assert "has_story_blueprint" in payload
+    assert "has_shot_plan" in payload
+    assert "has_segment_plan" in payload
+    assert payload.get("fallback_segments_count") == 0
+    assert payload.get("reason")

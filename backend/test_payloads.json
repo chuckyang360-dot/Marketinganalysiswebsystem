@@ -253,12 +253,12 @@
       {
         "category": "opportunity",
         "title": "FALLBACK ANALYSIS - Limited Insights Available",
-        "description": "[LIMITED MODE] AI analysis unavailable. Only basic metrics are shown.\n\nAnalyzed 8 evidence items across x, reddit, seo.\n\nWHAT'S AVAILABLE:\n- Sentiment counts from pre-analyzed evidence\n- Basic topic extraction (first words of titles)\n\nWHAT'S MISSING (requires Grok API):\n- Semantic topic grouping\n- Pattern detection (trends, risks, gaps)\n- Actionable content recommendations\n- Evidence-backed insights\n\nConfigure XAI_API_KEY to enable full AI-powered analysis.",
+        "description": "[LIMITED MODE] AI analysis unavailable. Only basic metrics are shown.\n\nAnalyzed 8 evidence items across x, seo, reddit.\n\nWHAT'S AVAILABLE:\n- Sentiment counts from pre-analyzed evidence\n- Basic topic extraction (first words of titles)\n\nWHAT'S MISSING (requires Grok API):\n- Semantic topic grouping\n- Pattern detection (trends, risks, gaps)\n- Actionable content recommendations\n- Evidence-backed insights\n\nConfigure XAI_API_KEY to enable full AI-powered analysis.",
         "supporting_evidence": 8,
         "platforms": [
           "x",
-          "reddit",
-          "seo"
+          "seo",
+          "reddit"
         ]
       }
     ],
@@ -275,10 +275,10 @@
       "total_evidence_analyzed": 8,
       "platforms_covered": [
         "x",
-        "reddit",
-        "seo"
+        "seo",
+        "reddit"
       ],
-      "analysis_timestamp": "2026-04-27T12:00:54.161262"
+      "analysis_timestamp": "2026-04-28T06:29:11.780694"
     }
   },
   "is_fallback": false

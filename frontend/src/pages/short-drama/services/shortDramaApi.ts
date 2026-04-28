@@ -35,11 +35,15 @@ import type {
 
 export class ShortDramaApiError extends Error {
   readonly status: number;
+  readonly detail?: unknown;
+  readonly response?: unknown;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, detail?: unknown, response?: unknown) {
     super(message);
     this.name = 'ShortDramaApiError';
     this.status = status;
+    this.detail = detail;
+    this.response = response;
   }
 }
 
@@ -64,28 +68,42 @@ function formatShortDramaDetailObject(d: Record<string, unknown>): string {
   return parts.length ? parts.join(' · ') : JSON.stringify(d);
 }
 
-async function parseErrorMessage(res: Response): Promise<string> {
+async function parseErrorDetail(res: Response): Promise<{ message: string; detail?: unknown; response?: unknown }> {
   const text = await res.text();
   const promptTooLongMessage = '视频生成提示词过长，系统已自动压缩。请重试。';
   const looksPromptTooLong = (value: string) =>
     /prompt length exceeds|maximum allowed length of 4096|提示词过长/i.test(value);
   try {
     const j = JSON.parse(text) as { detail?: unknown };
-    if (typeof j.detail === 'string') return looksPromptTooLong(j.detail) ? promptTooLongMessage : j.detail;
+    if (typeof j.detail === 'string') {
+      return {
+        message: looksPromptTooLong(j.detail) ? promptTooLongMessage : j.detail,
+        detail: j.detail,
+        response: j,
+      };
+    }
     if (Array.isArray(j.detail)) {
-      return j.detail
+      const message = j.detail
         .map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg: unknown }).msg) : String(x)))
         .join('; ');
+      return { message, detail: j.detail, response: j };
     }
     if (typeof j.detail === 'object' && j.detail !== null && !Array.isArray(j.detail)) {
       const formatted = formatShortDramaDetailObject(j.detail as Record<string, unknown>);
-      return looksPromptTooLong(formatted) ? promptTooLongMessage : formatted;
+      return {
+        message: looksPromptTooLong(formatted) ? promptTooLongMessage : formatted,
+        detail: j.detail,
+        response: j,
+      };
     }
+    return { message: text.slice(0, 400) || res.statusText || `HTTP ${res.status}`, detail: j.detail, response: j };
   } catch {
-    /* ignore */
+    return {
+      message: looksPromptTooLong(text) ? promptTooLongMessage : text.slice(0, 400) || res.statusText || `HTTP ${res.status}`,
+      detail: text,
+      response: text,
+    };
   }
-  if (looksPromptTooLong(text)) return promptTooLongMessage;
-  return text.slice(0, 400) || res.statusText || `HTTP ${res.status}`;
 }
 
 async function sdFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -97,8 +115,8 @@ async function sdFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const msg = await parseErrorMessage(res);
-    throw new ShortDramaApiError(msg, res.status);
+    const parsed = await parseErrorDetail(res);
+    throw new ShortDramaApiError(parsed.message, res.status, parsed.detail, parsed.response);
   }
   return res.json() as Promise<T>;
 }
@@ -293,6 +311,7 @@ export async function regenerateShortDramaAssetLibrary(body: {
   reference_images?: { file_url: string; file_name?: string }[];
   generate_count?: number;
   variant_directions?: string[];
+  image_description_override?: string;
 }): Promise<AssetLibraryItemDto> {
   return sdFetchJson<AssetLibraryItemDto>('/api/short-drama/assets/specs/library/regenerate', {
     method: 'POST',
@@ -411,8 +430,8 @@ export async function fetchShortDramaExportZip(projectId: number, kind: 'videos'
       : `/api/short-drama/project/${projectId}/export/all`;
   const res = await fetch(joinUrl(path), { method: 'GET' });
   if (!res.ok) {
-    const msg = await parseErrorMessage(res);
-    throw new ShortDramaApiError(msg, res.status);
+    const parsed = await parseErrorDetail(res);
+    throw new ShortDramaApiError(parsed.message, res.status, parsed.detail, parsed.response);
   }
   return res.blob();
 }

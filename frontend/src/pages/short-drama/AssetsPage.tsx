@@ -23,6 +23,275 @@ const fallbackNameByTab: Record<TabType, string> = {
   assets: 'Product Asset',
 };
 
+const PROMPT_DIRTY_PATTERNS: RegExp[] = [
+  /single coherent location/i,
+  /single location only/i,
+  /no collage/i,
+  /no split-screen/i,
+  /no multiple panels/i,
+  /no montage/i,
+  /no grid/i,
+  /one single person only/i,
+  /no multiple people/i,
+  /no contact sheet/i,
+  /product appearance cannot be altered/i,
+  /market_visual_constraints/i,
+  /visual_style_constraints/i,
+  /provider_params/i,
+  /prompt_snapshot/i,
+];
+
+function cleanBusinessText(input: unknown): string {
+  let text = String(input || '').trim();
+  if (!text) return '';
+  for (const re of PROMPT_DIRTY_PATTERNS) {
+    text = text.replace(re, ' ');
+  }
+  text = text
+    .replace(/\b(schema|json|provider|debug|meta)\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[；;，,]\s*[；;，,]+/g, '，')
+    .replace(/^[，。；、\s]+|[，。；、\s]+$/g, '')
+    .trim();
+  return text;
+}
+
+function listFromUnknown(input: unknown): string[] {
+  if (Array.isArray(input)) {
+    return input.map((x) => cleanBusinessText(x)).filter(Boolean);
+  }
+  const text = cleanBusinessText(input);
+  if (!text) return [];
+  return text.split(/[，,；;\n]/g).map((x) => cleanBusinessText(x)).filter(Boolean);
+}
+
+function uniqList(values: string[]): string[] {
+  return Array.from(new Set(values.map((x) => x.trim()).filter(Boolean)));
+}
+
+function joinParts(parts: string[]): string {
+  return parts.map((x) => cleanBusinessText(x)).filter(Boolean).join('，');
+}
+
+const PATCH_FORBIDDEN_TYPE_FIELD_KEYS = new Set([
+  'asset_type',
+  'assetType',
+  'raw_asset_type',
+  'type',
+  'rawSnapshot',
+  'raw_snapshot',
+  'images',
+  'provider_params',
+  'prompt_snapshot',
+  'meta',
+  'debug',
+  'provider_prompt',
+  'source_trace',
+]);
+
+const CHARACTER_TYPE_FIELD_WHITELIST = new Set([
+  'role_type',
+  'role_position',
+  'asset_role',
+  'label',
+  'story_usage',
+  'story_function',
+  'personality',
+  'voice_profile',
+  'voice_style',
+  'description',
+  'display_description',
+]);
+
+const SCENE_TYPE_FIELD_WHITELIST = new Set([
+  'scene_role',
+  'asset_role',
+  'label',
+  'story_usage',
+  'story_function',
+  'lighting',
+  'atmosphere',
+  'props',
+  'description',
+  'display_description',
+]);
+
+const PRODUCT_TYPE_FIELD_WHITELIST = new Set([
+  'product_role',
+  'asset_role',
+  'label',
+  'story_usage',
+  'story_function',
+  'visual_features',
+  'immutable_structure_constraints',
+  'usage_mode',
+  'description',
+  'display_description',
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === '[object Object]';
+}
+
+function sanitizeJsonSafe(value: unknown): unknown {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'boolean') return value;
+  if (Array.isArray(value)) {
+    const arr = value.map((x) => sanitizeJsonSafe(x)).filter((x) => x !== undefined);
+    return arr;
+  }
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const cleaned = sanitizeJsonSafe(v);
+      if (cleaned !== undefined) out[k] = cleaned;
+    }
+    return out;
+  }
+  return String(value);
+}
+
+function sanitizeTypeFields(input: Record<string, unknown>, kind: AssetKind): Record<string, unknown> {
+  const allowed =
+    kind === 'character'
+      ? CHARACTER_TYPE_FIELD_WHITELIST
+      : kind === 'scene'
+        ? SCENE_TYPE_FIELD_WHITELIST
+        : PRODUCT_TYPE_FIELD_WHITELIST;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!allowed.has(k)) continue;
+    if (PATCH_FORBIDDEN_TYPE_FIELD_KEYS.has(k)) continue;
+    if (/raw|snapshot|provider|debug|meta|image_url|prompt_snapshot/i.test(k)) continue;
+    const cleaned = sanitizeJsonSafe(v);
+    if (cleaned !== undefined) out[k] = cleaned;
+  }
+  if (typeof out.label !== 'string') out.label = '';
+  if (typeof out.asset_role !== 'string') out.asset_role = String(out.asset_role ?? '');
+  if (typeof out.story_usage !== 'string') out.story_usage = String(out.story_usage ?? '');
+  if (typeof out.story_function !== 'string') out.story_function = String(out.story_function ?? '');
+  if (kind === 'scene') {
+    if (typeof out.scene_role !== 'string') out.scene_role = String(out.scene_role ?? '');
+    if (!Array.isArray(out.props)) out.props = listFromUnknown(out.props);
+    out.props = (out.props as unknown[]).map((x) => String(x)).filter(Boolean);
+    if (typeof out.lighting !== 'string') out.lighting = String(out.lighting ?? '');
+    if (typeof out.atmosphere !== 'string') out.atmosphere = String(out.atmosphere ?? '');
+  }
+  if (kind === 'product') {
+    if (typeof out.product_role !== 'string') out.product_role = String(out.product_role ?? '');
+    if (!Array.isArray(out.visual_features)) out.visual_features = listFromUnknown(out.visual_features);
+    out.visual_features = (out.visual_features as unknown[]).map((x) => String(x)).filter(Boolean);
+    if (!Array.isArray(out.immutable_structure_constraints)) {
+      out.immutable_structure_constraints = listFromUnknown(out.immutable_structure_constraints);
+    } else {
+      out.immutable_structure_constraints = (out.immutable_structure_constraints as unknown[]).map((x) => String(x)).filter(Boolean);
+    }
+  }
+  return out;
+}
+
+function sanitizePatchPayload(body: {
+  project_id: number;
+  name?: string;
+  description?: string;
+  tags?: string[];
+  base_prompt?: string;
+  type_fields?: Record<string, unknown>;
+}) {
+  const out: {
+    project_id: number;
+    name?: string;
+    description?: string;
+    tags?: string[];
+    base_prompt?: string;
+    type_fields?: Record<string, unknown>;
+  } = { project_id: body.project_id };
+  if (typeof body.name === 'string') out.name = body.name.trim();
+  if (typeof body.description === 'string') out.description = body.description.trim();
+  if (Array.isArray(body.tags)) {
+    const tags = body.tags.map((x) => String(x).trim()).filter(Boolean);
+    if (tags.length) out.tags = tags;
+  }
+  if (typeof body.base_prompt === 'string') out.base_prompt = body.base_prompt.trim();
+  if (body.type_fields && isPlainObject(body.type_fields)) {
+    const cleaned = sanitizeJsonSafe(body.type_fields);
+    if (cleaned && isPlainObject(cleaned)) out.type_fields = cleaned;
+  }
+  if (!out.base_prompt) out.base_prompt = out.description || '';
+  return out;
+}
+
+function logPatchFailure(tag: '[S3_PATCH_SAVE_FAILED]' | '[S3_PATCH_REGENERATE_FAILED]', assetId: number, payload: unknown, error: unknown) {
+  const e = error as { name?: unknown; message?: unknown; status?: unknown; detail?: unknown; response?: unknown };
+  console.error(tag, {
+    asset_id: assetId,
+    payload_json: JSON.stringify(payload, null, 2),
+    error_name: typeof e?.name === 'string' ? e.name : undefined,
+    error_message: typeof e?.message === 'string' ? e.message : String(error),
+    error_status: e?.status,
+    error_detail: e?.detail,
+    error_response: e?.response,
+  });
+}
+
+function buildAssetPromptFromCurrentData(detail: AssetInteractionEntity, payload: AssetEditorPayload): string {
+  const name = cleanBusinessText(payload.name || detail.name || '');
+  const role = cleanBusinessText(payload.typeLabel || detail.typeLabel || '');
+  const description = cleanBusinessText(payload.description || detail.description || '');
+  const storyUsage = cleanBusinessText(payload.storyUsage || detail.narrativeFunctionLabel || detail.productUsage || '');
+  const visualFeatures = uniqList(listFromUnknown(payload.visualFeatures)).slice(0, 6);
+  const immutable = uniqList(listFromUnknown(payload.immutableStructure || payload.consistencyRequirements)).slice(0, 4);
+
+  if (detail.kind === 'character') {
+    const appearance = cleanBusinessText(payload.description || '');
+    return cleanBusinessText(
+      [
+        '干净的人物设定参考图，人物居中，纯白或浅灰背景',
+        name ? `${name}，${role || '角色设定'}` : `${role || '角色设定'}`,
+        appearance || description || '自然真实的人物外观与穿搭',
+        storyUsage || '用于承载剧情人物状态表达',
+        '后续镜头保持年龄感、脸型、发型、身形和服装风格一致',
+        '真实广告片质感，自然光，9:16竖构图',
+      ].join('。'),
+    );
+  }
+
+  if (detail.kind === 'scene') {
+    const sceneDetails = joinParts([
+      name || role,
+      description,
+    ]);
+    return cleanBusinessText(
+      [
+        '干净的场景设定参考图，不包含人物',
+        sceneDetails || name || role || '生活化空间场景',
+        storyUsage || '用于承载剧情环境与动作背景',
+        '后续镜头保持空间布局、光线、色调和生活质感一致',
+        '真实广告片质感，自然光，9:16竖构图',
+      ].join('。'),
+    );
+  }
+
+  const productDetails = joinParts([
+    role,
+    description,
+    visualFeatures.join('、'),
+  ]);
+  const immutableText = immutable.length ? `后续镜头保持${immutable.join('、')}一致` : '后续镜头保持包装、结构、颜色、材质和关键识别特征一致';
+  return cleanBusinessText(
+    [
+      '干净的产品设定参考图，产品居中展示，简洁白底或浅灰背景',
+      name || '产品主体',
+      productDetails || '产品外观识别信息清晰可读',
+      storyUsage || '用于后续短剧中的产品展示镜头',
+      immutableText,
+      '真实产品摄影质感，自然柔和光线，9:16竖构图',
+    ].join('。'),
+  );
+}
+
 function sanitizeAssetName(input: string): string {
   const blocked = new Set(['新增角色', '添加角色', '新增场景', '添加场景', '新增产品', '添加产品']);
   const trimmed = input.trim();
@@ -205,6 +474,7 @@ export function ShortDramaAssetsPage() {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [addPending, setAddPending] = useState<{ tab: TabType; mode: AddMode } | null>(null);
   const [working, setWorking] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [autoPhase, setAutoPhase] = useState<Step3AutoPhase>('idle');
   const [, setAutoHint] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<string>('');
@@ -731,7 +1001,7 @@ export function ShortDramaAssetsPage() {
       <AssetInteractionModal
         asset={detail}
         saving={working}
-        regenerating={false}
+        regenerating={regenerating}
         onClose={() => setDetail(null)}
         onSaveNormalField={async (field: AssetNormalFieldKey, payload: AssetEditorPayload) => {
           if (!effectiveProjectId || !detail) return;
@@ -755,26 +1025,52 @@ export function ShortDramaAssetsPage() {
           try {
             const latest = await getShortDramaAssetLibraryDetail(effectiveProjectId, detail.id);
             const tf = { ...((latest.extra?.type_fields ?? {}) as Record<string, unknown>) };
-            if (detail.kind === 'character') tf.personality = payload.voiceStyle ?? '';
-            if (detail.kind === 'product') tf.usage_mode = payload.productUsage ?? '';
-            tf.label = payload.typeLabel;
-            await updateShortDramaAssetLibrary(detail.id, {
-              project_id: effectiveProjectId,
-              name: payload.name,
-              description: payload.description,
-              base_prompt: payload.prompt,
-              tags: [payload.typeLabel],
-              type_fields: tf,
+            tf.image_description = payload.description ?? '';
+            const regeneratedPrompt = buildAssetPromptFromCurrentData(detail, payload);
+            const safeTypeFields = sanitizeTypeFields(tf, detail.kind);
+            const patchPayload = sanitizePatchPayload({
+              project_id: Number(effectiveProjectId),
+              name: String(payload.name || ''),
+              description: String(payload.description || ''),
+              base_prompt: String(regeneratedPrompt || payload.description || ''),
+              type_fields: safeTypeFields,
             });
+            try {
+              await updateShortDramaAssetLibrary(detail.id, patchPayload);
+            } catch (e) {
+              logPatchFailure('[S3_PATCH_SAVE_FAILED]', detail.id, patchPayload, e);
+              throw e;
+            }
             await reload();
             await openDetail(detail.id);
+          } catch (e) {
+            window.alert('保存失败，请稍后重试。');
           } finally { setWorking(false); }
         }}
         onRegeneratePrompt={async (payload: AssetEditorPayload) => {
           if (!effectiveProjectId || !detail) return;
-          await updateShortDramaAssetLibrary(detail.id, { project_id: effectiveProjectId, base_prompt: payload.prompt });
-          await regenerateShortDramaAssetLibrary({ project_id: effectiveProjectId, asset_id: detail.id, generate_count: 1, reuse_reference_images: true });
-          await reload(); await openDetail(detail.id);
+          setRegenerating(true);
+          try {
+            await regenerateShortDramaAssetLibrary({
+              project_id: effectiveProjectId,
+              asset_id: detail.id,
+              generate_count: 1,
+              reuse_reference_images: true,
+              image_description_override: String(payload.description || ''),
+            });
+            await reload();
+            await openDetail(detail.id);
+          } catch (e) {
+            console.error('[S3_REGENERATE_FAILED]', {
+              asset_id: detail.id,
+              image_description_override: String(payload.description || ''),
+              error_name: e instanceof Error ? e.name : undefined,
+              error_message: e instanceof Error ? e.message : String(e),
+            });
+            window.alert('重生成失败，请稍后重试。');
+          } finally {
+            setRegenerating(false);
+          }
         }}
         onSelectImage={(imageId) => setDetail((prev) => (prev ? { ...prev, selectedImageId: imageId, imageUrl: prev.images?.find((x) => x.id === imageId)?.imageUrl ?? prev.imageUrl } : prev))}
         onAddImage={() => {

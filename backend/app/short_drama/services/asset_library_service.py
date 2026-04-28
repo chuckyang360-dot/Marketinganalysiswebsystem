@@ -58,19 +58,24 @@ class AssetLibraryService:
         return project
 
     def _build_prompt(self, asset: AssetEntity, variant_hint: str | None = None) -> str:
+        base_prompt = (asset.base_prompt or "").strip()
         raw_input = {
             "asset_type": asset.asset_type,
             "name": (asset.name or "").strip(),
             "description": (asset.description or "").strip(),
-            "base_prompt": (asset.base_prompt or "").strip(),
+            "base_prompt": base_prompt,
             "variant_hint": (variant_hint or "").strip(),
         }
-        clean_prompt = build_visual_prompt(
-            {
-                "asset_type": asset.asset_type,
-                "name": raw_input["name"],
-                "description": raw_input["description"],
-            }
+        clean_prompt = (
+            base_prompt
+            if base_prompt
+            else build_visual_prompt(
+                {
+                    "asset_type": asset.asset_type,
+                    "name": raw_input["name"],
+                    "description": raw_input["description"],
+                }
+            )
         )
         if variant_hint:
             clean_prompt = f"{clean_prompt}, alternate angle: {variant_hint}"
@@ -799,6 +804,16 @@ class AssetLibraryService:
         )
         if not asset:
             raise ValueError("Asset not found")
+        desc_override = str(getattr(body, "image_description_override", "") or "").strip()
+        if desc_override:
+            asset.description = desc_override
+            asset.base_prompt = desc_override
+            extra = dict(asset.extra_json or {})
+            tf = dict(extra.get("type_fields") or {})
+            tf["image_description"] = desc_override
+            extra["type_fields"] = tf
+            asset.extra_json = extra
+            db.add(asset)
         current = self._active_images(db, asset.id)
         room = MAX_ASSET_IMAGES - len(current)
         if room <= 0:
@@ -822,10 +837,11 @@ class AssetLibraryService:
                     status="active",
                 )
             )
+        latest_generated_id: int | None = None
         for i in range(count):
             variant_hint = (body.variant_directions[i % max(1, len(body.variant_directions))] if body.variant_directions else f"regen-{len(current) + i + 1}")
             prompt = self._build_prompt(asset, variant_hint)
-            self._persist_generated_image(
+            image = self._persist_generated_image(
                 db,
                 project_id=body.project_id,
                 asset=asset,
@@ -833,6 +849,10 @@ class AssetLibraryService:
                 variant_label=f"{variant_hint}",
                 variant_meta={"direction": variant_hint, "regenerated": True},
             )
+            latest_generated_id = int(image.id) if isinstance(image.id, int) else latest_generated_id
+        if latest_generated_id is not None:
+            asset.cover_image_id = latest_generated_id
+            db.add(asset)
         self._ensure_cover(db, asset)
         return asset
 

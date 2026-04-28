@@ -417,6 +417,32 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                             seg_meta["original_error_type"] = type(e).__name__
                             segments.append(seg.model_copy(update={"meta": seg_meta}))
                     else:
+                        shot_plan = blueprint.shot_plan if isinstance(blueprint.shot_plan, dict) else {}
+                        shot_plan_segments = shot_plan.get("segments") if isinstance(shot_plan.get("segments"), list) else []
+                        segment_plan = blueprint.segment_plan if isinstance(blueprint.segment_plan, list) else []
+                        fallback_reason = "unknown"
+                        if not shot_plan:
+                            fallback_reason = "shot_plan_missing"
+                        elif not shot_plan_segments:
+                            fallback_reason = "shot_plan_segments_missing"
+                        elif any(
+                            not isinstance(seg, dict) or not isinstance(seg.get("shots"), list) or len(seg.get("shots") or []) == 0
+                            for seg in shot_plan_segments
+                        ):
+                            fallback_reason = "shot_plan_segments_empty_or_invalid"
+                        elif not segment_plan:
+                            fallback_reason = "segment_plan_missing"
+                        logger.warning(
+                            "[S4_SEGMENT_GENERATION_FALLBACK_FAILED] %s",
+                            {
+                                "project_id": body.project_id,
+                                "has_story_blueprint": bool(sb_row and sb_row.blueprint_json),
+                                "has_shot_plan": bool(shot_plan),
+                                "has_segment_plan": bool(segment_plan),
+                                "fallback_segments_count": 0,
+                                "reason": fallback_reason,
+                            },
+                        )
                         raise
             shot_count = sum(len(s.shots) for s in segments)
             story_framework = blueprint.story_framework if isinstance(blueprint.story_framework, dict) else {}

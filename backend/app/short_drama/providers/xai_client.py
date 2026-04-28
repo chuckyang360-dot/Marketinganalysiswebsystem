@@ -25,7 +25,7 @@ def effective_xai_base_url() -> str:
     return base.rstrip("/")
 
 
-_DEFAULT_XAI_TEXT_MODEL = "grok-4.1-fast-non-reasoning"
+_DEFAULT_XAI_TEXT_MODEL = "grok-4.20"
 
 
 def effective_xai_text_model() -> str:
@@ -173,7 +173,11 @@ class XAIClient:
     ):
         self._api_key = api_key if api_key is not None else settings.XAI_API_KEY
         self._base_url = (base_url or effective_xai_base_url()).rstrip("/")
-        self._timeout = float(timeout_seconds if timeout_seconds is not None else settings.XAI_TIMEOUT_SECONDS)
+        self._timeout = float(
+            timeout_seconds
+            if timeout_seconds is not None
+            else settings.SHORT_DRAMA_XAI_TEXT_TIMEOUT_SECONDS
+        )
 
     def post_responses(
         self,
@@ -224,6 +228,7 @@ class XAIClient:
             provider=prov,
             model=model,
             **extra_ctx,
+            timeout_seconds=self._timeout,
             system_prompt_len=len(system_prompt),
             user_content_kind=ukind,
             user_content_len=ulen,
@@ -332,4 +337,6 @@ class XAIClient:
             error=f"exhausted_retries: {last_err}",
             **extra_ctx,
         )
+        if isinstance(last_err, httpx.TimeoutException):
+            raise ShortDramaProviderError("short_drama_provider_timeout")
         raise ShortDramaProviderError(f"xAI request failed after retries: {last_err}")

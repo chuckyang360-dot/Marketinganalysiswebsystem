@@ -90,6 +90,29 @@ _COMMUTE_LOCATION_CANDIDATES = (
     "urban commute street",
 )
 
+_CHARACTER_SINGLE_PERSON_REQUIRED = [
+    "one single person only",
+    "one character reference image",
+    "single subject centered",
+    "full body or half body portrait",
+    "no multiple people",
+    "no group photo",
+    "no collage",
+    "no grid",
+    "no contact sheet",
+    "no lineup",
+    "no moodboard",
+    "no character sheet with multiple variants",
+]
+
+_CHARACTER_GROUP_AMBIGUOUS_TERMS = (
+    "diverse",
+    "multiple ethnicities",
+    "group",
+    "diverse group",
+    "多元族裔",
+)
+
 
 def _market_is_china(value: str | None) -> bool:
     v = str(value or "").strip().lower()
@@ -429,13 +452,24 @@ def _character_prompt_blueprint(
     negative: list[str],
 ) -> str:
     prompt = row.visual_prompt or row.description or ""
+    low_prompt = prompt.lower()
+    if any(token in low_prompt for token in _CHARACTER_GROUP_AMBIGUOUS_TERMS):
+        prompt = re.sub(r"\bdiverse group\b", "single character with natural urban appearance", prompt, flags=re.IGNORECASE)
+        prompt = re.sub(r"\bdiverse\b", "single character with natural urban appearance", prompt, flags=re.IGNORECASE)
+        prompt = re.sub(r"\bgroup\b", "single character with natural urban appearance", prompt, flags=re.IGNORECASE)
+        prompt = re.sub(r"\bmultiple ethnicities\b", "single character with natural urban appearance", prompt, flags=re.IGNORECASE)
+        prompt = prompt.replace("多元族裔", "单一人物，具有自然真实的都市年轻人特征")
     details = [
         prompt,
         "市场语境：" + "；".join(market_terms) if market_terms else "",
         f"视觉风格约束：{style_terms}" if style_terms else "",
         "禁止项：" + "、".join(list(dict.fromkeys(negative))) if negative else "",
     ]
-    return _clean_ws("。".join([x for x in details if x]))
+    combined = _clean_ws("。".join([x for x in details if x]))
+    missing = [rule for rule in _CHARACTER_SINGLE_PERSON_REQUIRED if rule.lower() not in combined.lower()]
+    if missing:
+        combined = _clean_ws(f"{combined}。{'；'.join(missing)}")
+    return combined
 
 
 def _scene_prompt_blueprint(

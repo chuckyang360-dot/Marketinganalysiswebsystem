@@ -210,6 +210,7 @@ class RegenerateAssetRequest(BaseModel):
     reference_images: List[Dict[str, str]] = Field(default_factory=list)
     generate_count: int = 1
     variant_directions: List[str] = Field(default_factory=list)
+    image_description_override: Optional[str] = None
 
 
 class AppendUploadedImagesRequest(BaseModel):

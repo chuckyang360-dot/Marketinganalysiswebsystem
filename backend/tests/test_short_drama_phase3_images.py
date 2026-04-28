@@ -233,5 +233,90 @@ class TestPipelineWithImages(unittest.TestCase):
             self.assertEqual(pipe.json()["project"]["status"], "assets_ready")
 
 
+class TestAssetLibraryRegeneratePrompt(unittest.TestCase):
+    def test_regenerate_uses_base_prompt_and_updates_cover(self):
+        from types import SimpleNamespace
+
+        from app.database import SessionLocal
+        from app.models import User
+        from app.short_drama.models import AssetEntity, ShortDramaProject
+        from app.short_drama.providers.generated_image import GeneratedImage
+        from app.short_drama.services.asset_library_service import AssetLibraryService
+        from app.short_drama.utils import image_storage
+
+        class _FakeProvider:
+            def __init__(self):
+                self.calls: list[dict] = []
+
+            def generate_from_text(self, **kwargs):
+                self.calls.append(kwargs)
+                return GeneratedImage(
+                    data=b"fakepng",
+                    mime_type="image/png",
+                    provider="fake",
+                    model="fake-model",
+                    meta={"ok": True},
+                )
+
+            def capabilities(self):
+                return {"provider_id": "fake-provider"}
+
+        db: Session = SessionLocal()
+        try:
+            with patch.object(image_storage, "short_drama_generated_root") as mock_root:
+                tmp = Path(__file__).resolve().parent / "_sd_library_regen_out"
+                tmp.mkdir(parents=True, exist_ok=True)
+                mock_root.return_value = tmp
+                u = db.query(User).first()
+                if not u:
+                    u = User(
+                        username="sd_p3_library",
+                        name="SD P3 Library",
+                        email="sd_p3_library@test.local",
+                        password_hash="x" * 64,
+                        is_active=True,
+                    )
+                    db.add(u)
+                    db.commit()
+                    db.refresh(u)
+                proj = ShortDramaProject(user_id=u.id, project_name="p3lib", status="assets_ready")
+                db.add(proj)
+                db.commit()
+                db.refresh(proj)
+                asset = AssetEntity(
+                    project_id=proj.id,
+                    asset_type="product",
+                    name="Test Product",
+                    description="desc",
+                    base_prompt="current prompt from modal",
+                    source="user_created",
+                    status="active",
+                    extra_json={"type_fields": {}},
+                )
+                db.add(asset)
+                db.commit()
+                db.refresh(asset)
+
+                svc = AssetLibraryService()
+                fake = _FakeProvider()
+                svc._provider = fake
+                body = SimpleNamespace(
+                    project_id=proj.id,
+                    asset_id=asset.id,
+                    generate_count=1,
+                    reuse_reference_images=True,
+                    reference_images=[],
+                    variant_directions=[],
+                )
+                out = svc.regenerate_asset_images(db, body)
+                db.commit()
+                db.refresh(out)
+                self.assertTrue(fake.calls)
+                self.assertIn("current prompt from modal", fake.calls[0]["prompt"])
+                self.assertIsNotNone(out.cover_image_id)
+        finally:
+            db.close()
+
+
 if __name__ == "__main__":
     unittest.main()
