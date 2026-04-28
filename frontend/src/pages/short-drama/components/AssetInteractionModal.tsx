@@ -46,6 +46,7 @@ type Props = {
   onRegeneratePrompt: (payload: AssetEditorPayload) => Promise<void>;
   onSelectImage?: (imageId: number) => void;
   onAddImage?: () => void;
+  onPromptDirtyChange?: (dirty: boolean) => void;
 };
 
 function formatDisplayValue(value: unknown, fallback = '—'): string {
@@ -161,6 +162,7 @@ export function AssetInteractionModal({
   onRegeneratePrompt,
   onSelectImage,
   onAddImage,
+  onPromptDirtyChange,
 }: Props) {
   const [displayDescription, setDisplayDescription] = useState('');
   const [initialPromptDraft, setInitialPromptDraft] = useState('');
@@ -208,6 +210,12 @@ export function AssetInteractionModal({
     return { currentImagePrompt: cleanEditableAssetPrompt(promptDraft) };
   }, [asset, promptDraft]);
 
+  const isDirty = cleanEditableAssetPrompt(promptDraft) !== cleanEditableAssetPrompt(initialPromptDraft);
+
+  useEffect(() => {
+    onPromptDirtyChange?.(isDirty);
+  }, [isDirty, onPromptDirtyChange]);
+
   if (!asset || !payload) return null;
 
   const images = asset.images ?? [];
@@ -236,7 +244,6 @@ export function AssetInteractionModal({
   const providerParamsText = serializeDebugValue(asset.rawSnapshot?.provider_params);
   const typeFieldsText = serializeDebugValue(asset.typeFields);
   const debugMetaText = serializeDebugValue(asset.rawSnapshot?.meta ?? asset.rawSnapshot);
-  const isDirty = cleanEditableAssetPrompt(promptDraft) !== cleanEditableAssetPrompt(initialPromptDraft);
 
   const valueTextClass = 'mt-1 text-[13px] leading-relaxed text-[#444444] whitespace-pre-wrap break-words';
 
