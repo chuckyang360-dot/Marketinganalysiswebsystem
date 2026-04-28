@@ -199,43 +199,30 @@ function AssetDetailModal({
   onClose: () => void;
 }) {
   const { kind, item } = detail;
-  const rows =
+  const isDev = import.meta.env.DEV;
+  const positionLabel =
     kind === "character"
-      ? [
-          ["名称", item.name],
-          ["角色定位", "role" in item ? item.role : "—"],
-          ["描述", "desc" in item ? item.desc || "—" : "—"],
-          ["外观", getMetaText(item, ["appearance"])],
-          ["服装", getMetaText(item, ["costume", "clothing"])],
-          ["基础表情", getMetaText(item, ["base_expression", "expression"])],
-          ["剧情用途", getMetaText(item, ["story_usage"])],
-          ["音色", "voice" in item ? item.voice : getMetaText(item, ["voice_profile", "voice_style", "voice"])],
-          ["结构摘要信息", getMetaText(item, ["structure_summary"], "暂无结构摘要")],
-          ["图片来源", "imageSource" in item ? item.imageSource : "—"],
-        ]
+      ? "角色定位"
       : kind === "scene"
-        ? [
-            ["名称", item.name],
-            ["场景定位", sceneMetaText(item, ["scene_form"], "未标注")],
-            ["地点/空间", sceneMetaText(item, ["location", "space", "place"], "未标注")],
-            ["描述", "desc" in item ? item.desc || "暂无描述" : "暂无描述"],
-            ["灯光", sceneMetaText(item, ["lighting", "light"], "暂无描述")],
-            ["氛围", sceneMetaText(item, ["mood", "atmosphere"], "暂无描述")],
-            ["道具", sceneMetaText(item, ["props", "key_props"], "暂无描述")],
-            ["剧情用途", sceneMetaText(item, ["story_usage"], "暂无描述")],
-            ["结构摘要信息", getMetaText(item, ["structure_summary"], "暂无结构摘要")],
-            ["图片来源", "imageSource" in item ? item.imageSource : "—"],
-          ]
-        : [
-            ["名称", item.name],
-            ["产品定位", "type" in item ? item.type : "—"],
-            ["描述", "desc" in item ? item.desc || "—" : "—"],
-            ["形态/材质/特征", getMetaText(item, ["form", "material", "color", "visual_features"])],
-            ["产品使用方式", getMetaText(item, ["product_usage", "usage_mode", "placement", "shot_use"])],
-            ["剧情用途", getMetaText(item, ["story_usage"])],
-            ["结构摘要信息", getMetaText(item, ["structure_summary"], "暂无结构摘要")],
-            ["图片来源", "imageSource" in item ? item.imageSource : "—"],
-          ];
+        ? "场景定位"
+        : kind === "product"
+          ? "商品定位"
+          : "定位";
+  const positionValue =
+    kind === "character"
+      ? ("role" in item ? item.role : "角色")
+      : "type" in item && item.type
+        ? item.type
+        : kind === "scene"
+          ? "场景"
+          : "产品";
+  const rows = [
+    ["名称", item.name || "—"],
+    [positionLabel, positionValue || "—"],
+    ["画面说明", ("desc" in item ? item.desc : "") || "—"],
+    ["重新生成描述", ("visualPrompt" in item ? item.visualPrompt : "") || "—"],
+    ["图片来源", "imageSource" in item ? item.imageSource || "—" : "—"],
+  ] as const;
 
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center px-4" style={{ background: "rgba(0,0,0,0.42)" }} onClick={onClose}>
@@ -264,10 +251,23 @@ function AssetDetailModal({
                 <p className="text-[12.5px] leading-relaxed whitespace-pre-wrap" style={{ color: "#444444" }}>{value || "—"}</p>
               </div>
             ))}
-            {"visualPrompt" in item && item.visualPrompt ? (
+            {isDev ? (
               <details className="rounded-lg px-3 py-2" style={{ background: "#F7F8FA", border: "1px solid #EAEAEA" }}>
-                <summary className="cursor-pointer text-[11px] font-semibold" style={{ color: "#6E6E73" }}>结构 Prompt</summary>
-                <p className="mt-2 text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: "#444444" }}>{item.visualPrompt}</p>
+                <summary className="cursor-pointer text-[11px] font-semibold" style={{ color: "#6E6E73" }}>开发调试信息</summary>
+                <div className="mt-2 space-y-2">
+                  <p className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: "#444444" }}>
+                    外观：{getMetaText(item, ["appearance"], "—")}
+                  </p>
+                  <p className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: "#444444" }}>
+                    服装：{getMetaText(item, ["costume", "clothing"], "—")}
+                  </p>
+                  <p className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: "#444444" }}>
+                    结构摘要：{getMetaText(item, ["structure_summary"], "—")}
+                  </p>
+                  <p className="text-[11px] leading-relaxed whitespace-pre-wrap" style={{ color: "#444444" }}>
+                    剧情用途：{sceneMetaText(item, ["story_usage"], "—")}
+                  </p>
+                </div>
               </details>
             ) : null}
           </div>

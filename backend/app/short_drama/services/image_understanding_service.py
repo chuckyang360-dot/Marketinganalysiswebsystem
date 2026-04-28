@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import logging
 import json
+import re
 from typing import Any
 
 from ...config import settings
 from ..providers.xai_text_provider import XAITextProvider, get_xai_text_provider
 from ..schemas.product import ProductImageUnderstandingSchema, ProductRawInputSchema
-from ..utils.prompts import PRODUCT_IMAGE_UNDERSTANDING_SYSTEM_PROMPT
+from ..utils.prompts import (
+    ASSET_CREATE_FROM_IMAGE_SYSTEM_PROMPT,
+    ASSET_REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
+    PRODUCT_IMAGE_UNDERSTANDING_SYSTEM_PROMPT,
+)
 
 logger = logging.getLogger(__name__)
+SUPPORTED_IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_DATA_URL_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,", re.IGNORECASE)
 
 _S1_IMAGE_UNDERSTANDING_LIST_FIELDS = (
     "detected_visual_features",
@@ -97,6 +104,27 @@ def _build_s1_image_understanding_text_payload(raw_input: ProductRawInputSchema)
     }
 
 
+def validate_supported_image_data_url(image_data_url: str) -> str:
+    text = str(image_data_url or "").strip()
+    if not text:
+        raise ValueError("Unsupported image format. Please upload JPG, PNG, or WebP.")
+    match = _DATA_URL_RE.match(text)
+    if not match:
+        raise ValueError("Unsupported image format. Please upload JPG, PNG, or WebP.")
+    mime = str(match.group(1) or "").lower()
+    if mime not in SUPPORTED_IMAGE_MIME_TYPES:
+        raise ValueError("Unsupported image format. Please upload JPG, PNG, or WebP.")
+    return mime
+
+
+def _as_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _safe_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 class ProductImageUnderstandingService:
     def __init__(self, text_provider: XAITextProvider | None = None):
         self._text = text_provider or get_xai_text_provider()
@@ -159,4 +187,78 @@ class ProductImageUnderstandingService:
         return out
 
 
+class AssetImageUnderstandingService:
+    def __init__(self, text_provider: XAITextProvider | None = None):
+        self._text = text_provider or get_xai_text_provider()
+
+    def analyze_reference_image(
+        self,
+        *,
+        project_id: int,
+        image_data_url: str,
+        asset_context: dict[str, Any],
+        project_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        validate_supported_image_data_url(image_data_url)
+        payload = {
+            "project_id": project_id,
+            "mode": "existing_asset_reference_analysis",
+            "asset_context": asset_context,
+            "project_context": project_context,
+        }
+        data = self._text.generate_structured_json(
+            project_id=project_id,
+            service_name="asset_reference_image_analysis",
+            system_prompt=ASSET_REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT,
+            user_payload=payload,
+            image_urls=[image_data_url],
+            expected_schema_name="AssetReferenceImageAnalysis",
+            stage="ASSET_REFERENCE_IMAGE_ANALYSIS",
+        )
+        return {
+            "is_same_asset": bool(data.get("is_same_asset", True)),
+            "visual_description": _as_text(data.get("visual_description")),
+            "image_prompt": _as_text(data.get("image_prompt")),
+            "change_summary": _as_text(data.get("change_summary")),
+        }
+
+    def create_asset_from_image(
+        self,
+        *,
+        project_id: int,
+        asset_type: str,
+        image_data_url: str,
+        optional_name: str | None,
+        project_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        validate_supported_image_data_url(image_data_url)
+        normalized_type = _as_text(asset_type).lower()
+        payload = {
+            "project_id": project_id,
+            "mode": "create_asset_from_image",
+            "asset_type": normalized_type,
+            "optional_name": _as_text(optional_name),
+            "project_context": project_context,
+        }
+        data = self._text.generate_structured_json(
+            project_id=project_id,
+            service_name="asset_create_from_image",
+            system_prompt=ASSET_CREATE_FROM_IMAGE_SYSTEM_PROMPT,
+            user_payload=payload,
+            image_urls=[image_data_url],
+            expected_schema_name="AssetCreateFromImage",
+            stage="ASSET_CREATE_FROM_IMAGE",
+        )
+        out = _safe_dict(data)
+        result_type = _as_text(out.get("asset_type")).lower() or normalized_type
+        return {
+            "asset_type": result_type if result_type in {"character", "scene", "product"} else normalized_type,
+            "name": _as_text(out.get("name")),
+            "position": _as_text(out.get("position")),
+            "visual_description": _as_text(out.get("visual_description")),
+            "image_prompt": _as_text(out.get("image_prompt")),
+        }
+
+
 product_image_understanding_service = ProductImageUnderstandingService()
+asset_image_understanding_service = AssetImageUnderstandingService()

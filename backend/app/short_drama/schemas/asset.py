@@ -10,6 +10,7 @@ class CharacterAssetSchema(BaseModel):
     role_type: str
     description: Optional[str] = None
     business_profile: Dict[str, Any] = Field(default_factory=dict)
+    image_prompt: Optional[str] = None
     visual_prompt: Optional[str] = None
     technical_constraints: Dict[str, Any] = Field(default_factory=dict)
     image_url: Optional[str] = None
@@ -30,6 +31,7 @@ class SceneAssetSchema(BaseModel):
     scene_form: Optional[str] = None
     description: Optional[str] = None
     business_profile: Dict[str, Any] = Field(default_factory=dict)
+    image_prompt: Optional[str] = None
     visual_prompt: Optional[str] = None
     technical_constraints: Dict[str, Any] = Field(default_factory=dict)
     image_url: Optional[str] = None
@@ -49,6 +51,7 @@ class ProductAssetSchema(BaseModel):
     product_role: Optional[str] = None
     description: Optional[str] = None
     business_profile: Dict[str, Any] = Field(default_factory=dict)
+    image_prompt: Optional[str] = None
     visual_prompt: Optional[str] = None
     technical_constraints: Dict[str, Any] = Field(default_factory=dict)
     immutable_structure_constraints: List[str] = Field(default_factory=list)
@@ -211,11 +214,30 @@ class RegenerateAssetRequest(BaseModel):
     generate_count: int = 1
     variant_directions: List[str] = Field(default_factory=list)
     image_description_override: Optional[str] = None
+    current_image_prompt: Optional[str] = None
+    base_prompt: Optional[str] = None
 
 
 class AppendUploadedImagesRequest(BaseModel):
     project_id: int
     uploaded_images: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class AnalyzeAssetReferenceImageRequest(BaseModel):
+    project_id: int
+    image: str
+
+
+class AnalyzeAssetReferenceImageResponse(BaseModel):
+    asset: AssetDetailSchema
+    warning: Optional[str] = None
+
+
+class CreateAssetFromImageRequest(BaseModel):
+    project_id: int
+    asset_type: str
+    image: str
+    optional_name: Optional[str] = None
 
 
 class UpdateAssetMetaRequest(BaseModel):

@@ -20,6 +20,9 @@ import type {
   RegenerateOneAssetImageResponseDto,
   AssetLibraryItemDto,
   AssetLibraryListResponseDto,
+  AnalyzeAssetReferenceImageBody,
+  AnalyzeAssetReferenceImageResponseDto,
+  CreateAssetFromImageBody,
   CreateAssetLibraryBody,
   ShortDramaProjectDto,
   ShortDramaProjectListResponseDto,
@@ -312,6 +315,8 @@ export async function regenerateShortDramaAssetLibrary(body: {
   generate_count?: number;
   variant_directions?: string[];
   image_description_override?: string;
+  current_image_prompt?: string;
+  base_prompt?: string;
 }): Promise<AssetLibraryItemDto> {
   return sdFetchJson<AssetLibraryItemDto>('/api/short-drama/assets/specs/library/regenerate', {
     method: 'POST',
@@ -324,6 +329,25 @@ export async function appendShortDramaAssetUploadedImages(
   body: { project_id: number; uploaded_images: { file_url: string; file_name?: string }[] },
 ): Promise<AssetLibraryItemDto> {
   return sdFetchJson<AssetLibraryItemDto>(`/api/short-drama/assets/specs/library/${assetId}/uploaded-images`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function analyzeShortDramaAssetReferenceImage(
+  assetId: number,
+  body: AnalyzeAssetReferenceImageBody,
+): Promise<AnalyzeAssetReferenceImageResponseDto> {
+  return sdFetchJson<AnalyzeAssetReferenceImageResponseDto>(`/api/short-drama/assets/specs/library/${assetId}/reference-image/analyze`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createShortDramaAssetFromImage(
+  body: CreateAssetFromImageBody,
+): Promise<AssetLibraryItemDto> {
+  return sdFetchJson<AssetLibraryItemDto>('/api/short-drama/assets/specs/library/create-from-image', {
     method: 'POST',
     body: JSON.stringify(body),
   });

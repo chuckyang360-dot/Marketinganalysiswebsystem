@@ -417,21 +417,22 @@ def _budgeted_segment_prompt(segment: SegmentScriptSchema, *, aspect_ratio: str)
 
 def _duration_for_segment(segment: SegmentScriptSchema) -> int:
     limit = float(segment.duration_limit or 0.0)
-    if limit > 10.0:
-        raise ShortDramaVideoInputError(
-            f"Segment {segment.segment_id!r} duration_limit {limit}s exceeds 10s (reference-to-video cap)"
-        )
     if limit > 0:
         d = int(round(limit))
     else:
         total = sum(float(_get_shot_value(s, "duration_seconds", 0.0) or 0.0) for s in segment.shots)
         d = int(round(total)) if total > 0 else 6
-    if d > 10:
-        raise ShortDramaVideoInputError(
-            f"Segment {segment.segment_id!r} effective duration {d}s exceeds 10s"
-        )
     if d < 1:
         d = 1
+    if d > 10:
+        logger.warning(
+            "[S4_SEGMENT_DURATION_CLAMPED] segment_id=%s requested_segment_duration=%s provider_max_duration=%s note=%s",
+            segment.segment_id,
+            d,
+            10,
+            "single-segment cap only; full project duration should be achieved by multiple segments + merge",
+        )
+        d = 10
     return min(10, d)
 
 

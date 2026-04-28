@@ -330,9 +330,9 @@ def _segment_count_for_project(total: float, project_config: Dict[str, Any], pro
     if total <= 35:
         low, high = 3, 5
     elif total <= 50:
-        low, high = 4, 6
+        low, high = 5, 7
     else:
-        low, high = (6, 8) if total >= 58 else (5, 8)
+        low, high = 6, 8
     count = low
     if form in {"series", "story", "story_drama"} or style in {"suspense", "emotional", "comedy"}:
         count += 1
@@ -344,16 +344,26 @@ def _segment_count_for_project(total: float, project_config: Dict[str, Any], pro
 
 
 def _segment_durations(total: float, count: int) -> list[float]:
-    if count <= 1:
-        return [round(total, 1)]
-    weights = [1.0] * count
-    weights[0] = 0.85
-    weights[-1] = 0.9
-    if count >= 4:
-        weights[1] = 1.1
-        weights[-2] = 1.05
-    denom = sum(weights)
-    return [round(max(3.0, total * w / denom), 1) for w in weights]
+    total_value = max(1.0, float(total or 0.0))
+    segment_count = max(1, int(count or 1))
+    durations: list[float] = []
+    remaining = total_value
+    for idx in range(segment_count):
+        slots_left = segment_count - idx - 1
+        min_rest = slots_left * 1.0
+        max_rest = slots_left * 10.0
+        ideal = remaining / (slots_left + 1)
+        low = max(1.0, remaining - max_rest)
+        high = min(10.0, remaining - min_rest)
+        value = min(max(ideal, low), high)
+        durations.append(value)
+        remaining -= value
+    rounded = [round(v, 1) for v in durations]
+    delta = round(total_value - sum(rounded), 1)
+    if rounded:
+        adjusted_last = round(min(10.0, max(1.0, rounded[-1] + delta)), 1)
+        rounded[-1] = adjusted_last
+    return rounded
 
 
 def _contains_terms(text: str, terms: tuple[str, ...]) -> bool:
@@ -670,7 +680,11 @@ def _normalize_blueprint_for_execution(
         raise ShortDramaInvalidModelOutputError("S2 provider must output story structure or segment_plan")
     stage_names = stages
     total = float(project_constraints.get("duration_sec") or _duration_budget_seconds(project_config.get("duration")))
-    segment_count = len(blueprint.segment_plan or []) or len(stages)
+    requested_segment_count = len(blueprint.segment_plan or [])
+    desired_segment_count = _segment_count_for_project(total, project_config, product)
+    minimum_provider_safe_count = max(1, int((total + 9.999) // 10))
+    segment_count = max(requested_segment_count, len(stages), desired_segment_count, minimum_provider_safe_count)
+    segment_count = max(1, min(8, segment_count))
     durations = _segment_durations(total, segment_count)
     points = [p for p in product.core_selling_points if p]
     visual_features = [v for v in product.visual_features if v]
@@ -733,6 +747,19 @@ def _normalize_blueprint_for_execution(
             goal = _sanitize_brand_seeding_text(goal, fallback_goal)
         asset_req = list(item.required_assets or item.expected_assets or [])
         placeholder = _safe_segment_placeholder(story_beat)
+        raw_duration = float(item.duration_seconds or item.duration_sec or durations[idx] or 0.0)
+        if raw_duration <= 0:
+            raw_duration = float(durations[idx] or 6.0)
+        normalized_duration = raw_duration
+        if normalized_duration > 10.0:
+            logger.warning(
+                "[S2_SEGMENT_DURATION_CLAMPED] project_id=%s segment_id=%s requested_duration=%s provider_max_duration=%s",
+                project_config.get("project_id"),
+                sid,
+                raw_duration,
+                10.0,
+            )
+            normalized_duration = 10.0
         next_plan.append(
             item.model_copy(
                 update={
@@ -741,8 +768,8 @@ def _normalize_blueprint_for_execution(
                     "title": item.title or placeholder["title"],
                     "segment_title": item.segment_title or item.title or placeholder["title"],
                     "segment_goal": goal or placeholder["goal"],
-                    "duration_seconds": item.duration_seconds or durations[idx],
-                    "duration_sec": item.duration_sec or item.duration_seconds or durations[idx],
+                    "duration_seconds": normalized_duration,
+                    "duration_sec": normalized_duration,
                     "story_beat": story_beat,
                     "segment_role": item.segment_role or story_beat or fallback_goal,
                     "goal": goal or placeholder["goal"],
@@ -761,6 +788,27 @@ def _normalize_blueprint_for_execution(
             )
         )
         mapping[sid] = selling_point
+    actual_total_duration = round(sum(float(x.duration_seconds or 0.0) for x in next_plan), 1)
+    max_segment_duration = round(max((float(x.duration_seconds or 0.0) for x in next_plan), default=0.0), 1)
+    logger.info(
+        "[S2_SEGMENT_DURATION_SUMMARY] project_id=%s target_total_duration=%s actual_total_duration=%s segment_count=%s max_segment_duration=%s requested_segment_count=%s desired_segment_count=%s",
+        project_config.get("project_id"),
+        round(total, 1),
+        actual_total_duration,
+        len(next_plan),
+        max_segment_duration,
+        requested_segment_count,
+        desired_segment_count,
+    )
+    if total > 0 and actual_total_duration < (0.8 * total):
+        logger.warning(
+            "[S2_SEGMENT_DURATION_UNDER_TARGET] project_id=%s target_total_duration=%s actual_total_duration=%s segment_count=%s max_segment_duration=%s",
+            project_config.get("project_id"),
+            round(total, 1),
+            actual_total_duration,
+            len(next_plan),
+            max_segment_duration,
+        )
     scene_goals = dict(blueprint.scene_goals or {})
     for item in next_plan:
         scene_goals[item.segment_id] = scene_goals.get(item.segment_id) or item.goal or item.summary

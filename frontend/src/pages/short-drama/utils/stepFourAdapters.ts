@@ -233,9 +233,12 @@ function resolveDialogueSource(shot: Record<string, unknown>): Step4Shot['dialog
   return 'none';
 }
 
-function imageSourceLabel(img: string | null, anchorId?: number | null): string {
+function imageSourceLabel(img: string | null, anchorId?: number | null, imageType?: string): string {
   if (!img) return '未生成图片';
-  return anchorId ? `视觉锚点 #${anchorId}` : '资产库图片';
+  const t = String(imageType || '').toLowerCase();
+  if (t === 'reference') return '用户参考图';
+  if (t === 'uploaded') return '用户上传';
+  return anchorId ? `系统生成（锚点 #${anchorId}）` : '系统生成';
 }
 
 export function pipelineAssetsToStepFourLibraryVm(
@@ -253,8 +256,12 @@ export function pipelineAssetsToStepFourLibraryVm(
       role: c.role_type?.trim() || '角色',
       desc: displayDesc,
       img: getAssetThumbnailUrl(c),
-      visualPrompt: (pickString(meta, ['image_prompt']) || (c.visual_prompt ?? '')).trim(),
-      imageSource: imageSourceLabel(getAssetThumbnailUrl(c), c.visual_anchor_image_id),
+      visualPrompt: (
+        (c.visual_prompt ?? '') ||
+        pickString(meta, ['image_prompt', 'visual_prompt']) ||
+        (c.description ?? '')
+      ).trim(),
+      imageSource: imageSourceLabel(getAssetThumbnailUrl(c), c.visual_anchor_image_id, pickString(meta, ['cover_image_type', 'image_type'])),
       voice: pickString(meta, ['voice_style', 'voiceStyle', 'voice']) || '未指定',
       meta,
     };
@@ -270,8 +277,12 @@ export function pipelineAssetsToStepFourLibraryVm(
     type: s.scene_type?.trim() || '场景',
     desc: displayDesc,
     img: getAssetThumbnailUrl(s),
-    visualPrompt: (pickString(meta, ['image_prompt']) || (s.visual_prompt ?? '')).trim(),
-    imageSource: imageSourceLabel(getAssetThumbnailUrl(s), s.visual_anchor_image_id),
+    visualPrompt: (
+      (s.visual_prompt ?? '') ||
+      pickString(meta, ['image_prompt', 'visual_prompt']) ||
+      (s.description ?? '')
+    ).trim(),
+    imageSource: imageSourceLabel(getAssetThumbnailUrl(s), s.visual_anchor_image_id, pickString(meta, ['cover_image_type', 'image_type'])),
     sceneForm: s.scene_form,
     meta,
     };
@@ -287,8 +298,12 @@ export function pipelineAssetsToStepFourLibraryVm(
       type: p.product_role?.trim() || pickString(meta, ['product_type', 'productType', 'type']) || '产品',
       desc: displayDesc,
       img: getAssetThumbnailUrl(p),
-      visualPrompt: (pickString(meta, ['image_prompt']) || (p.visual_prompt ?? '')).trim(),
-      imageSource: imageSourceLabel(getAssetThumbnailUrl(p), p.visual_anchor_image_id),
+      visualPrompt: (
+        (p.visual_prompt ?? '') ||
+        pickString(meta, ['image_prompt', 'visual_prompt']) ||
+        (p.description ?? '')
+      ).trim(),
+      imageSource: imageSourceLabel(getAssetThumbnailUrl(p), p.visual_anchor_image_id, pickString(meta, ['cover_image_type', 'image_type'])),
       meta,
     };
   });

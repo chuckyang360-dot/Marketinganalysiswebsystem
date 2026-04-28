@@ -545,3 +545,20 @@ export type CreateAssetLibraryBody = {
   generate_count?: number;
   variant_directions?: string[];
 };
+
+export type AnalyzeAssetReferenceImageBody = {
+  project_id: number;
+  image: string;
+};
+
+export type AnalyzeAssetReferenceImageResponseDto = {
+  asset: AssetLibraryItemDto;
+  warning?: string | null;
+};
+
+export type CreateAssetFromImageBody = {
+  project_id: number;
+  asset_type: 'character' | 'scene' | 'product';
+  image: string;
+  optional_name?: string;
+};

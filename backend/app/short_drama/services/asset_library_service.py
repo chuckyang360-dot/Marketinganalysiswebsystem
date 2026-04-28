@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
@@ -11,6 +12,7 @@ from ..models import (
     AssetImage,
     AssetReferenceImage,
     CharacterAsset,
+    ProductContextRecord,
     ProductAsset,
     SceneAsset,
     SegmentScriptRecord,
@@ -18,7 +20,8 @@ from ..models import (
     StoryBlueprintRecord,
 )
 from ..providers.image_provider_factory import build_short_drama_image_provider
-from ..utils.image_prompts import build_visual_prompt, prepare_image_prompt
+from .image_understanding_service import asset_image_understanding_service, validate_supported_image_data_url
+from ..utils.image_prompts import prepare_image_prompt
 from ..utils.image_storage import mime_to_ext, save_image_bytes
 
 MAX_ASSET_IMAGES = 6
@@ -59,6 +62,17 @@ class AssetLibraryService:
 
     def _build_prompt(self, asset: AssetEntity, variant_hint: str | None = None) -> str:
         base_prompt = (asset.base_prompt or "").strip()
+        extra = dict(asset.extra_json or {})
+        tf = dict(extra.get("type_fields") or {})
+        fallback_prompt = (
+            str(tf.get("image_prompt") or "").strip()
+            or str(tf.get("visual_prompt") or "").strip()
+            or str(asset.description or "").strip()
+        )
+        used_history_fallback = False
+        if not base_prompt and fallback_prompt:
+            base_prompt = fallback_prompt
+            used_history_fallback = True
         raw_input = {
             "asset_type": asset.asset_type,
             "name": (asset.name or "").strip(),
@@ -66,20 +80,18 @@ class AssetLibraryService:
             "base_prompt": base_prompt,
             "variant_hint": (variant_hint or "").strip(),
         }
-        clean_prompt = (
-            base_prompt
-            if base_prompt
-            else build_visual_prompt(
-                {
-                    "asset_type": asset.asset_type,
-                    "name": raw_input["name"],
-                    "description": raw_input["description"],
-                }
-            )
-        )
-        if variant_hint:
-            clean_prompt = f"{clean_prompt}, alternate angle: {variant_hint}"
+        if not base_prompt:
+            raise ValueError("Asset base_prompt is empty; historical fallback also unavailable")
+        clean_prompt = base_prompt
         final_prompt = prepare_image_prompt(clean_prompt)
+        if used_history_fallback:
+            logger.warning(
+                "[ASSET_PROMPT_HISTORY_FALLBACK] project_id=%s asset_id=%s asset_type=%s fallback_source=%s",
+                asset.project_id,
+                asset.id,
+                asset.asset_type,
+                "type_fields.image_prompt/type_fields.visual_prompt/description",
+            )
         if asset.asset_type == "product":
             logger.info(
                 "[PRODUCT_ASSET_GENERATE_PROMPT] project_id=%s asset_id=%s variant_hint=%s clean_prompt=%s final_prompt=%s",
@@ -111,6 +123,21 @@ class AssetLibraryService:
             asset.asset_type,
             asset.name,
             reason,
+        )
+
+    def _persist_data_url_image(self, *, project_id: int, asset_type: str, asset_id: int, image_data_url: str) -> str:
+        mime = validate_supported_image_data_url(image_data_url)
+        try:
+            _, payload = str(image_data_url).split(",", 1)
+            raw = base64.b64decode(payload, validate=False)
+        except Exception as exc:
+            raise ValueError("Invalid image payload") from exc
+        return save_image_bytes(
+            project_id=project_id,
+            asset_type=f"{asset_type}-library-upload",
+            asset_id=asset_id,
+            data=raw,
+            ext=mime_to_ext(mime),
         )
 
     def _persist_generated_image(
@@ -181,7 +208,9 @@ class AssetLibraryService:
             asset.cover_image_id = None
             db.add(asset)
             return
-        cover = next((img for img in images if img.id == asset.cover_image_id), None) or images[0]
+        preferred_images = [img for img in images if str(img.image_type or "").lower() != "reference"]
+        fallback_pool = preferred_images or images
+        cover = next((img for img in images if img.id == asset.cover_image_id), None) or fallback_pool[0]
         for img in images:
             img.is_cover = img.id == cover.id
             db.add(img)
@@ -455,6 +484,46 @@ class AssetLibraryService:
             return "solution"
         return None
 
+    def _project_context_payload(self, db: Session, project_id: int) -> dict[str, Any]:
+        project = self._get_project(db, project_id)
+        product = (
+            db.query(ProductContextRecord)
+            .filter(ProductContextRecord.project_id == project_id)
+            .order_by(ProductContextRecord.version.desc(), ProductContextRecord.id.desc())
+            .first()
+        )
+        blueprint = (
+            db.query(StoryBlueprintRecord)
+            .filter(StoryBlueprintRecord.project_id == project_id)
+            .order_by(StoryBlueprintRecord.version.desc(), StoryBlueprintRecord.id.desc())
+            .first()
+        )
+        segment_rows = (
+            db.query(SegmentScriptRecord)
+            .filter(SegmentScriptRecord.project_id == project_id)
+            .order_by(SegmentScriptRecord.version.desc(), SegmentScriptRecord.id.desc())
+            .limit(8)
+            .all()
+        )
+        return {
+            "s0_project_settings": {
+                "project_name": project.project_name,
+                "creative_intent": project.creative_intent,
+                "creative_brief": project.creative_brief,
+                "visual_style": project.visual_style,
+                "aspect_ratio": project.aspect_ratio,
+                "style": project.style,
+                "target_market": project.target_market,
+                "target_audience": project.target_audience,
+                "marketing_goal": project.marketing_goal,
+                "workflow_language": project.workflow_language,
+                "video_language": project.video_language,
+            },
+            "s1_product_context": product.normalized_context_json if product and isinstance(product.normalized_context_json, dict) else {},
+            "s2_story_blueprint": blueprint.blueprint_json if blueprint and isinstance(blueprint.blueprint_json, dict) else {},
+            "s2_segments": [row.script_json for row in segment_rows if isinstance(row.script_json, dict)],
+        }
+
     def _derive_visual_anchor_image_id(self, db: Session, asset: AssetEntity) -> int | None:
         extra = asset.extra_json if isinstance(asset.extra_json, dict) else {}
         tf = extra.get("type_fields") if isinstance(extra, dict) else {}
@@ -523,6 +592,13 @@ class AssetLibraryService:
             if isinstance(nested_type_fields, dict):
                 normalized_type_fields = _merge_type_fields_preserve_non_empty(normalized_type_fields, nested_type_fields)
             normalized_type_fields = _merge_type_fields_preserve_non_empty(normalized_type_fields, meta_payload)
+            prompt_source = (
+                str(normalized_type_fields.get("image_prompt") or "").strip()
+                or str(normalized_type_fields.get("visual_prompt") or "").strip()
+                or str(prompt or "").strip()
+                or str(description or "").strip()
+                or None
+            )
             candidates = (
                 db.query(AssetEntity)
                 .filter(
@@ -548,7 +624,7 @@ class AssetLibraryService:
                     asset_type=asset_type,
                     name=name,
                     description=description,
-                    base_prompt=prompt,
+                    base_prompt=prompt_source,
                     source="system_generated",
                     tags_json=[],
                     status="active",
@@ -562,7 +638,8 @@ class AssetLibraryService:
             else:
                 target.name = name
                 target.description = description
-                target.base_prompt = prompt
+                if prompt_source:
+                    target.base_prompt = prompt_source
                 extra = dict(target.extra_json or {})
                 extra.setdefault("legacy_source", {"table_asset_id": legacy_id, "asset_type": asset_type})
                 merged_type_fields = dict(extra.get("type_fields") or {})
@@ -750,6 +827,168 @@ class AssetLibraryService:
             )
         return asset
 
+    def _asset_context_for_reference_analysis(self, db: Session, asset: AssetEntity) -> dict[str, Any]:
+        extra = dict(asset.extra_json or {})
+        tf = dict(extra.get("type_fields") or {})
+        cover = (
+            db.query(AssetImage)
+            .filter(AssetImage.id == asset.cover_image_id, AssetImage.asset_id == asset.id, AssetImage.status == "active")
+            .first()
+            if asset.cover_image_id
+            else None
+        )
+        return {
+            "asset_id": asset.id,
+            "asset_type": asset.asset_type,
+            "name": asset.name,
+            "description": asset.description or "",
+            "base_prompt": asset.base_prompt or "",
+            "type_fields": tf,
+            "position": tf.get("role_type") or tf.get("scene_type") or tf.get("product_role") or "",
+            "cover_image": {
+                "id": cover.id,
+                "image_url": cover.image_url,
+                "image_type": cover.image_type,
+            }
+            if cover
+            else None,
+        }
+
+    def analyze_reference_image_and_update_asset(
+        self,
+        db: Session,
+        *,
+        project_id: int,
+        asset_id: int,
+        image_data_url: str,
+        file_name: str | None = None,
+    ) -> tuple[AssetEntity, str | None]:
+        asset = (
+            db.query(AssetEntity)
+            .filter(AssetEntity.id == asset_id, AssetEntity.project_id == project_id, AssetEntity.status == "active")
+            .first()
+        )
+        if not asset:
+            raise ValueError("Asset not found")
+        understanding = asset_image_understanding_service.analyze_reference_image(
+            project_id=project_id,
+            image_data_url=image_data_url,
+            asset_context=self._asset_context_for_reference_analysis(db, asset),
+            project_context=self._project_context_payload(db, project_id),
+        )
+        stored_image_url = self._persist_data_url_image(
+            project_id=project_id,
+            asset_type=asset.asset_type,
+            asset_id=asset.id,
+            image_data_url=image_data_url,
+        )
+        # Unified model: save user reference image as AssetImage(image_type=reference).
+        images = self._active_images(db, asset.id)
+        if len(images) < MAX_ASSET_IMAGES:
+            db.add(
+                AssetImage(
+                    asset_id=asset.id,
+                    image_url=stored_image_url,
+                    image_type="reference",
+                    variant_label=f"reference-{len(images) + 1}",
+                    variant_meta={"source": "user_uploaded_reference"},
+                    prompt_snapshot=None,
+                    provider="upload",
+                    provider_params={},
+                    is_cover=False,
+                    status="active",
+                )
+            )
+        if understanding.get("visual_description"):
+            asset.description = str(understanding["visual_description"]).strip()
+        if understanding.get("image_prompt"):
+            asset.base_prompt = str(understanding["image_prompt"]).strip()
+        extra = dict(asset.extra_json or {})
+        tf = dict(extra.get("type_fields") or {})
+        tf["reference_image_change_summary"] = str(understanding.get("change_summary") or "").strip()
+        extra["type_fields"] = tf
+        asset.extra_json = extra
+        db.add(asset)
+        warning = None
+        if not bool(understanding.get("is_same_asset", True)):
+            warning = "上传图与当前资产差异较大，已作为参考图保存。"
+        return asset, warning
+
+    def create_asset_from_uploaded_image(
+        self,
+        db: Session,
+        *,
+        project_id: int,
+        asset_type: str,
+        image_data_url: str,
+        optional_name: str | None = None,
+    ) -> AssetEntity:
+        self._get_project(db, project_id)
+        normalized_type = str(asset_type or "").strip().lower()
+        if normalized_type not in {"character", "scene", "product"}:
+            raise ValueError("Invalid asset_type")
+        understanding = asset_image_understanding_service.create_asset_from_image(
+            project_id=project_id,
+            asset_type=normalized_type,
+            image_data_url=image_data_url,
+            optional_name=optional_name,
+            project_context=self._project_context_payload(db, project_id),
+        )
+        name = str(understanding.get("name") or optional_name or f"{normalized_type} asset").strip()
+        if not name:
+            name = f"{normalized_type} asset"
+        position = str(understanding.get("position") or "").strip()
+        description = str(understanding.get("visual_description") or "").strip() or None
+        image_prompt = str(understanding.get("image_prompt") or "").strip() or None
+        type_fields: dict[str, Any] = {
+            "asset_type": normalized_type,
+            "source": "image_understanding",
+            "image_understanding_summary": str(understanding.get("visual_description") or "").strip(),
+        }
+        if normalized_type == "character":
+            type_fields["role_type"] = position or "待标注角色"
+        elif normalized_type == "scene":
+            type_fields["scene_type"] = position or "生活场景"
+        else:
+            type_fields["product_role"] = position or "主商品"
+        asset = AssetEntity(
+            project_id=project_id,
+            asset_type=normalized_type,
+            name=name,
+            description=description,
+            tags_json=[],
+            base_prompt=image_prompt,
+            source="user_created",
+            status="active",
+            extra_json={"type_fields": type_fields},
+        )
+        db.add(asset)
+        db.flush()
+        stored_image_url = self._persist_data_url_image(
+            project_id=project_id,
+            asset_type=normalized_type,
+            asset_id=asset.id,
+            image_data_url=image_data_url,
+        )
+        uploaded = AssetImage(
+            asset_id=asset.id,
+            image_url=stored_image_url,
+            image_type="uploaded",
+            variant_label="upload-1",
+            variant_meta={"source": "user_uploaded"},
+            prompt_snapshot=None,
+            provider="upload",
+            provider_params={},
+            is_cover=True,
+            status="active",
+        )
+        db.add(uploaded)
+        db.flush()
+        asset.cover_image_id = uploaded.id
+        db.add(asset)
+        self._ensure_cover(db, asset)
+        return asset
+
     def append_uploaded_images(
         self,
         db: Session,
@@ -804,36 +1043,51 @@ class AssetLibraryService:
         )
         if not asset:
             raise ValueError("Asset not found")
-        desc_override = str(getattr(body, "image_description_override", "") or "").strip()
-        if desc_override:
-            asset.description = desc_override
-            asset.base_prompt = desc_override
-            extra = dict(asset.extra_json or {})
-            tf = dict(extra.get("type_fields") or {})
-            tf["image_description"] = desc_override
-            extra["type_fields"] = tf
-            asset.extra_json = extra
+        prompt_override = (
+            str(getattr(body, "current_image_prompt", "") or "").strip()
+            or str(getattr(body, "base_prompt", "") or "").strip()
+            or str(getattr(body, "image_description_override", "") or "").strip()
+        )
+        if prompt_override:
+            asset.base_prompt = prompt_override
             db.add(asset)
+        logger.info(
+            "[S3_REGENERATE_PROMPT_SOURCE] project_id=%s asset_id=%s used_override=%s prompt_preview=%s",
+            body.project_id,
+            body.asset_id,
+            bool(prompt_override),
+            (asset.base_prompt or "")[:280],
+        )
         current = self._active_images(db, asset.id)
         room = MAX_ASSET_IMAGES - len(current)
         if room <= 0:
             raise ValueError("Asset image limit reached (6). Delete one before regenerating.")
         count = min(self._normalize_generate_count(body.generate_count or 1), room)
-        if not body.reuse_reference_images:
-            for r in self._active_refs(db, asset.id):
-                r.status = "deleted"
-                db.add(r)
         for idx, ref in enumerate(body.reference_images or []):
-            file_url = (ref.get("file_url") or "").strip()
-            if not file_url:
+            raw_url = (ref.get("file_url") or "").strip()
+            if not raw_url:
                 continue
-            db.add(
-                AssetReferenceImage(
+            file_url = (
+                self._persist_data_url_image(
+                    project_id=body.project_id,
+                    asset_type=asset.asset_type,
                     asset_id=asset.id,
-                    file_url=file_url,
-                    file_name=(ref.get("file_name") or "").strip() or None,
-                    sort_order=len(current) + idx,
-                    is_primary=False,
+                    image_data_url=raw_url,
+                )
+                if raw_url.startswith("data:image/")
+                else raw_url
+            )
+            db.add(
+                AssetImage(
+                    asset_id=asset.id,
+                    image_url=file_url,
+                    image_type="reference",
+                    variant_label=f"reference-{len(current) + idx + 1}",
+                    variant_meta={"source": "regenerate_reference"},
+                    prompt_snapshot=None,
+                    provider="upload",
+                    provider_params={},
+                    is_cover=False,
                     status="active",
                 )
             )
@@ -854,11 +1108,37 @@ class AssetLibraryService:
             asset.cover_image_id = latest_generated_id
             db.add(asset)
         self._ensure_cover(db, asset)
+        if asset.cover_image_id:
+            extra = dict(asset.extra_json or {})
+            tf = dict(extra.get("type_fields") or {})
+            tf["visual_anchor_image_id"] = int(asset.cover_image_id)
+            extra["type_fields"] = tf
+            asset.extra_json = extra
+            db.add(asset)
         return asset
 
     def to_detail(self, db: Session, asset: AssetEntity) -> dict[str, Any]:
         images = self._active_images(db, asset.id)
         refs = self._active_refs(db, asset.id)
+        used_image_ids = {int(i.id) for i in images if isinstance(i.id, int)}
+        compat_ref_images: list[dict[str, Any]] = []
+        compat_seed_id = (max(used_image_ids) + 1) if used_image_ids else 1
+        for idx, ref in enumerate(refs):
+            compat_ref_images.append(
+                {
+                    "id": compat_seed_id + idx,
+                    "image_url": ref.file_url,
+                    "image_type": "reference",
+                    "variant_label": ref.file_name or "legacy-reference",
+                    "variant_meta": {"source": "legacy_reference_table", "legacy_reference_id": ref.id},
+                    "prompt_snapshot": None,
+                    "provider": "upload",
+                    "provider_params": {},
+                    "is_cover": False,
+                    "status": ref.status,
+                    "created_at": ref.created_at,
+                }
+            )
         cover = next((img for img in images if img.id == asset.cover_image_id), None)
         extra = asset.extra_json if isinstance(asset.extra_json, dict) else {}
         tf = extra.get("type_fields") if isinstance(extra, dict) else {}
@@ -890,12 +1170,12 @@ class AssetLibraryService:
             "variant_image_ids": variant_image_ids,
             "cover_image_id": asset.cover_image_id,
             "cover_image": self._image_to_dict(cover) if cover else None,
-            "image_count": len(images),
-            "has_reference_images": len(refs) > 0,
+            "image_count": len(images) + len(compat_ref_images),
+            "has_reference_images": len(refs) > 0 or any(str(i.image_type or "").lower() == "reference" for i in images),
             "sort_order": asset.sort_order,
             "status": asset.status,
             "extra": extra,
-            "images": [self._image_to_dict(i) for i in images],
+            "images": [self._image_to_dict(i) for i in images] + compat_ref_images,
             "reference_images": [self._ref_to_dict(r) for r in refs],
             "created_at": asset.created_at,
             "updated_at": asset.updated_at,

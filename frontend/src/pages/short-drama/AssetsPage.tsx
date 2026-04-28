@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { AssetLightbox, type LightboxItem } from './components/AssetLightbox';
-import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEntity, type AssetKind, type AssetNormalFieldKey } from './components/AssetInteractionModal';
+import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEntity, type AssetKind } from './components/AssetInteractionModal';
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
-import { appendShortDramaAssetUploadedImages, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
+import { analyzeShortDramaAssetReferenceImage, createShortDramaAssetFromImage, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
 import type { AssetLibraryItemDto } from './types/shortDramaApi';
 import { getAssetThumbnailUrl, resolveAssetImageUrl } from './utils/assetsPageAdapters';
 import { withProjectQuery } from './utils/shortDramaRoutes';
@@ -14,6 +14,9 @@ type TabType = 'characters' | 'scenes' | 'assets';
 type Step3AutoPhase = 'idle' | 'checking' | 'generating_specs' | 'generating_images' | 'ready' | 'error';
 type AddMode = 'text' | 'upload';
 type AddDraft = { name: string; prompt: string };
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const SUPPORTED_IMAGE_ACCEPT = 'image/jpeg,image/png,image/webp';
+const UNSUPPORTED_IMAGE_MESSAGE = '当前图片格式暂不支持，请上传 JPG、PNG 或 WebP 图片。';
 
 const toKind = (assetType: string): AssetKind => (assetType === 'scene' ? 'scene' : assetType === 'product' ? 'product' : 'character');
 const tabToKind = (tab: TabType): AssetKind => (tab === 'scenes' ? 'scene' : tab === 'assets' ? 'product' : 'character');
@@ -236,62 +239,6 @@ function logPatchFailure(tag: '[S3_PATCH_SAVE_FAILED]' | '[S3_PATCH_REGENERATE_F
   });
 }
 
-function buildAssetPromptFromCurrentData(detail: AssetInteractionEntity, payload: AssetEditorPayload): string {
-  const name = cleanBusinessText(payload.name || detail.name || '');
-  const role = cleanBusinessText(payload.typeLabel || detail.typeLabel || '');
-  const description = cleanBusinessText(payload.description || detail.description || '');
-  const storyUsage = cleanBusinessText(payload.storyUsage || detail.narrativeFunctionLabel || detail.productUsage || '');
-  const visualFeatures = uniqList(listFromUnknown(payload.visualFeatures)).slice(0, 6);
-  const immutable = uniqList(listFromUnknown(payload.immutableStructure || payload.consistencyRequirements)).slice(0, 4);
-
-  if (detail.kind === 'character') {
-    const appearance = cleanBusinessText(payload.description || '');
-    return cleanBusinessText(
-      [
-        '干净的人物设定参考图，人物居中，纯白或浅灰背景',
-        name ? `${name}，${role || '角色设定'}` : `${role || '角色设定'}`,
-        appearance || description || '自然真实的人物外观与穿搭',
-        storyUsage || '用于承载剧情人物状态表达',
-        '后续镜头保持年龄感、脸型、发型、身形和服装风格一致',
-        '真实广告片质感，自然光，9:16竖构图',
-      ].join('。'),
-    );
-  }
-
-  if (detail.kind === 'scene') {
-    const sceneDetails = joinParts([
-      name || role,
-      description,
-    ]);
-    return cleanBusinessText(
-      [
-        '干净的场景设定参考图，不包含人物',
-        sceneDetails || name || role || '生活化空间场景',
-        storyUsage || '用于承载剧情环境与动作背景',
-        '后续镜头保持空间布局、光线、色调和生活质感一致',
-        '真实广告片质感，自然光，9:16竖构图',
-      ].join('。'),
-    );
-  }
-
-  const productDetails = joinParts([
-    role,
-    description,
-    visualFeatures.join('、'),
-  ]);
-  const immutableText = immutable.length ? `后续镜头保持${immutable.join('、')}一致` : '后续镜头保持包装、结构、颜色、材质和关键识别特征一致';
-  return cleanBusinessText(
-    [
-      '干净的产品设定参考图，产品居中展示，简洁白底或浅灰背景',
-      name || '产品主体',
-      productDetails || '产品外观识别信息清晰可读',
-      storyUsage || '用于后续短剧中的产品展示镜头',
-      immutableText,
-      '真实产品摄影质感，自然柔和光线，9:16竖构图',
-    ].join('。'),
-  );
-}
-
 function sanitizeAssetName(input: string): string {
   const blocked = new Set(['新增角色', '添加角色', '新增场景', '添加场景', '新增产品', '添加产品']);
   const trimmed = input.trim();
@@ -428,6 +375,10 @@ function toDataUrl(file: File): Promise<string> {
   });
 }
 
+function isSupportedImageType(file: File): boolean {
+  return SUPPORTED_IMAGE_TYPES.has(String(file.type || '').toLowerCase());
+}
+
 function extractSemanticTokens(text: string): string[] {
   if (!text) return [];
   const zh = (text.match(/[\u4e00-\u9fff]{2,}/g) ?? []).map((x) => x.toLowerCase());
@@ -482,6 +433,7 @@ export function ShortDramaAssetsPage() {
   const [pipelineStepStatus, setPipelineStepStatus] = useState<Record<string, string>>({});
   const [imageLoadFailedIds, setImageLoadFailedIds] = useState<Set<number>>(() => new Set());
   const [imageGenerationFailedIds, setImageGenerationFailedIds] = useState<Set<number>>(() => new Set());
+  const [analyzingAssetIds, setAnalyzingAssetIds] = useState<Set<number>>(() => new Set());
   const refUploadInput = useRef<HTMLInputElement>(null);
   const refTargetAssetId = useRef<number | null>(null);
   const uploadPickerRef = useRef<HTMLInputElement>(null);
@@ -619,6 +571,19 @@ export function ShortDramaAssetsPage() {
       const tf = (d.extra?.type_fields ?? {}) as Record<string, unknown>;
       const detailTypeLabel = resolveAssetRoleLabel(d);
       const anchorImage = getAssetThumbnailUrl(d);
+      const detailImages = activeRenderableImages(d).map((x) => ({
+        id: x.id,
+        imageUrl: x.resolvedUrl,
+        isCover: x.is_cover,
+        label: x.variant_label ?? undefined,
+        sourceType: (
+          String(x.image_type || '').toLowerCase() === 'reference'
+            ? 'reference'
+            : String(x.image_type || '').toLowerCase() === 'uploaded'
+              ? 'uploaded'
+              : 'generated'
+        ) as 'reference' | 'uploaded' | 'generated',
+      }));
       const detailVm: AssetInteractionEntity = {
         id: d.id,
         kind: toKind(d.asset_type),
@@ -640,7 +605,7 @@ export function ShortDramaAssetsPage() {
         productUsage: typeof (tf.product_usage || tf.usage_mode) === 'string' ? String(tf.product_usage || tf.usage_mode) : '',
         imageCount: d.image_count,
         imageLimit: 6,
-        images: activeRenderableImages(d).map((x) => ({ id: x.id, imageUrl: x.resolvedUrl, isCover: x.is_cover, label: x.variant_label ?? undefined })),
+        images: detailImages,
         selectedImageId: resolveVisualAnchorImageId(d) ?? null,
         referenceImages: d.reference_images.map((x) => ({ id: x.id, fileUrl: x.file_url, fileName: x.file_name ?? undefined })),
         tags: d.tags ?? [],
@@ -671,6 +636,37 @@ export function ShortDramaAssetsPage() {
       window.alert('资产详情加载失败，请重试');
     }
   }, [effectiveProjectId]);
+
+  const analyzeReferenceImage = useCallback(async (assetId: number, file: File) => {
+    if (!effectiveProjectId) return;
+    if (!isSupportedImageType(file)) {
+      window.alert(UNSUPPORTED_IMAGE_MESSAGE);
+      return;
+    }
+    setAnalyzingAssetIds((prev) => {
+      const next = new Set(prev);
+      next.add(assetId);
+      return next;
+    });
+    try {
+      const image = await toDataUrl(file);
+      const result = await analyzeShortDramaAssetReferenceImage(assetId, {
+        project_id: effectiveProjectId,
+        image,
+      });
+      if (result.warning) window.alert(result.warning);
+      await reload();
+      if (detail?.id === assetId) await openDetail(assetId);
+    } catch {
+      window.alert('参考图分析失败，请重试。');
+    } finally {
+      setAnalyzingAssetIds((prev) => {
+        const next = new Set(prev);
+        next.delete(assetId);
+        return next;
+      });
+    }
+  }, [detail?.id, effectiveProjectId, openDetail, reload]);
 
   const createLabel = activeTab === 'characters' ? '添加角色' : activeTab === 'scenes' ? '添加场景' : '添加产品';
   const currentRows = data[activeTab];
@@ -755,7 +751,9 @@ export function ShortDramaAssetsPage() {
         })();
       } else {
         if (!uploadFiles.length) throw new Error('请先上传图片');
-        const urls = await Promise.all(uploadFiles.map((f) => toDataUrl(f)));
+        const file = uploadFiles[0];
+        if (!file || !isSupportedImageType(file)) throw new Error(UNSUPPORTED_IMAGE_MESSAGE);
+        const image = await toDataUrl(file);
         const k = tabToKind(activeTab);
         setAddPending({ tab: activeTab, mode: addMode });
         setShowCreate(false);
@@ -763,22 +761,15 @@ export function ShortDramaAssetsPage() {
         setUploadFiles([]);
         void (async () => {
           try {
-            await createShortDramaAssetLibrary({
+            await createShortDramaAssetFromImage({
               project_id: effectiveProjectId,
               asset_type: k,
-              name: sanitizeAssetName(draft.name) || fallbackNameByTab[activeTab],
-              description: '用户上传图片（当前阶段仅展示原图）',
-              base_prompt: '',
-              generate_count: 0,
-              variant_directions: [],
-              reference_images: [],
-              uploaded_images: uploadFiles.map((f, idx) => ({ file_name: f.name, file_url: urls[idx] })),
-              type_fields: {},
-              source: 'user_created',
+              image,
+              optional_name: sanitizeAssetName(draft.name),
             });
             await reload();
           } catch (e) {
-            window.alert(e instanceof Error ? e.message : '创建失败');
+            window.alert(e instanceof Error ? e.message : '创建失败，请重试。');
           } finally {
             setAddPending(null);
           }
@@ -914,9 +905,10 @@ export function ShortDramaAssetsPage() {
                       <button
                         type="button"
                         className="h-9 rounded-lg border border-dashed border-[#D1D1D6] bg-[#F7F8FA] px-2 text-[11.5px] font-medium text-[#444]"
+                        disabled={analyzingAssetIds.has(row.id)}
                         onClick={() => { refTargetAssetId.current = row.id; refUploadInput.current?.click(); }}
                       >
-                        上传参考图
+                        {analyzingAssetIds.has(row.id) ? '正在分析参考图...' : '上传参考图'}
                       </button>
                     </div>
                   </div>
@@ -964,7 +956,7 @@ export function ShortDramaAssetsPage() {
                     <div className="mt-1 h-4 w-4/5 animate-pulse rounded bg-[#F1F2F4]" />
                   </div>
                   <div className="mt-auto pt-3 text-[12px] text-[#6E6E73]">
-                    {addPending.mode === 'text' ? '正在生成资产图片，请稍候…' : '正在处理上传图片，请稍候…'}
+                    {addPending.mode === 'text' ? '正在生成资产图片，请稍候…' : '正在创建资产...'}
                   </div>
                 </div>
               </div>
@@ -987,14 +979,13 @@ export function ShortDramaAssetsPage() {
           </div>
         </div>
       </div>
-      <input ref={refUploadInput} type="file" accept="image/*" className="hidden" onChange={(e) => void (async () => {
-        const f = e.target.files?.[0]; e.target.value = ''; if (!f || !effectiveProjectId || refTargetAssetId.current == null) return;
-        const assetId = refTargetAssetId.current; refTargetAssetId.current = null;
-        await appendShortDramaAssetUploadedImages(assetId, {
-          project_id: effectiveProjectId,
-          uploaded_images: [{ file_name: f.name, file_url: await toDataUrl(f) }],
-        });
-        await reload(); if (detail?.id === assetId) await openDetail(assetId);
+      <input ref={refUploadInput} type="file" accept={SUPPORTED_IMAGE_ACCEPT} className="hidden" onChange={(e) => void (async () => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (!f || !effectiveProjectId || refTargetAssetId.current == null) return;
+        const assetId = refTargetAssetId.current;
+        refTargetAssetId.current = null;
+        await analyzeReferenceImage(assetId, f);
       })()} />
 
       <AssetLightbox item={lightbox} onClose={() => setLightbox(null)} />
@@ -1003,37 +994,13 @@ export function ShortDramaAssetsPage() {
         saving={working}
         regenerating={regenerating}
         onClose={() => setDetail(null)}
-        onSaveNormalField={async (field: AssetNormalFieldKey, payload: AssetEditorPayload) => {
-          if (!effectiveProjectId || !detail) return;
-          const latest = await getShortDramaAssetLibraryDetail(effectiveProjectId, detail.id);
-          const tf = { ...((latest.extra?.type_fields ?? {}) as Record<string, unknown>) };
-          if (field === 'typeLabel') tf.label = payload.typeLabel;
-          if (field === 'voiceStyle') tf.personality = payload.voiceStyle ?? '';
-          if (field === 'productUsage') tf.usage_mode = payload.productUsage ?? '';
-          await updateShortDramaAssetLibrary(detail.id, {
-            project_id: effectiveProjectId,
-            ...(field === 'name' ? { name: payload.name } : {}),
-            ...(field === 'description' ? { description: payload.description } : {}),
-            ...(field === 'typeLabel' ? { tags: [payload.typeLabel] } : {}),
-            type_fields: tf,
-          });
-          await reload(); await openDetail(detail.id);
-        }}
         onSaveAllNormal={async (payload: AssetEditorPayload) => {
           if (!effectiveProjectId || !detail) return;
           setWorking(true);
           try {
-            const latest = await getShortDramaAssetLibraryDetail(effectiveProjectId, detail.id);
-            const tf = { ...((latest.extra?.type_fields ?? {}) as Record<string, unknown>) };
-            tf.image_description = payload.description ?? '';
-            const regeneratedPrompt = buildAssetPromptFromCurrentData(detail, payload);
-            const safeTypeFields = sanitizeTypeFields(tf, detail.kind);
             const patchPayload = sanitizePatchPayload({
               project_id: Number(effectiveProjectId),
-              name: String(payload.name || ''),
-              description: String(payload.description || ''),
-              base_prompt: String(regeneratedPrompt || payload.description || ''),
-              type_fields: safeTypeFields,
+              base_prompt: String(payload.currentImagePrompt || '').trim(),
             });
             try {
               await updateShortDramaAssetLibrary(detail.id, patchPayload);
@@ -1056,14 +1023,14 @@ export function ShortDramaAssetsPage() {
               asset_id: detail.id,
               generate_count: 1,
               reuse_reference_images: true,
-              image_description_override: String(payload.description || ''),
+              current_image_prompt: String(payload.currentImagePrompt || '').trim(),
             });
             await reload();
             await openDetail(detail.id);
           } catch (e) {
             console.error('[S3_REGENERATE_FAILED]', {
               asset_id: detail.id,
-              image_description_override: String(payload.description || ''),
+              current_image_prompt: String(payload.currentImagePrompt || ''),
               error_name: e instanceof Error ? e.name : undefined,
               error_message: e instanceof Error ? e.message : String(e),
             });
@@ -1075,9 +1042,11 @@ export function ShortDramaAssetsPage() {
         onSelectImage={(imageId) => setDetail((prev) => (prev ? { ...prev, selectedImageId: imageId, imageUrl: prev.images?.find((x) => x.id === imageId)?.imageUrl ?? prev.imageUrl } : prev))}
         onAddImage={() => {
           if (!detail) return;
+          if (analyzingAssetIds.has(detail.id)) return;
           refTargetAssetId.current = detail.id;
           refUploadInput.current?.click();
         }}
+        imageAnalyzing={detail ? analyzingAssetIds.has(detail.id) : false}
       />
 
       {showCreate ? (
@@ -1096,12 +1065,21 @@ export function ShortDramaAssetsPage() {
                 <>
                   <div className="flex flex-wrap items-center gap-2">
                     {uploadFiles.map((f, idx) => <span key={`${f.name}-${idx}`} className="rounded bg-[#F5F5F7] px-2 py-1 text-[11px] text-[#444]">{f.name}</span>)}
-                    {uploadFiles.length < 6 ? (
+                    {uploadFiles.length < 1 ? (
                       <button type="button" className="h-8 w-8 rounded border border-dashed border-[#B8BBC2] text-[18px] text-[#6E6E73]" onClick={() => uploadPickerRef.current?.click()}>+</button>
                     ) : null}
                   </div>
-                  <input ref={uploadPickerRef} type="file" multiple accept="image/*" className="hidden" onChange={(e) => setUploadFiles((prev) => [...prev, ...Array.from(e.target.files || [])].slice(0, 6))} />
-                  <p className="text-[11px] text-[#8E8E93]">当前阶段：上传后先直接展示用户原图，不做图片识别生成。</p>
+                  <input ref={uploadPickerRef} type="file" accept={SUPPORTED_IMAGE_ACCEPT} className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!file) return;
+                    if (!isSupportedImageType(file)) {
+                      window.alert(UNSUPPORTED_IMAGE_MESSAGE);
+                      return;
+                    }
+                    setUploadFiles([file]);
+                  }} />
+                  <p className="text-[11px] text-[#8E8E93]">上传图片后将先做图像理解并创建新资产，不会自动重生成。</p>
                 </>
               )}
             </div>

@@ -214,11 +214,7 @@ def _apply_market_constraints_to_bundle(
                 "避免单一刻板族群设定",
             ]
             market_phrase = "适合北美市场语境"
-        prompt = _clean_ws(
-            f"{row.visual_prompt or row.description or ''}。年龄段清晰，{market_phrase or market_desc}，目标受众：{target_audience}。"
-            f"包含脸部特征、发型、身形、服装、姿态表情、气质。视觉风格：{style_desc}。"
-            f"负面约束：{'；'.join([*extra_constraints, *style_negative, *market_negative])}"
-        )
+        prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         meta = dict(row.meta or {})
         meta["market_constraint"] = {
             "target_market": target_market,
@@ -235,6 +231,7 @@ def _apply_market_constraints_to_bundle(
                         "target_audience": target_audience,
                         "story_function": row.narrative_function or row.purpose,
                     },
+                    "image_prompt": prompt or row.image_prompt,
                     "visual_prompt": prompt,
                     "technical_constraints": {
                         "style": style_visual,
@@ -265,37 +262,23 @@ def _apply_market_constraints_to_bundle(
                 "东京/大阪通勤、小户型公寓、便利店、咖啡店、办公室",
                 "不要欧美图库场景默认值",
             ]
-            prompt = _clean_ws(
-                f"{row.visual_prompt or row.description or ''}。单一可复用空间：{primary_location or '日本都市生活场景'}。"
-                f"只描述空间，不包含人物剧情动作。包含机位、空间布局、光线、色彩、道具、记忆点。"
-                f"市场语境：{market_visual.get('description') or '日本都市生活广告语境'}。视觉风格：{style_desc}。"
-                "不要拼贴、不要分屏、不要多格漫画。"
-            )
+            prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         elif is_china:
             scene_constraints = [
                 "中国城市通勤语境",
                 "地铁、办公室、咖啡店等本地生活场景",
                 "不要欧美图库场景默认值",
             ]
-            prompt = _clean_ws(
-                f"{row.visual_prompt or row.description or ''}。单一可复用空间：{primary_location or '中国城市生活场景'}。"
-                f"只描述空间，不包含人物剧情动作。包含机位、空间布局、光线、色彩、道具、记忆点。视觉风格：{style_desc}。"
-            )
+            prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         elif is_sea:
             scene_constraints = [
                 "东南亚城市通勤语境",
                 "地铁站、街头、咖啡桌、办公桌",
                 "不要空白房间或通用棚拍场景",
             ]
-            prompt = _clean_ws(
-                f"{row.visual_prompt or row.description or ''}。单一可复用空间：{primary_location or '东南亚城市生活场景'}。"
-                f"只描述空间，不包含人物剧情动作。包含机位、空间布局、光线、色彩、道具、记忆点。视觉风格：{style_desc}。"
-            )
+            prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         else:
-            prompt = _clean_ws(
-                f"{row.visual_prompt or row.description or ''}。单一可复用空间，只描述空间，不包含人物剧情动作。"
-                f"包含机位、空间布局、光线、色彩、道具、记忆点。视觉风格：{style_desc}。"
-            )
+            prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         meta = dict(row.meta or {})
         meta["market_constraint"] = {
             "target_market": target_market,
@@ -310,6 +293,7 @@ def _apply_market_constraints_to_bundle(
                         "market_context": market_visual,
                         "location_type": row.scene_form,
                     },
+                    "image_prompt": prompt or row.image_prompt,
                     "visual_prompt": prompt,
                     "technical_constraints": {
                         "style": style_visual,
@@ -354,10 +338,8 @@ def _apply_market_constraints_to_bundle(
                         "product_position": row.product_role,
                         "market_context": market_visual,
                     },
-                    "visual_prompt": _clean_ws(
-                        f"{row.visual_prompt or row.description or ''}。产品结构必须准确，保留材质、颜色、结构细节、功能部件和关键特写。"
-                        f"视觉风格：{style_desc}。不可变结构约束：{'；'.join(immutable)}。"
-                    ),
+                    "image_prompt": _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description),
+                    "visual_prompt": _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description),
                     "technical_constraints": {
                         "style": style_visual,
                         "market": market_visual,
@@ -382,6 +364,14 @@ def _apply_market_constraints_to_bundle(
 
 def _clean_ws(text: str | None) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip(" ,;:，；：")
+
+
+def _resolve_asset_image_prompt(*values: str | None) -> str:
+    for value in values:
+        text = _clean_ws(value)
+        if text:
+            return text
+    return ""
 
 
 def _list_like(value: Any) -> list[str]:
@@ -538,15 +528,7 @@ def _finalize_assets_with_creative_brief(
     characters = []
     for row in bundle.characters:
         negative = _user_facing_constraints([*row.boundary_warnings, *animation_terms, *market_terms])
-        prompt = _character_prompt_blueprint(
-            row=row,
-            target_market=target_market,
-            target_audience=target_audience,
-            style_terms=style_terms,
-            animation_terms=animation_terms,
-            market_terms=market_terms,
-            negative=negative,
-        )
+        prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         characters.append(
             row.model_copy(
                 update={
@@ -557,6 +539,7 @@ def _finalize_assets_with_creative_brief(
                         "relationship_to_product": "使用者",
                         "story_function": row.narrative_function or row.purpose or "",
                     },
+                    "image_prompt": prompt or row.image_prompt,
                     "visual_prompt": prompt,
                     "technical_constraints": {
                         **(row.technical_constraints or {}),
@@ -582,13 +565,7 @@ def _finalize_assets_with_creative_brief(
     for row in bundle.scenes:
         negative = _user_facing_constraints([*row.boundary_warnings, *market_terms])
         scene_name = row.name
-        prompt = _scene_prompt_blueprint(
-            row=row,
-            target_market=target_market,
-            style_terms=style_terms,
-            market_terms=market_terms,
-            negative=negative,
-        )
+        prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         scenes.append(
             row.model_copy(
                 update={
@@ -600,6 +577,7 @@ def _finalize_assets_with_creative_brief(
                         "market_context": market_visual,
                         "location_type": scene_name,
                     },
+                    "image_prompt": prompt or row.image_prompt,
                     "visual_prompt": prompt,
                     "technical_constraints": {
                         **(row.technical_constraints or {}),
@@ -633,13 +611,7 @@ def _finalize_assets_with_creative_brief(
                 ]
             )
         )
-        prompt = _product_prompt_blueprint(
-            row=row,
-            product=product,
-            style_terms=style_terms,
-            immutable=immutable,
-            negative=risk_notes,
-        )
+        prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
         products.append(
             row.model_copy(
                 update={
@@ -649,6 +621,7 @@ def _finalize_assets_with_creative_brief(
                         "market_context": market_visual,
                         "category": product.product_category if product else "",
                     },
+                    "image_prompt": prompt or row.image_prompt,
                     "visual_prompt": prompt,
                     "technical_constraints": {
                         **(row.technical_constraints or {}),
@@ -765,6 +738,7 @@ class MockAssetSpecProvider:
                     name="林晓",
                     role_type="main",
                     description="年轻上班族，注重效率与形象",
+                    image_prompt=f"mock: 亚洲女性，25岁，休闲职场穿搭，自然光，{visual_style}，{aspect_ratio}",
                     visual_prompt=f"mock: 亚洲女性，25岁，休闲职场穿搭，自然光，{visual_style}，{aspect_ratio}",
                     image_url=None,
                     source_asset_version="mock-v1",
@@ -777,6 +751,7 @@ class MockAssetSpecProvider:
                     name="店员阿杰",
                     role_type="supporting",
                     description="友善配角，推动试用",
+                    image_prompt=f"mock: 亚洲男性店员，微笑，简洁背景，{visual_style}，{aspect_ratio}",
                     visual_prompt=f"mock: 亚洲男性店员，微笑，简洁背景，{visual_style}，{aspect_ratio}",
                     image_url=None,
                     source_asset_version="mock-v1",
@@ -792,6 +767,7 @@ class MockAssetSpecProvider:
                     scene_type="hook",
                     scene_form="exterior",
                     description="人流、晨光、快节奏",
+                    image_prompt=f"mock: 城市街景，浅景深，清新色调，{visual_style}，{aspect_ratio}",
                     visual_prompt=f"mock: 城市街景，浅景深，清新色调，{visual_style}，{aspect_ratio}",
                     image_url=None,
                     source_asset_version="mock-v1",
@@ -805,6 +781,7 @@ class MockAssetSpecProvider:
                     scene_type="conflict",
                     scene_form="interior",
                     description="货架、手持镜头感",
+                    image_prompt=f"mock: 暖色室内光，货架层次清晰，{visual_style}，{aspect_ratio}",
                     visual_prompt=f"mock: 暖色室内光，货架层次清晰，{visual_style}，{aspect_ratio}",
                     image_url=None,
                     source_asset_version="mock-v1",
@@ -819,6 +796,11 @@ class MockAssetSpecProvider:
                     name=pname,
                     product_role="hero",
                     description=feat,
+                    image_prompt=(
+                        f"mock: 产品 hero shot，{pname}，{visual_hint}，{consistency_hint}，"
+                        f"MUST: {visual_hint}；DO NOT: {'；'.join(product.visual_risk_notes[:3])}，"
+                        f"{visual_style}，{aspect_ratio}"
+                    ),
                     visual_prompt=(
                         f"mock: 产品 hero shot，{pname}，{visual_hint}，{consistency_hint}，"
                         f"MUST: {visual_hint}；DO NOT: {'；'.join(product.visual_risk_notes[:3])}，"
@@ -932,6 +914,15 @@ def _validate_asset_bundle(data: dict[str, Any]) -> AssetSpecsBundleSchema:
                 name=str(row["name"]).strip(),
                 role_type=str(row.get("role_type") or "").strip(),
                 description=(str(row.get("description")) if row.get("description") is not None else None),
+                image_prompt=(
+                    str(row.get("image_prompt"))
+                    if row.get("image_prompt") is not None
+                    else (
+                        str(row.get("visual_prompt"))
+                        if row.get("visual_prompt") is not None
+                        else None
+                    )
+                ),
                 visual_prompt=(str(row.get("visual_prompt")) if row.get("visual_prompt") is not None else None),
                 image_url=None,
                 source_asset_version=str(row.get("source_asset_version") or "legacy-1"),
@@ -955,6 +946,15 @@ def _validate_asset_bundle(data: dict[str, Any]) -> AssetSpecsBundleSchema:
                 scene_type=str(row.get("scene_type") or "").strip(),
                 scene_form=(str(row.get("scene_form")) if row.get("scene_form") is not None else None),
                 description=(str(row.get("description")) if row.get("description") is not None else None),
+                image_prompt=(
+                    str(row.get("image_prompt"))
+                    if row.get("image_prompt") is not None
+                    else (
+                        str(row.get("visual_prompt"))
+                        if row.get("visual_prompt") is not None
+                        else None
+                    )
+                ),
                 visual_prompt=(str(row.get("visual_prompt")) if row.get("visual_prompt") is not None else None),
                 image_url=None,
                 source_asset_version=str(row.get("source_asset_version") or "legacy-1"),
@@ -977,6 +977,15 @@ def _validate_asset_bundle(data: dict[str, Any]) -> AssetSpecsBundleSchema:
                 name=str(row["name"]).strip(),
                 product_role=(str(row.get("product_role")) if row.get("product_role") is not None else None),
                 description=(str(row.get("description")) if row.get("description") is not None else None),
+                image_prompt=(
+                    str(row.get("image_prompt"))
+                    if row.get("image_prompt") is not None
+                    else (
+                        str(row.get("visual_prompt"))
+                        if row.get("visual_prompt") is not None
+                        else None
+                    )
+                ),
                 visual_prompt=(str(row.get("visual_prompt")) if row.get("visual_prompt") is not None else None),
                 image_url=None,
                 source_asset_version=str(row.get("source_asset_version") or "legacy-1"),
@@ -996,8 +1005,8 @@ def _validate_asset_bundle(data: dict[str, Any]) -> AssetSpecsBundleSchema:
 def _normalize_character_asset(row: CharacterAssetSchema) -> CharacterAssetSchema:
     name, name_warnings = _strip_plot_terms(row.name)
     desc, desc_warnings = _strip_plot_terms(row.description)
-    prompt, prompt_warnings = _strip_plot_terms(row.visual_prompt)
-    prompt = ", ".join(x for x in [_asset_prompt_prefix("character"), prompt] if x)
+    prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
+    _, prompt_warnings = _strip_plot_terms(prompt)
     warnings = list(dict.fromkeys([*row.boundary_warnings, *name_warnings, *desc_warnings, *prompt_warnings]))
     meta = {
         **(row.meta or {}),
@@ -1009,6 +1018,7 @@ def _normalize_character_asset(row: CharacterAssetSchema) -> CharacterAssetSchem
         update={
             "name": final_name,
             "description": desc or row.description,
+            "image_prompt": prompt or row.image_prompt,
             "visual_prompt": prompt,
             "asset_identity": row.asset_identity or final_name,
             "boundary_warnings": warnings,
@@ -1025,16 +1035,8 @@ def _normalize_scene_asset(row: SceneAssetSchema, workflow_language: str | None)
         workflow_language,
     )
     desc, desc_warnings = _strip_plot_terms(row.description)
-    prompt, prompt_warnings = _strip_plot_terms(row.visual_prompt)
-    prompt = ". ".join(
-        x
-        for x in [
-            f"Single coherent location: {identity}",
-            "single location only, no collage, no split-screen, no multiple panels, no montage, no grid layout, one coherent reusable background environment",
-            ", ".join(y for y in [_asset_prompt_prefix("scene"), prompt] if y),
-        ]
-        if x
-    )
+    prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
+    _, prompt_warnings = _strip_plot_terms(prompt)
     warnings = list(dict.fromkeys([*row.boundary_warnings, *identity_warnings, *desc_warnings, *prompt_warnings]))
     meta = {
         **(row.meta or {}),
@@ -1046,6 +1048,7 @@ def _normalize_scene_asset(row: SceneAssetSchema, workflow_language: str | None)
         update={
             "name": identity,
             "description": desc or row.description or "",
+            "image_prompt": prompt or row.image_prompt,
             "visual_prompt": prompt,
             "asset_identity": identity,
             "boundary_warnings": warnings,
@@ -1401,7 +1404,8 @@ def _normalize_product_asset(
     fallback_name = _clean_ws(product_name) or row.name
     name, name_warnings = _strip_product_scene_terms(row.name or fallback_name)
     desc, desc_warnings = _strip_product_scene_terms(row.description)
-    prompt, prompt_warnings = _strip_product_scene_terms(row.visual_prompt)
+    prompt = _resolve_asset_image_prompt(row.image_prompt, row.visual_prompt, row.description)
+    _, prompt_warnings = _strip_product_scene_terms(prompt)
     p_name = _clean_ws((product.product_name if product else "") or name or fallback_name)
     p_form = _clean_ws((product.product_form if product else "") or str((row.meta or {}).get("form") or ""))
     p_summary = _clean_ws((product.product_summary if product else ""))
@@ -1423,19 +1427,6 @@ def _normalize_product_asset(
             ]
         )
     )
-    prompt = ", ".join(
-        x
-        for x in [
-            _asset_prompt_prefix("product"),
-            p_name,
-            p_form,
-            " / ".join([str(x) for x in p_features[:6] if str(x).strip()]),
-            shape_guard,
-            "immutable structure constraints: " + " / ".join(immutable_constraints),
-            prompt,
-        ]
-        if x
-    )
     warnings = list(dict.fromkeys([*row.boundary_warnings, *name_warnings, *desc_warnings, *prompt_warnings]))
     meta = {
         **(row.meta or {}),
@@ -1447,6 +1438,7 @@ def _normalize_product_asset(
         update={
             "name": p_name or name or fallback_name,
             "description": desc or row.description or p_summary or "",
+            "image_prompt": prompt or row.image_prompt,
             "visual_prompt": prompt,
             "asset_identity": p_name or name or fallback_name,
             "boundary_warnings": warnings,
@@ -1666,7 +1658,8 @@ def asset_bundle_from_story_requirements(
                 ]
                 if x
             ),
-            visual_prompt=str((row or {}).get("appearance") or "").strip(),
+            image_prompt=str((row or {}).get("image_prompt") or (row or {}).get("visual_prompt") or (row or {}).get("appearance") or "").strip(),
+            visual_prompt=str((row or {}).get("visual_prompt") or (row or {}).get("image_prompt") or (row or {}).get("appearance") or "").strip(),
             boundary_warnings=[*_as_list((row or {}).get("must_avoid"))],
             meta={
                 "must_keep": _as_list((row or {}).get("must_keep")),
@@ -1694,7 +1687,10 @@ def asset_bundle_from_story_requirements(
                 ]
                 if x
             ),
-            visual_prompt="；".join(_as_list((row or {}).get("props"))),
+            image_prompt=str((row or {}).get("image_prompt") or (row or {}).get("visual_prompt") or "").strip()
+            or "；".join(_as_list((row or {}).get("props"))),
+            visual_prompt=str((row or {}).get("visual_prompt") or (row or {}).get("image_prompt") or "").strip()
+            or "；".join(_as_list((row or {}).get("props"))),
             boundary_warnings=[*_as_list((row or {}).get("must_avoid"))],
             meta={
                 "must_keep": _as_list((row or {}).get("must_keep")),
@@ -1721,7 +1717,10 @@ def asset_bundle_from_story_requirements(
                 ]
                 if x
             ),
-            visual_prompt="；".join(_as_list((row or {}).get("visual_features"))),
+            image_prompt=str((row or {}).get("image_prompt") or (row or {}).get("visual_prompt") or "").strip()
+            or "；".join(_as_list((row or {}).get("visual_features"))),
+            visual_prompt=str((row or {}).get("visual_prompt") or (row or {}).get("image_prompt") or "").strip()
+            or "；".join(_as_list((row or {}).get("visual_features"))),
             boundary_warnings=[*_as_list((row or {}).get("must_avoid"))],
             meta={
                 "must_keep": _as_list((row or {}).get("must_keep")),

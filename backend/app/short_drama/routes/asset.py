@@ -8,11 +8,14 @@ from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderEr
 from ..http_errors import raise_short_drama_http
 from ..models import AssetEntity, AssetImage, CharacterAsset, ProductAsset, SceneAsset
 from ..schemas.asset import (
+    AnalyzeAssetReferenceImageRequest,
+    AnalyzeAssetReferenceImageResponse,
     AppendUploadedImagesRequest,
     AssetDetailSchema,
     AssetListResponse,
     AssetSpecsBundleSchema,
     CharacterAssetSchema,
+    CreateAssetFromImageRequest,
     CreateAssetRequest,
     GenerateAssetSpecsRequest,
     GenerateAssetSpecsResponse,
@@ -38,6 +41,7 @@ from ..services.asset_spec_service import (
 from ..services.asset_library_service import asset_library_service
 from ..services.read_models import latest_product_context, latest_story_blueprint
 from ..services.workflow_orchestrator import orchestrator
+from ..services.image_understanding_service import validate_supported_image_data_url
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
@@ -411,7 +415,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                         "target_market": project_config.get("target_market"),
                         "target_audience": project_config.get("target_audience"),
                         "final_character_name": c.name,
-                        "prompt_preview": _preview_text(c.visual_prompt),
+                        "prompt_preview": _preview_text((c.image_prompt or c.visual_prompt)),
                     },
                 )
             story_framework = blueprint.story_framework if isinstance(blueprint.story_framework, dict) else {}
@@ -423,7 +427,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                         "target_market": project_config.get("target_market"),
                         "story_framework_type": story_framework.get("type"),
                         "final_scene_name": s.name,
-                        "prompt_preview": _preview_text(s.visual_prompt),
+                        "prompt_preview": _preview_text((s.image_prompt or s.visual_prompt)),
                     },
                 )
             product_name_from_s1 = product.product_name
@@ -441,7 +445,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                         "product_name_from_asset_requirement": product_req_first_name,
                         "final_product_asset_name": p.name,
                         "visual_features": product.visual_features[:8],
-                        "prompt_preview": _preview_text(p.visual_prompt),
+                        "prompt_preview": _preview_text((p.image_prompt or p.visual_prompt)),
                     },
                 )
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
@@ -574,14 +578,14 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                 "spoken_language": project_config.get("video_language"),
                 "voice_tone": (c.meta or {}).get("voice_tone") or project_config.get("brand_tone"),
                 "speech_style": (c.meta or {}).get("speech_style") or "自然口播",
-                "structured_prompt": c.visual_prompt or "",
+                "structured_prompt": c.image_prompt or c.visual_prompt or "",
                 "structure_summary": structure_summary,
                 "story_usage": story_usage,
                 "narrative_function": c.narrative_function or "",
                 "exposure_priority": c.exposure_priority,
                 "display_name": display_name,
                 "display_description": display_desc,
-                "image_prompt": c.visual_prompt or "",
+                "image_prompt": c.image_prompt or c.visual_prompt or "",
                 "plot_stage": plot_stage,
                 "scene_form": scene_form,
                 "workflow_language": project_config.get("workflow_language"),
@@ -746,14 +750,14 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                 "materials": (s.meta or {}).get("materials") or "",
                 "atmosphere": atmosphere,
                 "props": props,
-                "structured_prompt": s.visual_prompt or "",
+                "structured_prompt": s.image_prompt or s.visual_prompt or "",
                 "structure_summary": structure_summary,
                 "story_usage": story_usage,
                 "narrative_function": s.narrative_function or "",
                 "exposure_priority": s.exposure_priority,
                 "display_name": display_name,
                 "display_description": display_desc,
-                "image_prompt": s.visual_prompt or "",
+                "image_prompt": s.image_prompt or s.visual_prompt or "",
                 "plot_stage": plot_stage,
                 "workflow_language": project_config.get("workflow_language"),
                 "business_profile": s.business_profile,
@@ -931,14 +935,14 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                 "color": color,
                 "material": material,
                 "visual_features": visual_features,
-                "structured_prompt": p.visual_prompt or "",
+                "structured_prompt": p.image_prompt or p.visual_prompt or "",
                 "structure_summary": structure_summary,
                 "story_usage": story_usage,
                 "narrative_function": p.narrative_function or "",
                 "exposure_priority": p.exposure_priority,
                 "display_name": display_name,
                 "display_description": display_desc,
-                "image_prompt": p.visual_prompt or "",
+                "image_prompt": p.image_prompt or p.visual_prompt or "",
                 "plot_stage": plot_stage,
                 "scene_form": scene_form,
                 "workflow_language": project_config.get("workflow_language"),
@@ -1053,7 +1057,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                     name=c.name,
                     role_type=c.role_type,
                     description=c.description,
-                    visual_prompt=c.visual_prompt,
+                        visual_prompt=c.visual_prompt,
                     image_url=c.image_url,
                     visual_anchor_image_id=(c.meta_json or {}).get("visual_anchor_image_id"),
                     source_asset_version=str((c.meta_json or {}).get("source_asset_version") or "legacy-1"),
@@ -1071,7 +1075,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                     scene_type=s.scene_type,
                     scene_form=(s.meta_json or {}).get("scene_form"),
                     description=s.description,
-                    visual_prompt=s.visual_prompt,
+                        visual_prompt=s.visual_prompt,
                     image_url=s.image_url,
                     visual_anchor_image_id=(s.meta_json or {}).get("visual_anchor_image_id"),
                     source_asset_version=str((s.meta_json or {}).get("source_asset_version") or "legacy-1"),
@@ -1087,7 +1091,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                     id=p.id,
                     name=p.name,
                     description=p.description,
-                    visual_prompt=p.visual_prompt,
+                        visual_prompt=p.visual_prompt,
                     image_url=p.image_url,
                     visual_anchor_image_id=(p.meta_json or {}).get("visual_anchor_image_id"),
                     source_asset_version=str((p.meta_json or {}).get("source_asset_version") or "legacy-1"),
@@ -1208,6 +1212,50 @@ async def append_uploaded_images_to_asset(
             project_id=body.project_id,
             asset_id=asset_id,
             uploaded_images=body.uploaded_images,
+        )
+        _mark_step3_and_stale_step4(db, body.project_id)
+        db.commit()
+        db.refresh(row)
+        return AssetDetailSchema.model_validate(asset_library_service.to_detail(db, row))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/library/{asset_id}/reference-image/analyze", response_model=AnalyzeAssetReferenceImageResponse)
+async def analyze_reference_image_for_asset(
+    asset_id: int,
+    body: AnalyzeAssetReferenceImageRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        validate_supported_image_data_url(body.image)
+        row, warning = asset_library_service.analyze_reference_image_and_update_asset(
+            db,
+            project_id=body.project_id,
+            asset_id=asset_id,
+            image_data_url=body.image,
+        )
+        _mark_step3_and_stale_step4(db, body.project_id)
+        db.commit()
+        db.refresh(row)
+        return AnalyzeAssetReferenceImageResponse(
+            asset=AssetDetailSchema.model_validate(asset_library_service.to_detail(db, row)),
+            warning=warning,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/library/create-from-image", response_model=AssetDetailSchema)
+async def create_asset_library_from_image(body: CreateAssetFromImageRequest, db: Session = Depends(get_db)):
+    try:
+        validate_supported_image_data_url(body.image)
+        row = asset_library_service.create_asset_from_uploaded_image(
+            db,
+            project_id=body.project_id,
+            asset_type=body.asset_type,
+            image_data_url=body.image,
+            optional_name=body.optional_name,
         )
         _mark_step3_and_stale_step4(db, body.project_id)
         db.commit()

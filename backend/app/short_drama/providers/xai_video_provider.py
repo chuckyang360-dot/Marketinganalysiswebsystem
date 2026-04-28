@@ -112,7 +112,8 @@ class XAIVideoProvider:
             )
             if not dur_pass:
                 err = (
-                    f"segment duration {dur}s exceeds provider cap {_XAI_PROVIDER_DURATION_CAP_SECONDS}s"
+                    f"单个片段时长 {dur}s 超过 provider 上限 {_XAI_PROVIDER_DURATION_CAP_SECONDS}s。"
+                    "请将该片段拆分到更多片段中生成；完整视频可通过多片段合成实现（如 45s/60s）。"
                 )
                 logger.error(
                     "[XAI_SEGMENT_DURATION_REJECT] project_id=%s segment_id=%s requested_duration_seconds=%s provider_cap_seconds=%s err=%s",

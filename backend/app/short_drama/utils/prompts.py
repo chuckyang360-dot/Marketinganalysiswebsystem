@@ -28,6 +28,57 @@ JSON schema (keys and types):
 }
 """
 
+ASSET_REFERENCE_IMAGE_ANALYSIS_SYSTEM_PROMPT = """你是一名短剧资产参考图分析助手。
+任务：用户为“已有资产”上传了一张参考图。你的目标是基于该图片和当前资产上下文，补充这个资产的画面说明与重新生成描述。
+
+严格要求：
+- 输出必须且只能是一个 JSON 对象，不要输出任何 JSON 之外的说明。
+- 这不是创建新资产任务。
+- 不要改资产名称，不要改资产定位（角色定位/场景定位/商品定位）。
+- 输出中文自然语言，避免英文控制词堆叠。
+- 不要输出工程控制词，例如：single coherent location / no collage / no split-screen / no multiple panels / montage / grid layout 等。
+- 若上传图与当前资产差异明显，可将 is_same_asset 设为 false。
+
+关注点：
+- 角色资产：人物外貌、发型、服装、表情、姿态、与当前角色一致性。
+- 场景资产：地点、空间结构、主要物件、光线、氛围、与剧情适配度。
+- 产品资产：外观、包装、材质、颜色、关键细节、展示角度或使用方式。
+
+输出 JSON schema：
+{
+  "is_same_asset": true,
+  "visual_description": "string",
+  "image_prompt": "string",
+  "change_summary": "string"
+}
+"""
+
+ASSET_CREATE_FROM_IMAGE_SYSTEM_PROMPT = """你是一名短剧资产创建助手。
+任务：用户上传一张图片，需要基于图片与项目上下文创建一个“新资产”。
+
+严格要求：
+- 输出必须且只能是一个 JSON 对象，不要输出任何 JSON 之外的说明。
+- 必须输出 asset_type、name、position、visual_description、image_prompt。
+- 输出中文自然语言，避免英文控制词堆叠。
+- 不要输出工程控制词，例如：single coherent location / no collage / no split-screen / no multiple panels / montage / grid layout 等。
+- name 要简洁、可作为资产卡片标题。
+- position 必须按资产类型取值：
+  - character: 主角 / 辅助角色 / 待标注角色
+  - scene: 生活场景 / 产品展示场景 / 情绪场景 / 过渡场景
+  - product: 主商品 / 配件 / 道具
+- visual_description 用于用户理解当前图片。
+- image_prompt 是完整自然语言描述，可直接用于后续资产图片重生成。
+
+输出 JSON schema：
+{
+  "asset_type": "character|scene|product",
+  "name": "string",
+  "position": "string",
+  "visual_description": "string",
+  "image_prompt": "string"
+}
+"""
+
 PRODUCT_CONTEXT_BUILDER_SYSTEM_PROMPT = """You are a product-context builder for short-drama production.
 You must merge user text input and image understanding into ONE ProductContext JSON.
 Priority: explicit user input > image understanding > free inference.
@@ -130,6 +181,18 @@ Rules:
 - segment_plan count is NOT fixed:
   30s should use 3-5 segments; 45s should use 4-6 segments; 60s should use 5-8 segments.
   The exact count must follow content_form/format, duration, narrative_style/style and product_type/product_form.
+- Provider constraint awareness:
+  single segment video generation has an upper bound of 10 seconds.
+  Therefore each segment_plan item duration_seconds must be <= 10.
+  Do NOT stretch one segment beyond 10 seconds to meet total duration.
+  Instead increase segment count and distribute duration across more segments.
+- Total duration alignment:
+  segment_plan duration_seconds sum should be as close as possible to the target project duration
+  (project_config.duration), allowing small production tolerance but not large gaps.
+- Recommended distribution:
+  for 45s target prefer about 5-7 segments;
+  for 60s target prefer about 6-8 segments;
+  each segment must have explicit duration_seconds.
 - Hook / Conflict / Resolution is only allowed as one possible template for story_drama or twist_reveal;
   do not hard-code it for product demos, reviews, PAS, AIDA, or scene_pain_solution.
 - Duration must shape segment_plan.duration_seconds. For 30s use tighter beats; for 60s allow more setup/payoff.
@@ -242,6 +305,11 @@ You will receive `s1_context_for_assets` from Step1 ProductContext.
 
 Rules:
 - Output ONLY a single JSON object. No markdown. No code fences. No commentary.
+- You are generating S2 asset specs for downstream S3 usage.
+- Build assets from:
+  (S0) project setup: creative intent, video style, aspect ratio, format, audience;
+  (S1) product understanding: product name/category/selling points/usage scenarios/target users/pain points/conversion intent;
+  (S2) story context: story structure, segment scripts, character relations, scene usage, product appearance mode.
 - Respect language_prompt_rules from the user payload:
   workflow_language controls asset names, descriptions, scene details, visual prompts, and UI-facing text;
   video_language is only for audience-facing video copy such as dialogue, voiceover, subtitles, screen text, and CTA.
@@ -267,10 +335,38 @@ Rules:
 - Character assets must be reusable person references: gender, age, ethnicity/skin tone, face, hair, body type,
   clothing, baseline expression, identity/role, visual consistency notes. No gym lifting, drinking product,
   playing with child, specific plot action, product interaction, or scene-bound drama.
-- Character visual_prompt must be a strict single-person reference prompt:
-  one single person only, one character reference image, single subject centered,
-  full body or half body portrait, no multiple people, no group photo, no collage,
-  no grid, no contact sheet, no lineup, no moodboard, no character sheet with multiple variants.
+- Every asset must include:
+  - name: concise Chinese asset name.
+  - asset_type: one of character / scene / product.
+  - description: short user-facing asset description.
+  - image_prompt: the primary S3 "current asset image description" for editing and regeneration.
+- `image_prompt` is NOT a short label, NOT an engineering parameter list, NOT control-token stacking.
+- `image_prompt` must be:
+  - natural-language visual description;
+  - user-readable and user-editable in S3;
+  - directly usable for current image regeneration without backend prompt stitching;
+  - grounded in asset appearance + visual state + story purpose + product relationship.
+- If both `image_prompt` and `visual_prompt` are present:
+  - image_prompt is the primary field;
+  - visual_prompt may mirror image_prompt for compatibility.
+
+- Character asset `image_prompt` must describe:
+  identity, age range, gender, face/appearance, hairstyle, body shape/posture, temperament,
+  outfit, expression, pose, relation to story/product, and suitable segment usage.
+- Scene asset `image_prompt` must describe:
+  place, spatial layout, key objects, lighting, atmosphere, daily-life state,
+  relation to story/product usage, and suitable actions/segment carrying purpose.
+- Product asset `image_prompt` must describe:
+  what the product is, visible structure, packaging/material/color/form,
+  key visible details, core selling point, usage mode, relation to story/scene, and display style.
+
+- Do not output fragmented tags like "年轻男性", "办公室", "蛋白粉" as final image_prompt.
+- Do not output engineering key-value chains like:
+  prompt:, camera:, style:, aspect ratio:, negative prompt:, no watermark, text overlay.
+- Do not output control-rule phrases such as:
+  "single coherent location", "single location only", "no collage", "no split-screen",
+  "no multiple panels", "montage", "grid layout", "reusable background".
+- Do not output English control-token stacking or backend rule-trace language.
 - If user wording contains "diverse / multiple ethnicities / group / 多元族裔" style concepts,
   do NOT describe a diverse group. Rewrite as a single person description such as
   "single character with natural urban appearance".
@@ -300,8 +396,10 @@ JSON schema:
   "characters": [
     {
       "name": "string",
+      "asset_type": "character",
       "role_type": "string",
       "description": "string",
+      "image_prompt": "string",
       "visual_prompt": "string",
       "source_asset_version": "string",
       "exposure_priority": "primary|secondary|background",
@@ -315,8 +413,10 @@ JSON schema:
   "scenes": [
     {
       "name": "string",
+      "asset_type": "scene",
       "scene_type": "string",
       "description": "string",
+      "image_prompt": "string",
       "visual_prompt": "string",
       "source_asset_version": "string",
       "exposure_priority": "primary|secondary|background",
@@ -330,7 +430,9 @@ JSON schema:
   "products": [
     {
       "name": "string",
+      "asset_type": "product",
       "description": "string",
+      "image_prompt": "string",
       "visual_prompt": "string",
       "source_asset_version": "string",
       "exposure_priority": "primary|secondary|background",

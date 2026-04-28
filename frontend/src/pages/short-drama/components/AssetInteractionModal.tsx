@@ -17,7 +17,7 @@ export type AssetInteractionEntity = {
   assetTypeLabel?: string;
   imageCount?: number;
   imageLimit?: number;
-  images?: { id: number; imageUrl: string; isCover: boolean; label?: string }[];
+  images?: { id: number; imageUrl: string; isCover: boolean; label?: string; sourceType?: 'generated' | 'uploaded' | 'reference' }[];
   referenceImages?: { id: number; fileUrl: string; fileName?: string }[];
   selectedImageId?: number | null;
   tags?: string[];
@@ -33,26 +33,15 @@ export type AssetInteractionEntity = {
 };
 
 export type AssetEditorPayload = {
-  name: string;
-  typeLabel: string;
-  description: string; // 统一作为“图片描述”
-  prompt: string;
-  storyUsage?: string;
-  visualFeatures?: string;
-  immutableStructure?: string;
-  consistencyRequirements?: string;
-  voiceStyle?: string;
-  productUsage?: string;
+  currentImagePrompt: string;
 };
-
-export type AssetNormalFieldKey = 'name' | 'typeLabel' | 'description' | 'voiceStyle' | 'productUsage';
 
 type Props = {
   asset: AssetInteractionEntity | null;
   saving: boolean;
   regenerating: boolean;
+  imageAnalyzing?: boolean;
   onClose: () => void;
-  onSaveNormalField: (field: AssetNormalFieldKey, payload: AssetEditorPayload) => Promise<void>;
   onSaveAllNormal: (payload: AssetEditorPayload) => Promise<void>;
   onRegeneratePrompt: (payload: AssetEditorPayload) => Promise<void>;
   onSelectImage?: (imageId: number) => void;
@@ -88,6 +77,16 @@ function formatDisplayValue(value: unknown, fallback = '—'): string {
     return fallback;
   }
   return String(value);
+}
+
+function serializeDebugValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function getTypeFieldText(fields: Record<string, unknown> | undefined, keys: string[], fallback = '—'): string {
@@ -178,52 +177,23 @@ function extractUsefulZhSegments(raw: string): string[] {
   return out.filter(Boolean);
 }
 
-function buildFallbackPrompt(asset: AssetInteractionEntity): string {
-  const aspect = '9:16构图';
-  const desc = cleanupMainDisplayText(asset.description) || '';
-  if (asset.kind === 'character') {
-    return normalizePromptPieces([
-      '单一人物参考图',
-      asset.typeLabel || '人物角色',
-      desc || `${asset.name}，真实广告片质感`,
-      '干净背景',
-      '自然光',
-      aspect,
-    ]);
-  }
-  if (asset.kind === 'scene') {
-    return normalizePromptPieces([
-      `${asset.typeLabel || asset.name}场景`,
-      desc || '干净明亮，真实广告片质感',
-      '自然光',
-      aspect,
-      '不包含人物动作',
-    ]);
-  }
-  return normalizePromptPieces([
-    '产品主体参考图',
-    asset.typeLabel || asset.name,
-    desc || '标签清晰，真实产品摄影质感',
-    '干净背景',
-    aspect,
-  ]);
+function cleanEditableAssetPrompt(raw: string): string {
+  return String(raw || '').trim();
 }
 
-/** 用户可编辑版提示词：剔除元信息/执行规则，只保留可读画面描述 */
-function cleanEditableAssetPrompt(raw: string, asset: AssetInteractionEntity): string {
-  const source = String(raw || '').trim();
-  if (!source) return buildFallbackPrompt(asset);
-  const lines = source
-    .split(/\n/g)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .filter((line) => !containsMetaOrRule(line))
-    .map((line) => line.replace(/\b(raw_[a-z_]+|source_trace|field_meta)\b[:=].*/gi, '').trim())
-    .filter(Boolean);
-  const zhPieces = extractUsefulZhSegments(lines.join('\n'));
-  const cleaned = normalizePromptPieces(zhPieces);
-  if (cleaned) return cleaned;
-  return buildFallbackPrompt(asset);
+function looksLikeEngineeringPrompt(raw: string): boolean {
+  const text = String(raw || '').trim().toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes('single coherent location') ||
+    text.includes('single location only') ||
+    text.includes('no collage') ||
+    text.includes('no split-screen') ||
+    text.includes('no multiple panels') ||
+    text.includes('no montage') ||
+    text.includes('no grid layout') ||
+    text.includes('one coherent reusable background environment')
+  );
 }
 
 const EXECUTION_PATTERNS: RegExp[] = [
@@ -273,39 +243,27 @@ export function AssetInteractionModal({
   asset,
   saving,
   regenerating,
+  imageAnalyzing = false,
   onClose,
   onSaveAllNormal,
   onRegeneratePrompt,
   onSelectImage,
   onAddImage,
 }: Props) {
-  type EditableField = 'name' | 'description';
-
-  type FormState = {
-    name: string;
-    description: string;
-  };
-
-  const [form, setForm] = useState<FormState>({
-    name: '',
-    description: '',
-  });
-  const [initialForm, setInitialForm] = useState<FormState>({
-    name: '',
-    description: '',
-  });
-  const [editingField, setEditingField] = useState<EditableField | null>(null);
-  const [editingDraft, setEditingDraft] = useState('');
+  const [displayDescription, setDisplayDescription] = useState('');
+  const [initialPromptDraft, setInitialPromptDraft] = useState('');
   const [promptDraft, setPromptDraft] = useState('');
-  const [isPromptEditing, setIsPromptEditing] = useState(false);
 
   useEffect(() => {
     if (!asset) return;
     const rawPreferred = String(
       asset.rawSnapshot?.base_prompt ??
+      (asset.typeFields?.image_prompt as string | undefined) ??
+      (asset.typeFields?.visual_prompt as string | undefined) ??
       asset.prompt ??
       asset.rawSnapshot?.prompt_snapshot ??
       asset.rawSnapshot?.provider_prompt ??
+      asset.description ??
       '',
     );
     const tf = asset.typeFields ?? {};
@@ -317,44 +275,26 @@ export function AssetInteractionModal({
           '',
       ),
     );
-    const fallbackDescription =
-      asset.kind === 'character'
-        ? '人物形象用于承载剧情角色表达，突出年龄、外貌、服装、状态和镜头一致性。'
-        : asset.kind === 'scene'
-          ? '场景用于承载剧情环境表达，突出空间结构、光线氛围、道具细节和镜头一致性。'
-          : '产品用于承载剧情中的核心展示，突出品牌识别、结构材质与外观一致性。';
-    const nextForm: FormState = {
-      name: asset.name || '',
-      description: imageDescription || fallbackDescription,
-    };
-    setForm(nextForm);
-    setInitialForm(nextForm);
-    setPromptDraft(cleanEditableAssetPrompt(rawPreferred, asset));
-    setEditingField(null);
-    setEditingDraft('');
-    setIsPromptEditing(false);
+    setDisplayDescription(imageDescription || '—');
+    const naturalFallback = cleanEditableAssetPrompt(
+      String(
+        tf.display_description ??
+        tf.image_description ??
+        asset.description ??
+        '',
+      ),
+    );
+    const normalizedPrompt = cleanEditableAssetPrompt(
+      looksLikeEngineeringPrompt(rawPreferred) && naturalFallback ? naturalFallback : rawPreferred,
+    );
+    setInitialPromptDraft(normalizedPrompt);
+    setPromptDraft(normalizedPrompt);
   }, [asset]);
 
   const payload = useMemo<AssetEditorPayload | null>(() => {
     if (!asset) return null;
-    const consistencyRequirements = getTypeFieldText(
-      asset.typeFields,
-      ['negative_constraints', 'negative_prompt', 'must_keep', 'structure_summary'],
-      '',
-    );
-    return {
-      name: form.name.trim(),
-      typeLabel: asset.typeLabel.trim(),
-      description: form.description.trim(),
-      prompt: promptDraft,
-      storyUsage: '',
-      visualFeatures: '',
-      immutableStructure: '',
-      consistencyRequirements: consistencyRequirements === '—' ? '' : consistencyRequirements.trim(),
-      voiceStyle: asset.voiceStyle,
-      productUsage: asset.productUsage,
-    };
-  }, [asset, form, promptDraft]);
+    return { currentImagePrompt: cleanEditableAssetPrompt(promptDraft) };
+  }, [asset, promptDraft]);
 
   if (!asset || !payload) return null;
 
@@ -363,8 +303,17 @@ export function AssetInteractionModal({
   const previewSrc = selectedImage?.imageUrl ?? asset.imageUrl;
   const canAddImage = (asset.imageCount ?? images.length) < (asset.imageLimit ?? 6);
   const rowClass = 'rounded-xl border border-[#EAEAEA] bg-white px-3 py-2.5';
+  const isDev = import.meta.env.DEV;
+  const positionLabel =
+    asset.kind === 'character'
+      ? '角色定位'
+      : asset.kind === 'scene'
+        ? '场景定位'
+        : asset.kind === 'product'
+          ? '商品定位'
+          : '定位';
 
-  const descriptionLabel = '图片描述';
+  const descriptionLabel = '画面说明';
   const providerPromptSnapshot = formatDisplayValue(
     asset.rawSnapshot?.prompt_snapshot ?? asset.rawSnapshot?.provider_prompt ?? asset.rawSnapshot?.base_prompt,
     '',
@@ -372,103 +321,12 @@ export function AssetInteractionModal({
   const basePromptRaw = formatDisplayValue(asset.rawSnapshot?.base_prompt ?? asset.prompt, '');
   const providerPromptRaw = formatDisplayValue(asset.rawSnapshot?.provider_prompt, '');
   const promptSnapshotRaw = formatDisplayValue(asset.rawSnapshot?.prompt_snapshot, '');
-  const providerParamsText = formatDisplayValue(asset.rawSnapshot?.provider_params, '');
-  const debugMetaText = formatDisplayValue(asset.rawSnapshot?.meta ?? asset.rawSnapshot, '');
-  const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm);
-
-  const startEdit = (field: EditableField, value: string) => {
-    setEditingField(field);
-    setEditingDraft(value);
-  };
-  const cancelEdit = () => {
-    setEditingField(null);
-    setEditingDraft('');
-  };
-  const applyFieldEdit = (): FormState => {
-    if (!editingField) return form;
-    const value = editingDraft.trim();
-    const next = { ...form, [editingField]: value } as FormState;
-    setForm(next);
-    setEditingField(null);
-    setEditingDraft('');
-    return next;
-  };
+  const providerParamsText = serializeDebugValue(asset.rawSnapshot?.provider_params);
+  const typeFieldsText = serializeDebugValue(asset.typeFields);
+  const debugMetaText = serializeDebugValue(asset.rawSnapshot?.meta ?? asset.rawSnapshot);
+  const isDirty = cleanEditableAssetPrompt(promptDraft) !== cleanEditableAssetPrompt(initialPromptDraft);
 
   const valueTextClass = 'mt-1 text-[13px] leading-relaxed text-[#444444] whitespace-pre-wrap break-words';
-  const fieldButtonClass = 'group w-full text-left rounded-lg px-1 py-0.5 hover:bg-[#F7F8FA]';
-  const editHintClass = 'text-[11px] text-[#AEAEB2] opacity-0 transition-opacity group-hover:opacity-100';
-
-  const renderField = (
-    key: EditableField,
-    label: string,
-    value: string,
-    kind: 'short' | 'long',
-    descriptionField = false,
-  ) => {
-    const editing = editingField === key;
-    return (
-      <div className={rowClass}>
-        <div className="text-[11px] font-medium text-[#8E8E93]">{label}</div>
-        {editing ? (
-          <div className="mt-1 space-y-2">
-            {kind === 'short' ? (
-              <input
-                value={editingDraft}
-                onChange={(e) => setEditingDraft(e.target.value)}
-                className="w-full rounded-lg border border-[#EAEAEA] px-3 py-2 text-[13px] text-[#1D1D1F]"
-              />
-            ) : (
-              <textarea
-                value={editingDraft}
-                onChange={(e) => setEditingDraft(e.target.value)}
-                rows={descriptionField ? 4 : 3}
-                className="w-full rounded-lg border border-[#EAEAEA] px-3 py-2 text-[13px] leading-relaxed text-[#444444]"
-              />
-            )}
-            <div className={`grid ${descriptionField ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>
-              <button
-                type="button"
-                onClick={() => {
-                  const next = applyFieldEdit();
-                  if (descriptionField) void onSaveAllNormal({ ...payload, ...next, description: next.description, name: next.name });
-                }}
-                disabled={saving || regenerating}
-                className="rounded-lg border border-[#EAEAEA] py-2 text-[12px] font-medium text-[#1D1D1F] disabled:opacity-50"
-              >
-                保存
-              </button>
-              <button
-                type="button"
-                onClick={cancelEdit}
-                disabled={saving || regenerating}
-                className="rounded-lg border border-[#EAEAEA] py-2 text-[12px] font-medium text-[#444444] disabled:opacity-50"
-              >
-                取消
-              </button>
-              {descriptionField ? (
-                <button
-                  type="button"
-                  disabled={saving || regenerating}
-                  onClick={() => {
-                    const next = applyFieldEdit();
-                    void onRegeneratePrompt({ ...payload, ...next, description: next.description, name: next.name });
-                  }}
-                  className="rounded-lg bg-[#1D1D1F] py-2 text-[12px] font-medium text-white disabled:opacity-50"
-                >
-                  {regenerating ? '生成中…' : '重新生成图片'}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        ) : (
-          <button type="button" className={fieldButtonClass} onClick={() => startEdit(key, value)}>
-            <div className={valueTextClass}>{formatDisplayValue(value || '', '点击编辑')}</div>
-            <div className={editHintClass}>点击编辑</div>
-          </button>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4">
@@ -491,16 +349,28 @@ export function AssetInteractionModal({
               <button
                 key={img.id}
                 type="button"
-                className={`h-12 w-12 overflow-hidden rounded border ${img.id === selectedImage?.id ? 'border-[#1D1D1F]' : 'border-[#EAEAEA]'}`}
+                className={`relative h-12 w-12 overflow-hidden rounded border ${img.id === selectedImage?.id ? 'border-[#1D1D1F]' : 'border-[#EAEAEA]'}`}
                 onClick={() => onSelectImage?.(img.id)}
+                title={img.sourceType === 'reference' ? '用户参考图' : img.sourceType === 'uploaded' ? '用户上传' : '系统生成'}
               >
                 <img src={img.imageUrl} alt={img.label ?? 'thumb'} className="h-full w-full object-cover" />
+                <span className="absolute bottom-0 right-0 rounded-tl bg-black/65 px-1 text-[9px] leading-[1.4] text-white">
+                  {img.sourceType === 'reference' ? '参考图' : img.sourceType === 'uploaded' ? '上传' : '生成'}
+                </span>
               </button>
             ))}
             {canAddImage ? (
-              <button type="button" onClick={onAddImage} className="flex h-12 w-12 items-center justify-center rounded border border-dashed border-[#B8BBC2] bg-white text-[24px] leading-none text-[#6E6E73]">
+              <button
+                type="button"
+                disabled={imageAnalyzing}
+                onClick={onAddImage}
+                className="flex h-12 w-12 items-center justify-center rounded border border-dashed border-[#B8BBC2] bg-white text-[24px] leading-none text-[#6E6E73] disabled:opacity-50"
+              >
                 +
               </button>
+            ) : null}
+            {imageAnalyzing ? (
+              <div className="flex h-12 items-center px-2 text-[11px] text-[#6E6E73]">正在分析参考图...</div>
             ) : null}
           </div>
         </div>
@@ -514,88 +384,112 @@ export function AssetInteractionModal({
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-            <div className="mb-2 text-[12px] text-[#6E6E73]">图片来源：<span className="font-medium text-[#444444]">{asset.sourceLabel}</span></div>
             <div className="flex flex-col gap-3">
-              {renderField('name', '资产名称', form.name, 'short')}
-              {renderField('description', descriptionLabel, form.description, 'long', true)}
-
-              <details className={rowClass}>
-                <summary className="cursor-pointer text-[11px] font-medium text-[#8E8E93]">高级设置</summary>
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <div className="text-[11px] font-medium text-[#8E8E93]">内部生成提示词</div>
-                    <p className="mt-1 text-[11px] leading-relaxed text-[#AEAEB2]">
-                      用于调试图片生成，普通用户无需查看。
-                    </p>
-                    {isPromptEditing ? (
-                      <textarea
-                        value={promptDraft}
-                        onChange={(e) => setPromptDraft(cleanEditableAssetPrompt(e.target.value, asset))}
-                        rows={4}
-                        className="mt-2 w-full rounded-lg border border-[#EAEAEA] px-3 py-2 text-[13px]"
-                      />
-                    ) : (
-                  <button type="button" onClick={() => setIsPromptEditing(true)} className="mt-2 w-full rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3 py-2 text-left text-[13px] leading-relaxed text-[#444444]">{formatDisplayValue(promptDraft, '点击编辑生成提示词')}</button>
-                    )}
-                  </div>
-                  <details className="rounded-lg border border-[#F0F0F0] bg-[#FAFAFA] px-3 py-2">
-                    <summary className="cursor-pointer text-[11px] font-medium text-[#8E8E93]">调试信息</summary>
-                    <div className="mt-2 space-y-2 text-[11px] text-[#6E6E73]">
-                      {basePromptRaw ? (
-                        <div>
-                          <div className="font-medium text-[#8E8E93]">原始 base_prompt</div>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
-                            {basePromptRaw}
-                          </pre>
-                        </div>
-                      ) : null}
-                      {providerPromptRaw ? (
-                        <div>
-                          <div className="font-medium text-[#8E8E93]">原始 provider prompt</div>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
-                            {providerPromptRaw}
-                          </pre>
-                        </div>
-                      ) : null}
-                      {promptSnapshotRaw ? (
-                        <div>
-                          <div className="font-medium text-[#8E8E93]">原始 prompt_snapshot</div>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
-                            {promptSnapshotRaw}
-                          </pre>
-                        </div>
-                      ) : null}
-                      {!promptSnapshotRaw && providerPromptSnapshot ? (
-                        <div>
-                          <div className="font-medium text-[#8E8E93]">Provider 提示快照</div>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
-                            {providerPromptSnapshot}
-                          </pre>
-                        </div>
-                      ) : null}
-                      {providerParamsText ? (
-                        <div>
-                          <div className="font-medium text-[#8E8E93]">Provider 参数</div>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
-                            {providerParamsText}
-                          </pre>
-                        </div>
-                      ) : null}
-                      {debugMetaText ? (
-                        <div>
-                          <div className="font-medium text-[#8E8E93]">其他元数据</div>
-                          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
-                            {debugMetaText}
-                          </pre>
-                        </div>
-                      ) : null}
-                      {!basePromptRaw && !providerPromptRaw && !promptSnapshotRaw && !providerPromptSnapshot && !providerParamsText && !debugMetaText ? (
-                        <p className="text-[11px] text-[#AEAEB2]">暂无调试数据</p>
-                      ) : null}
-                    </div>
-                  </details>
+              <div className={rowClass}>
+                <div className="text-[11px] font-medium text-[#8E8E93]">名称</div>
+                <div className={valueTextClass}>{formatDisplayValue(asset.name || '', '—')}</div>
+              </div>
+              <div className={rowClass}>
+                <div className="text-[11px] font-medium text-[#8E8E93]">{positionLabel}</div>
+                <div className={valueTextClass}>{formatDisplayValue(asset.assetTypeLabel || asset.typeLabel || '', '—')}</div>
+              </div>
+              <div className={rowClass}>
+                <div className="text-[11px] font-medium text-[#8E8E93]">{descriptionLabel}</div>
+                <div className={valueTextClass}>{formatDisplayValue(displayDescription || '', '—')}</div>
+              </div>
+              <div className={rowClass}>
+                <div className="text-[11px] font-medium text-[#8E8E93]">重新生成描述</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-[#AEAEB2]">
+                  修改这里后，点击“重新生成图片”，系统会按这段描述生成新的资产图。
+                </p>
+                <textarea
+                  value={promptDraft}
+                  onChange={(e) => setPromptDraft(e.target.value)}
+                  rows={5}
+                  className="mt-2 w-full rounded-lg border border-[#EAEAEA] px-3 py-2 text-[13px]"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={saving || regenerating}
+                    onClick={() => void onRegeneratePrompt(payload)}
+                    className="rounded-lg bg-[#1D1D1F] px-3 py-2 text-[12px] font-medium text-white disabled:opacity-50"
+                  >
+                    {regenerating ? '生成中…' : '重新生成图片'}
+                  </button>
                 </div>
-              </details>
+              </div>
+              <div className={rowClass}>
+                <div className="text-[11px] font-medium text-[#8E8E93]">图片来源</div>
+                <div className={valueTextClass}>{asset.sourceLabel}</div>
+              </div>
+
+              {isDev ? (
+                <details className={rowClass}>
+                  <summary className="cursor-pointer text-[11px] font-medium text-[#8E8E93]">开发调试信息</summary>
+                  <div className="mt-2 space-y-2 text-[11px] text-[#6E6E73]">
+                    {basePromptRaw ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">原始 base_prompt</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {basePromptRaw}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {providerPromptRaw ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">原始 provider prompt</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {providerPromptRaw}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {promptSnapshotRaw ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">原始 prompt_snapshot</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {promptSnapshotRaw}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {!promptSnapshotRaw && providerPromptSnapshot ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">Provider 提示快照</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {providerPromptSnapshot}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {providerParamsText ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">Provider 参数</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {providerParamsText}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {typeFieldsText ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">type_fields</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {typeFieldsText}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {debugMetaText ? (
+                      <div>
+                        <div className="font-medium text-[#8E8E93]">其他元数据</div>
+                        <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-[#EAEAEA] bg-white p-2 text-[11px] text-[#444444]">
+                          {debugMetaText}
+                        </pre>
+                      </div>
+                    ) : null}
+                    {!basePromptRaw && !providerPromptRaw && !promptSnapshotRaw && !providerPromptSnapshot && !providerParamsText && !typeFieldsText && !debugMetaText ? (
+                      <p className="text-[11px] text-[#AEAEB2]">暂无调试数据</p>
+                    ) : null}
+                  </div>
+                </details>
+              ) : null}
             </div>
           </div>
 
@@ -606,11 +500,11 @@ export function AssetInteractionModal({
                 disabled={saving || regenerating || !isDirty}
                 className="rounded-xl bg-[#1D1D1F] py-3 text-[13px] font-semibold text-white disabled:opacity-50"
                 onClick={() => {
-                  void onSaveAllNormal({ ...payload, ...form });
-                  setInitialForm(form);
+                  void onSaveAllNormal(payload);
+                  setInitialPromptDraft(cleanEditableAssetPrompt(promptDraft));
                 }}
               >
-                {saving ? '保存中…' : '保存'}
+                {saving ? '保存中…' : '保存描述'}
               </button>
             </div>
           </div>

@@ -339,15 +339,17 @@ def list_pipeline_asset_rows(
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
 
     def _pick_visual_anchor_id(asset: AssetEntity, tf: dict) -> int | None:
+        if asset.cover_image_id:
+            return int(asset.cover_image_id)
         raw = tf.get("visual_anchor_image_id")
         if isinstance(raw, int):
             return raw
         if isinstance(raw, str) and raw.strip().isdigit():
             return int(raw.strip())
-        if asset.cover_image_id:
-            return int(asset.cover_image_id)
         imgs = image_by_asset.get(asset.id) or []
-        return int(imgs[0].id) if imgs else None
+        non_reference = [img for img in imgs if str(img.image_type or "").lower() != "reference"]
+        picked = non_reference[0] if non_reference else (imgs[0] if imgs else None)
+        return int(picked.id) if picked else None
 
     def _normalize_priority(tf: dict) -> str:
         p = str(tf.get("exposure_priority") or "secondary").strip().lower()
@@ -355,11 +357,12 @@ def list_pipeline_asset_rows(
             return p
         return "secondary"
 
-    def _cover_url(asset: AssetEntity) -> str | None:
+    def _cover_image(asset: AssetEntity) -> AssetImage | None:
         if asset.cover_image_id and asset.cover_image_id in image_by_id:
-            return image_by_id[asset.cover_image_id].image_url
+            return image_by_id[asset.cover_image_id]
         imgs = image_by_asset.get(asset.id) or []
-        return imgs[0].image_url if imgs else None
+        non_reference = [img for img in imgs if str(img.image_type or "").lower() != "reference"]
+        return (non_reference[0] if non_reference else (imgs[0] if imgs else None))
 
     chars: list[PipelineCharacterAssetRow] = []
     scenes: list[PipelineSceneAssetRow] = []
@@ -368,7 +371,8 @@ def list_pipeline_asset_rows(
         tf = ((asset.extra_json or {}).get("type_fields") or {}) if isinstance(asset.extra_json, dict) else {}
         tf = tf if isinstance(tf, dict) else {}
         prompt = asset.base_prompt
-        cover_url = _cover_url(asset)
+        cover_image = _cover_image(asset)
+        cover_url = cover_image.image_url if cover_image else None
         visual_anchor_image_id = _pick_visual_anchor_id(asset, tf)
         exposure_priority = _normalize_priority(tf)
         narrative_function = str(tf.get("narrative_function")).strip() if tf.get("narrative_function") else None
@@ -387,6 +391,8 @@ def list_pipeline_asset_rows(
         # Keep nested shape for callers expecting meta.type_fields.
         meta_json["type_fields"] = dict(tf)
         meta_json.setdefault("source_asset_version", source_asset_version)
+        if cover_image and isinstance(cover_image.image_type, str):
+            meta_json["cover_image_type"] = cover_image.image_type
         if asset.asset_type == "character":
             role_type = _normalize_role_type(tf.get("role_type"))
             meta_json["role_type"] = role_type

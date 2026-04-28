@@ -95,7 +95,13 @@ export function resolveVisualAnchorImageUrl(row: AssetLibraryItemDto): string {
 
 export function resolveVisualAnchorImageId(row: AssetLibraryItemDto): number | null {
   const tf = pickTypeFields(row);
-  return asPositiveInt(readTopLevelField(row, 'visual_anchor_image_id')) ?? asPositiveInt(tf.visual_anchor_image_id);
+  return (
+    asPositiveInt(readTopLevelField(row, 'cover_image_id')) ??
+    asPositiveInt((readTopLevelField(row, 'cover_image') as Record<string, unknown> | undefined)?.id) ??
+    asPositiveInt(readTopLevelField(row, 'visual_anchor_image_id')) ??
+    asPositiveInt(tf.visual_anchor_image_id) ??
+    asPositiveInt((row.images ?? [])[0]?.id)
+  );
 }
 
 export function resolveAssetRoleLabel(row: AssetLibraryItemDto): string {
@@ -143,7 +149,8 @@ export function resolveNarrativeFunctionLabel(row: AssetLibraryItemDto): string 
 }
 
 export function resolveAssetSourceLabel(row: AssetLibraryItemDto): '系统生成' | '用户上传' | '用户参考图' {
-  if (row.has_reference_images) return '用户参考图';
+  const hasReference = (row.images ?? []).some((img) => asText(img.image_type).toLowerCase() === 'reference');
+  if (hasReference || row.has_reference_images) return '用户参考图';
   const source = asText(readTopLevelField(row, 'source')).toLowerCase();
   const hasUploaded = (row.images ?? []).some((img) => asText(img.image_type).toLowerCase() === 'uploaded');
   if (source === 'user_created' || source === 'mixed' || hasUploaded) return '用户上传';
