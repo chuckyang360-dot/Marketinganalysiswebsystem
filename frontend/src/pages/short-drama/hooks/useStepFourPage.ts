@@ -64,7 +64,10 @@ export function useStepFourPage() {
   const [activeSegment, setActiveSegment] = useState(1);
   /** 右侧预览：当前片段视频 vs 最终成片 */
   const [previewTarget, setPreviewTarget] = useState<'segment' | 'final'>('segment');
-  const [isDirty] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const markDirty = useCallback(() => {
+    setIsDirty(true);
+  }, []);
 
   const isBusyGenerationError = useCallback((err: unknown): boolean => {
     const msg =
@@ -185,7 +188,10 @@ export function useStepFourPage() {
             pollEpochRef.current += 1;
           }
         } catch {
+          window.clearInterval(id);
           console.info('[STEP4_POLLING_STOP]', { reason: 'fetch_error' });
+          setLoadError(SHORT_DRAMA_UI.error.pipelineLoad);
+          setPhase('error');
           pollEpochRef.current += 1;
         }
       })();
@@ -526,6 +532,7 @@ export function useStepFourPage() {
         project_id: projectId,
         ...body,
       });
+      setIsDirty(true);
       setSegmentStatusOverrides((prev) => ({ ...prev, [segId]: 'idle' }));
       await refreshPipeline();
       return res;
@@ -614,11 +621,12 @@ export function useStepFourPage() {
       shots: [],
     };
     setLocalAdditions((prev) => [...prev, newSegment]);
+    markDirty();
     setActiveSegment(newId);
     setTimeout(() => {
       document.getElementById(`segment-${newId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
-  }, [segments, pipelineVm.coreSegments.length]);
+  }, [segments, pipelineVm.coreSegments.length, markDirty]);
 
   const goCreate = useCallback(() => {
     navigate('/short-drama/create');
@@ -632,6 +640,7 @@ export function useStepFourPage() {
           step: 'step_4',
           save_intent: intent === 'before_exit' ? 'before_exit' : 'save_draft',
         });
+        setIsDirty(false);
         return true;
       } catch (e) {
         window.alert(e instanceof Error ? e.message : '保存失败，请稍后重试');
@@ -686,6 +695,7 @@ export function useStepFourPage() {
     handleAddSegment,
     goCreate,
     isDirty,
+    markDirty,
     saveDraft,
   };
 }

@@ -46,8 +46,8 @@ export function SDWorkflowNav({
     setDialog('leave');
   };
 
-  const handleSaveDraftClick = () => {
-    console.info('[FRONT_SAVE_DRAFT_CONFIRM_SHOWN]', { project_id: projectId ?? null, step: currentStep ?? null });
+  const handleSaveProjectClick = () => {
+    console.info('[FRONT_SAVE_PROJECT_CONFIRM_SHOWN]', { project_id: projectId ?? null, step: currentStep ?? null });
     setDialog('save');
   };
 
@@ -58,16 +58,18 @@ export function SDWorkflowNav({
       return;
     }
     const ok = await onSaveDraft(intent);
-    if (!ok) return;
+    if (!ok) {
+      window.alert('保存失败，请稍后重试。');
+      return;
+    }
     if (intent === 'before_exit') {
       console.info('[S0_SAVE_AND_LEAVE_SUCCESS]', { project_id: projectId ?? null, step: currentStep ?? null });
       console.info('[FRONT_SAVE_AND_EXIT_HOME]', { project_id: projectId ?? null, step: currentStep ?? null });
-      window.alert('已保存并返回官网');
       navigate('/');
       return;
     }
-    console.info('[FRONT_SAVE_DRAFT_SUCCESS_STAY]', { project_id: projectId ?? null, step: currentStep ?? null });
-    window.alert('草稿已保存');
+    console.info('[FRONT_SAVE_PROJECT_AND_BACK_SUCCESS]', { project_id: projectId ?? null, step: currentStep ?? null });
+    navigate('/short-drama/projects');
   };
 
   return (
@@ -167,7 +169,7 @@ export function SDWorkflowNav({
           </button>
           <button
             type="button"
-            onClick={handleSaveDraftClick}
+            onClick={handleSaveProjectClick}
             disabled={!allowSaveAndLeave}
             className="flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-4 py-1.5 text-[12.5px] font-medium text-[#444444] transition-all duration-200"
             onMouseEnter={(e) => {
@@ -180,7 +182,7 @@ export function SDWorkflowNav({
             }}
           >
             <i className={ri('ri-save-line', 'text-[12px]')} aria-hidden />
-            保存草稿
+            保存项目
           </button>
         </div>
       </div>
@@ -190,7 +192,7 @@ export function SDWorkflowNav({
             {dialog === 'leave' ? (
               <>
                 <h3 className="text-[17px] font-bold text-[#1D1D1F]">离开当前项目？</h3>
-                <p className="mt-2 text-[13px] text-[#6E6E73]">当前修改尚未保存，是否先保存草稿再返回官网？</p>
+                <p className="mt-2 text-[13px] text-[#6E6E73]">当前项目有未保存修改，离开后可能丢失本次修改。</p>
                 <div className="mt-5 flex items-center justify-end gap-2">
                   <button type="button" onClick={() => setDialog(null)} className="rounded-lg border border-[#EAEAEA] px-3.5 py-2 text-[12.5px]">取消</button>
                   <button
@@ -202,7 +204,7 @@ export function SDWorkflowNav({
                     }}
                     className="rounded-lg border border-[#EAEAEA] bg-[#F7F8FA] px-3.5 py-2 text-[12.5px]"
                   >
-                    不保存并离开
+                    放弃修改并离开
                   </button>
                   <button
                     type="button"
@@ -219,8 +221,8 @@ export function SDWorkflowNav({
               </>
             ) : (
               <>
-                <h3 className="text-[17px] font-bold text-[#1D1D1F]">保存当前进度？</h3>
-                <p className="mt-2 text-[13px] text-[#6E6E73]">保存后你可以稍后从项目管理页继续编辑。</p>
+                <h3 className="text-[17px] font-bold text-[#1D1D1F]">保存当前项目？</h3>
+                <p className="mt-2 text-[13px] text-[#6E6E73]">保存后将回到项目管理页，你可以之后继续编辑。</p>
                 <div className="mt-5 flex items-center justify-end gap-2">
                   <button type="button" onClick={() => setDialog(null)} className="rounded-lg border border-[#EAEAEA] px-3.5 py-2 text-[12.5px]">取消</button>
                   <button
@@ -231,7 +233,7 @@ export function SDWorkflowNav({
                     }}
                     className="rounded-lg bg-[#1D1D1F] px-3.5 py-2 text-[12.5px] font-semibold text-white"
                   >
-                    确认保存
+                    保存并返回
                   </button>
                 </div>
               </>

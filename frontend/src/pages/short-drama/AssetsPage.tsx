@@ -289,6 +289,7 @@ export function ShortDramaAssetsPage() {
   const [imageLoadFailedIds, setImageLoadFailedIds] = useState<Set<number>>(() => new Set());
   const [imageGenerationFailedIds, setImageGenerationFailedIds] = useState<Set<number>>(() => new Set());
   const [analyzingAssetIds, setAnalyzingAssetIds] = useState<Set<number>>(() => new Set());
+  const [isDirty, setIsDirty] = useState(false);
   const refUploadInput = useRef<HTMLInputElement>(null);
   const refTargetAssetId = useRef<number | null>(null);
   const uploadPickerRef = useRef<HTMLInputElement>(null);
@@ -510,6 +511,7 @@ export function ShortDramaAssetsPage() {
         image,
       });
       if (result.warning) window.alert(result.warning);
+      setIsDirty(true);
       await reload();
       if (detail?.id === assetId) await openDetail(assetId);
     } catch {
@@ -597,6 +599,7 @@ export function ShortDramaAssetsPage() {
               reference_images: [],
               type_fields: {},
             });
+            setIsDirty(true);
             await reload();
           } catch (e) {
             window.alert(e instanceof Error ? e.message : '创建失败');
@@ -622,6 +625,7 @@ export function ShortDramaAssetsPage() {
               image,
               optional_name: sanitizeAssetName(draft.name),
             });
+            setIsDirty(true);
             await reload();
           } catch (e) {
             window.alert(e instanceof Error ? e.message : '创建失败，请重试。');
@@ -637,9 +641,15 @@ export function ShortDramaAssetsPage() {
 
   return (
     <div className="min-h-screen" style={{ background: '#fff', fontFamily: "'Inter', sans-serif" }}>
-      <SDWorkflowNav currentStep={3} projectName={projectName ?? undefined} projectId={effectiveProjectId} isDirty={false} onSaveDraft={async (intent) => {
+      <SDWorkflowNav currentStep={3} projectName={projectName ?? undefined} projectId={effectiveProjectId} isDirty={isDirty} onSaveDraft={async (intent) => {
         if (!effectiveProjectId) return false;
-        try { await touchShortDramaProjectStep(effectiveProjectId, { step: 'step_3', save_intent: intent }); return true; } catch { return false; }
+        try {
+          await touchShortDramaProjectStep(effectiveProjectId, { step: 'step_3', save_intent: intent });
+          setIsDirty(false);
+          return true;
+        } catch {
+          return false;
+        }
       }} />
       <div className="pt-14">
         <div className="px-6 lg:px-10 py-6 flex items-start justify-between" style={{ borderBottom: '1px solid #EAEAEA' }}>
@@ -859,6 +869,7 @@ export function ShortDramaAssetsPage() {
             });
             try {
               await updateShortDramaAssetLibrary(detail.id, patchPayload);
+              setIsDirty(true);
             } catch (e) {
               logPatchFailure('[S3_PATCH_SAVE_FAILED]', detail.id, patchPayload, e);
               throw e;
@@ -880,6 +891,7 @@ export function ShortDramaAssetsPage() {
               reuse_reference_images: true,
               current_image_prompt: String(payload.currentImagePrompt || '').trim(),
             });
+            setIsDirty(true);
             await reload();
             await openDetail(detail.id);
           } catch (e) {
@@ -902,6 +914,9 @@ export function ShortDramaAssetsPage() {
           refUploadInput.current?.click();
         }}
         imageAnalyzing={detail ? analyzingAssetIds.has(detail.id) : false}
+        onPromptDirtyChange={(dirty) => {
+          if (dirty) setIsDirty(true);
+        }}
       />
 
       {showCreate ? (

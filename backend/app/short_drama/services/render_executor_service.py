@@ -192,6 +192,7 @@ class RenderExecutorService:
         }
         try:
             seg = SegmentScriptSchema.model_validate(rec.script_json)
+            rec_script_json_snapshot = dict(rec.script_json) if isinstance(rec.script_json, dict) else {}
             plan = build_segment_video_plan(
                 seg,
                 characters=chars,
@@ -326,7 +327,8 @@ class RenderExecutorService:
                     input_payload_json=payload,
                 )
                 db.add(job)
-                db.flush()
+                db.commit()
+                db.refresh(job)
 
             model_name = effective_xai_video_model()
             final_prompt = plan.segment_video_prompt or ""
@@ -378,6 +380,8 @@ class RenderExecutorService:
                     model_name,
                 )
 
+            # Release DB connection before long external API calls.
+            db.close()
             rid = self._provider.submit_reference_segment_video(
                 prompt=plan.segment_video_prompt,
                 reference_image_urls=ref_for_api,
@@ -393,6 +397,8 @@ class RenderExecutorService:
             trace["request_id"] = rid
             self._set_job_status(db, job, status=RenderJobStatus.RUNNING.value, progress=45, request_id=rid)
 
+            # Release DB connection while waiting provider completion.
+            db.close()
             result = self._provider.complete_segment_video(
                 request_id=rid,
                 project_id=project_id,
@@ -449,7 +455,7 @@ class RenderExecutorService:
             if meta.get("model"):
                 job.model = str(meta.get("model"))
 
-            base = dict(rec.script_json) if isinstance(rec.script_json, dict) else {}
+            base = dict(rec_script_json_snapshot)
             base["video_render"] = {
                 "video_url": url,
                 "render_job_id": job.id,

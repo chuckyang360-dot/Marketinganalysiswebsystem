@@ -68,26 +68,45 @@ def build_pipeline_video_state(db: Session, project_id: int, project_status: str
     }
 
 
+def preload_segment_render_jobs(
+    db: Session, project_id: int
+) -> tuple[dict[str, RenderJob], dict[int, RenderJob]]:
+    rows = (
+        db.query(RenderJob)
+        .filter(
+            RenderJob.project_id == project_id,
+            RenderJob.target_type == RenderTargetType.SEGMENT.value,
+        )
+        .order_by(RenderJob.id.desc())
+        .all()
+    )
+    by_segment_id: dict[str, RenderJob] = {}
+    by_job_id: dict[int, RenderJob] = {}
+    for row in rows:
+        if isinstance(row.id, int):
+            by_job_id[row.id] = row
+        seg_id = str(row.target_id or "").strip()
+        if seg_id and seg_id not in by_segment_id:
+            by_segment_id[seg_id] = row
+    return by_segment_id, by_job_id
+
+
 def segment_row_video_fields(
-    db: Session, project_id: int, segment_id: str, script: dict, video_url: str | None
+    segment_id: str,
+    script: dict,
+    video_url: str | None,
+    *,
+    render_job_by_segment_id: dict[str, RenderJob],
+    render_job_by_id: dict[int, RenderJob],
 ) -> dict:
     """Normalize per-segment video fields for pipeline payload."""
     vr = script.get("video_render") if isinstance(script.get("video_render"), dict) else {}
     jid = vr.get("render_job_id")
     job: RenderJob | None = None
     if isinstance(jid, int):
-        job = db.query(RenderJob).filter(RenderJob.id == jid).first()
+        job = render_job_by_id.get(jid)
     if job is None:
-        job = (
-            db.query(RenderJob)
-            .filter(
-                RenderJob.project_id == project_id,
-                RenderJob.target_type == RenderTargetType.SEGMENT.value,
-                RenderJob.target_id == segment_id,
-            )
-            .order_by(RenderJob.id.desc())
-            .first()
-        )
+        job = render_job_by_segment_id.get(str(segment_id))
     st = (job.status if job else None) or None
     err = (job.error_message or "").strip() if job else None
     if job is not None:

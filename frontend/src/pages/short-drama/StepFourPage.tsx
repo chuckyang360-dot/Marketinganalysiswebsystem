@@ -53,6 +53,7 @@ export function ShortDramaStepFourPage() {
     handleAddSegment,
     goCreate,
     isDirty,
+    markDirty,
     saveDraft,
   } = useStepFourPage();
 
@@ -343,6 +344,7 @@ export function ShortDramaStepFourPage() {
               videoGenerateDisabled={videoActionsDisabled}
               assetLibrary={assetLibraryVm}
               onSaveSegmentShot={handleSaveSegmentShot}
+              onDirtyChange={markDirty}
               onGenerateVideo={(id) => {
                 setActiveSegment(id);
                 void handleGenerateVideo(id);

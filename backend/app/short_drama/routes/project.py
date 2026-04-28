@@ -29,7 +29,11 @@ from ..services.project_state_service import (
     normalize_step_status,
     update_last_active_step,
 )
-from ..services.pipeline_video_state import build_pipeline_video_state, segment_row_video_fields
+from ..services.pipeline_video_state import (
+    build_pipeline_video_state,
+    preload_segment_render_jobs,
+    segment_row_video_fields,
+)
 from ..services.read_models import (
     latest_final_video_url,
     list_asset_rows,
@@ -365,6 +369,7 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
             }
 
         video_state = build_pipeline_video_state(db, project_id, project.status)
+        render_job_by_segment_id, render_job_by_id = preload_segment_render_jobs(db, project_id)
 
         seg_payload = []
         for s in segs:
@@ -375,7 +380,13 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
             vu_pub = _public_media_url(str(vu) if vu else None)
             script_out = _script_with_public_video_url(script, vu_pub)
             vr_out = script_out.get("video_render") or {}
-            row_extras = segment_row_video_fields(db, project_id, s.segment_id, script, str(vu) if vu else None)
+            row_extras = segment_row_video_fields(
+                s.segment_id,
+                script,
+                str(vu) if vu else None,
+                render_job_by_segment_id=render_job_by_segment_id,
+                render_job_by_id=render_job_by_id,
+            )
             seg_payload.append(
                 {
                     "id": s.id,

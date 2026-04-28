@@ -58,6 +58,7 @@ interface SegmentWorkbenchProps {
   ) => Promise<unknown>;
   videoGenerateDisabled?: boolean;
   videoLanguage?: string | null;
+  onDirtyChange?: () => void;
 }
 
 export function StepFourSegmentWorkbench({
@@ -71,6 +72,7 @@ export function StepFourSegmentWorkbench({
   onSaveSegmentShot,
   videoGenerateDisabled = false,
   videoLanguage = null,
+  onDirtyChange,
 }: SegmentWorkbenchProps) {
   const [expandedShot, setExpandedShot] = useState<number | null>(null);
   const [expandedSegmentIds, setExpandedSegmentIds] = useState<Record<number, boolean>>({});
@@ -116,6 +118,11 @@ export function StepFourSegmentWorkbench({
     }
     return out;
   }, [drafts, segments]);
+
+  useEffect(() => {
+    const hasUnsaved = Object.values(dirtyMap).some(Boolean) || Object.values(editing).some(Boolean);
+    if (hasUnsaved) onDirtyChange?.();
+  }, [dirtyMap, editing, onDirtyChange]);
 
   const updateSegmentDraft = (seg: Step4SegmentItem, patch: Partial<SegmentDraft>) => {
     setDrafts((prev) => ({ ...prev, [seg.id]: { ...(prev[seg.id] ?? makeSegmentDraft(seg)), ...patch } }));
