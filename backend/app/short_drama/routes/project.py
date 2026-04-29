@@ -491,14 +491,56 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
             + sum(1 for p in products if _nonempty_url(p.image_url))
         )
         asset_rows_total = len(chars) + len(scenes) + len(products)
+        has_all_segment_videos = bool(video_state.get("has_all_segment_videos"))
+        has_final_video = bool(final_u)
+        has_story_blueprint = sb is not None
+        has_product_context = pc is not None
+        segment_scripts_count = len(segs)
+        if has_final_video:
+            suggested_status = "completed"
+            suggested_reason = "final_video_exists"
+        elif has_all_segment_videos:
+            suggested_status = "video_segments_ready"
+            suggested_reason = "all_segment_videos_exist"
+        elif segment_scripts_count > 0:
+            suggested_status = "segments_generated"
+            suggested_reason = "segment_scripts_exist"
+        elif asset_rows_total > 0 and image_url_filled == asset_rows_total:
+            suggested_status = "assets_ready"
+            suggested_reason = "all_asset_images_ready"
+        elif asset_rows_total > 0:
+            suggested_status = "asset_specs_generated"
+            suggested_reason = "asset_specs_exist"
+        elif has_story_blueprint:
+            suggested_status = "story_generated"
+            suggested_reason = "story_blueprint_exists"
+        elif has_product_context:
+            suggested_status = "product_parsed"
+            suggested_reason = "product_context_exists"
+        else:
+            suggested_status = "created"
+            suggested_reason = "no_artifacts_found"
+        logger.info(
+            "[PROJECT_STATUS_ARTIFACT_CHECK] project_id=%s old_status=%s asset_rows_total=%s image_url_filled=%s "
+            "segment_scripts_count=%s has_final_video=%s has_all_segment_videos=%s suggested_status=%s reason=%s",
+            project_id,
+            project.status,
+            asset_rows_total,
+            image_url_filled,
+            segment_scripts_count,
+            has_final_video,
+            has_all_segment_videos,
+            suggested_status,
+            suggested_reason,
+        )
 
         log_api_success(
             logger,
             "GET /project/{id}/pipeline",
             project_id=project_id,
             status=project.status,
-            has_product_context=pc is not None,
-            has_story_blueprint=sb is not None,
+            has_product_context=has_product_context,
+            has_story_blueprint=has_story_blueprint,
             asset_counts={
                 "characters": len(chars),
                 "scenes": len(scenes),
@@ -506,8 +548,8 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
             },
             image_url_filled=image_url_filled,
             asset_rows_total=asset_rows_total,
-            segment_scripts_count=len(segs),
-            has_final_video=bool(final_u),
+            segment_scripts_count=segment_scripts_count,
+            has_final_video=has_final_video,
             final_video_url=final_u or "",
         )
         logger.info(

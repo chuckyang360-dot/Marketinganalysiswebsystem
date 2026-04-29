@@ -83,7 +83,7 @@ export const SHORT_DRAMA_UI = {
       '无法自动生成分段脚本：请确认已完成「资产规范」且项目状态为 asset_specs_generated，或返回「角色场景」页完成上一步。',
     segmentScriptsFailed: '分段脚本生成失败',
     videoStatusBlocked:
-      '当前项目状态尚不允许生成片段视频（需 assets_ready / video_rendering / completed）。请在后端流程到达可渲染阶段后再试。',
+      '当前项目状态尚不允许生成片段视频（需 assets_ready / segments_generated / video_rendering / video_segments_ready / completed）。请在后端流程到达可渲染阶段后再试。',
     assetLibraryEmpty: '暂无资产条目，请先在「角色场景」页生成资产规范。',
     videoGeneratedLabel: '视频已生成',
     segmentNotSynced: '该片段未关联后端脚本，无法单段生成。请先完成前置流程或使用「全部生成」。',
