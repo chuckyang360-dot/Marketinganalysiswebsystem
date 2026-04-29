@@ -5,7 +5,7 @@ import { AssetLightbox, type LightboxItem } from './components/AssetLightbox';
 import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEntity, type AssetKind } from './components/AssetInteractionModal';
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
 import { analyzeShortDramaAssetReferenceImage, createShortDramaAssetFromImage, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
-import type { AssetLibraryItemDto, PipelineSummaryDto } from './types/shortDramaApi';
+import type { AssetImageDto, AssetLibraryItemDto, PipelineSummaryDto } from './types/shortDramaApi';
 import { getAssetThumbnailUrl, resolveAssetImageUrl } from './utils/assetsPageAdapters';
 import { withProjectQuery } from './utils/shortDramaRoutes';
 import { buildRawStructureSnapshot, buildStructureSummary, resolveAssetRoleLabel, resolveAssetSourceLabel, resolveNarrativeFunctionLabel, resolveTypeFields, resolveVisualAnchorImageId } from './utils/assetSpecDisplay';
@@ -269,7 +269,17 @@ function warnAssetDetailMismatch(row: AssetLibraryItemDto): void {
 function pipelineAssetsToCachedCards(pipeline: PipelineSummaryDto): Record<TabType, AssetLibraryItemDto[]> {
   const assets = pipeline.assets;
   if (!assets) return { characters: [], scenes: [], assets: [] };
-  const base = {
+  const makeImage = (id: number, imageUrl: string): AssetImageDto => ({
+    id,
+    image_url: imageUrl,
+    image_type: 'generated',
+    variant_meta: {},
+    provider_params: {},
+    is_cover: true,
+    status: 'active',
+    created_at: null,
+  });
+  const base: Omit<AssetLibraryItemDto, 'id' | 'asset_type' | 'name' | 'description' | 'base_prompt'> = {
     project_id: pipeline.project.id,
     source: 'system_generated',
     cover_image_id: null,
@@ -284,7 +294,7 @@ function pipelineAssetsToCachedCards(pipeline: PipelineSummaryDto): Record<TabTy
     created_at: null,
     updated_at: null,
     tags: [],
-  } as const;
+  };
   return {
     characters: assets.characters.map((c, idx) => ({
       id: c.id,
@@ -295,7 +305,7 @@ function pipelineAssetsToCachedCards(pipeline: PipelineSummaryDto): Record<TabTy
       ...base,
       sort_order: idx,
       image_count: c.image_url ? 1 : 0,
-      images: c.image_url ? [{ id: c.id * 1000 + 1, image_url: c.image_url, image_type: 'generated', variant_meta: {}, is_cover: true, status: 'active', created_at: null }] : [],
+      images: c.image_url ? [makeImage(c.id * 1000 + 1, c.image_url)] : [],
     })),
     scenes: assets.scenes.map((s, idx) => ({
       id: s.id,
@@ -306,7 +316,7 @@ function pipelineAssetsToCachedCards(pipeline: PipelineSummaryDto): Record<TabTy
       ...base,
       sort_order: idx,
       image_count: s.image_url ? 1 : 0,
-      images: s.image_url ? [{ id: s.id * 1000 + 1, image_url: s.image_url, image_type: 'generated', variant_meta: {}, is_cover: true, status: 'active', created_at: null }] : [],
+      images: s.image_url ? [makeImage(s.id * 1000 + 1, s.image_url)] : [],
     })),
     assets: assets.products.map((p, idx) => ({
       id: p.id,
@@ -317,7 +327,7 @@ function pipelineAssetsToCachedCards(pipeline: PipelineSummaryDto): Record<TabTy
       ...base,
       sort_order: idx,
       image_count: p.image_url ? 1 : 0,
-      images: p.image_url ? [{ id: p.id * 1000 + 1, image_url: p.image_url, image_type: 'generated', variant_meta: {}, is_cover: true, status: 'active', created_at: null }] : [],
+      images: p.image_url ? [makeImage(p.id * 1000 + 1, p.image_url)] : [],
     })),
   };
 }
