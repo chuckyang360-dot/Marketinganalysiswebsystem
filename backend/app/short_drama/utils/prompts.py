@@ -316,10 +316,43 @@ Rules:
   video_language is only for audience-facing video copy such as dialogue, voiceover, subtitles, screen text, and CTA.
 - asset.name / asset.description / role_type / scene_type / scene_form / product_role and any asset UI-facing fields
   must use workflow_language only.
-- ASSET IS NOT A SHOT.
-- Character assets are reusable person references, not plot actions.
-- Scene assets are reusable empty locations, not emotional events or story beats.
-- Product assets describe reusable product/interface/service visual references, not invented capabilities.
+- ASSET BOUNDARIES:
+  - ASSET IS NOT A SHOT.
+  - Assets are reusable visual references, not final frames, story moments, or generated scenes.
+  - Do not combine character, scene, product, action, and camera direction into one asset prompt.
+  - A complete video shot should be composed later in Step4 from: character reference + scene reference + product reference + action + camera direction.
+- CHARACTER ASSETS:
+  - Character assets are reusable identity references, not lifestyle scenes, work scenes, product usage scenes, or story shots.
+  - A character asset answers: "Who is this person, and how should they consistently look?"
+  - For character assets, image_prompt and visual_prompt should describe only the person's stable visual identity:
+    approximate age range, gender presentation if relevant, facial features, hairstyle and hair color, skin tone, body type, outfit and clothing style, expression, temperament, and overall identity consistency.
+  - Character assets should not describe the person's location, activity, task, behavior, interaction, product/service usage, work process, story moment, or camera action.
+  - Scenes define where the story happens.
+  - Segment scripts define what the character does in the scene.
+  - Character assets define who the person is and how they should consistently appear.
+- SCENE ASSETS:
+  - Scene assets are reusable environment references, not emotional events, character actions, or story beats.
+  - A scene asset answers: "Where does the story happen, and how should this space consistently look?"
+  - For scene assets, image_prompt and visual_prompt should describe only the reusable environment:
+    location type, spatial layout, lighting, color palette, set dressing, materials, atmosphere, time-of-day feeling, and environment consistency.
+  - Scene assets should not describe character actions, character emotions, plot conflict, product selling points, user interactions, or camera movement.
+  - Characters will be added later by Step4.
+  - Actions and story events will be added later by Step4.
+- PRODUCT ASSETS:
+  - Product assets are reusable product/service visual references, not usage scenes, sales results, or final ad frames.
+  - A product asset answers: "What is this product/service visually, and how should it be consistently recognized?"
+  - For physical products, image_prompt and visual_prompt should describe stable visible features:
+    appearance, shape, color, material, structure, packaging, visible components, brand markings if grounded in provided facts, and immutable visual constraints.
+  - For software, SaaS, AI tools, or services, image_prompt and visual_prompt should describe the stable visual representation:
+    interface style, page structure, module layout, dashboard/workspace appearance, brand visual system, and service visualization.
+  - Product assets must not invent unprovided features, data, certifications, performance claims, or guaranteed outcomes.
+  - Product assets should not describe user actions, character interaction, story result, exaggerated transformation, or camera movement.
+  - Product usage and selling moments belong in Step4 segment scripts, not in product assets.
+- boundary_warnings should explicitly mention if the model is avoiding a boundary mix, such as:
+  character asset should not include location/action;
+  scene asset should not include character action;
+  product asset should not include user action or sales outcome.
+- If no boundary risk exists, use [].
 - Do not invent product/service abilities, certifications, data, or guarantees.
 - image_prompt must be natural language, user-readable, user-editable, and directly effective for image regeneration.
 - Do not output engineering parameter chains, control tokens, or backend trace language.
