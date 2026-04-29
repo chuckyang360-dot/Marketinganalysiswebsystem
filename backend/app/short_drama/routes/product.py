@@ -32,7 +32,7 @@ from ..services.project_task_guard import (
     mark_project_stage_failed,
     mark_project_stage_succeeded,
 )
-from ..utils.enums import ProjectStatus, WorkflowStep
+from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
 
@@ -270,8 +270,7 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
             if had_existing_context:
                 propagate_downstream_stale(write_project, STEP_1)
             update_last_active_step(write_project, STEP_1)
-            if write_project.status == ProjectStatus.CREATED.value:
-                orchestrator.advance_on_success(write_db, write_project, WorkflowStep.PARSE_PRODUCT)
+            orchestrator.advance_on_success(write_db, write_project, WorkflowStep.PARSE_PRODUCT)
             write_db.commit()
             write_db.refresh(record)
             final_status = write_project.status

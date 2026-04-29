@@ -55,6 +55,15 @@ def is_processing(project: ShortDramaProject) -> bool:
 
 
 def acquire_project_task_lock(db: Session, project: ShortDramaProject, *, stage: str) -> None:
+    rt_before = _runtime(project)
+    old_status = project.status
+    logger.info(
+        "[PROJECT_TASK_LOCK_STATE] project_id=%s status=%s current_stage=%s task_running=%s",
+        project.id,
+        project.status,
+        str(rt_before.get("current_stage") or ""),
+        bool(rt_before.get("task_running", False)),
+    )
     logger.info(
         "[PROJECT_TASK_LOCK_CHECK] project_id=%s user_id=%s stage=%s status=%s",
         project.id,
@@ -120,30 +129,49 @@ def acquire_project_task_lock(db: Session, project: ShortDramaProject, *, stage:
     db.commit()
     db.refresh(project)
     logger.info("[PROJECT_TASK_LOCK_ACQUIRED] project_id=%s user_id=%s stage=%s", project.id, project.user_id, stage)
-    logger.info("[PROJECT_STAGE_STARTED] project_id=%s stage=%s", project.id, stage)
+    logger.info(
+        "[PROJECT_STAGE_STARTED] project_id=%s stage=%s old_status=%s new_status=%s",
+        project.id,
+        stage,
+        old_status,
+        project.status,
+    )
 
 
-def mark_project_stage_succeeded(db: Session, project_id: int, *, stage: str, status_after: str) -> None:
+def mark_project_stage_succeeded(
+    db: Session,
+    project_id: int,
+    *,
+    stage: str,
+    status_after: str | None = None,
+    success_status: str | None = None,
+) -> None:
     project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
     if project is None:
         return
+    resolved_success_status = str(success_status or status_after or "").strip()
+    if not resolved_success_status:
+        raise ValueError("mark_project_stage_succeeded requires status_after or success_status")
+    previous_status = project.status
     rt = _runtime(project)
-    rt.update(
-        {
-            "task_running": False,
-            "current_stage": "",
-            "last_succeeded_stage": stage,
-            "failed_stage": "",
-            "error_message": "",
-            "error_type": "",
-            "can_retry": False,
-        }
-    )
-    project.status = status_after
+    rt.pop("task_running", None)
+    rt.pop("current_stage", None)
+    rt.pop("failed_stage", None)
+    rt.pop("error_message", None)
+    rt.pop("error_type", None)
+    rt["can_retry"] = False
+    rt["last_succeeded_stage"] = stage
+    project.status = resolved_success_status
     _save_runtime(project, rt)
     db.add(project)
     db.commit()
-    logger.info("[PROJECT_STAGE_SUCCEEDED] project_id=%s stage=%s status=%s", project_id, stage, status_after)
+    logger.info(
+        "[PROJECT_STAGE_SUCCEEDED] project_id=%s stage=%s previous_status=%s success_status=%s runtime_cleared=true",
+        project_id,
+        stage,
+        previous_status,
+        resolved_success_status,
+    )
 
 
 def mark_project_stage_failed(
@@ -173,9 +201,10 @@ def mark_project_stage_failed(
     db.add(project)
     db.commit()
     logger.error(
-        "[PROJECT_STAGE_FAILED] project_id=%s stage=%s error_type=%s error_message=%s",
+        "[PROJECT_STAGE_FAILED] project_id=%s stage=%s error_type=%s failed_status=%s error_message=%s",
         project_id,
         stage,
         error_type_value,
+        project.status,
         (message or "")[:240],
     )
