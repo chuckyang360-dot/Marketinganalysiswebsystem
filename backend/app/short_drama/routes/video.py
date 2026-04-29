@@ -44,6 +44,22 @@ router = APIRouter()
 async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /videos/generate", project_id=body.project_id)
     lock_acquired = False
+    def _fail_after_lock(error_type_value: str, message: str) -> None:
+        if not lock_acquired:
+            return
+        fail_db = SessionLocal()
+        try:
+            mark_project_stage_failed(
+                fail_db,
+                body.project_id,
+                stage="s4_video",
+                error_type_value=error_type_value,
+                message=message,
+            )
+        except Exception:
+            pass
+        finally:
+            fail_db.close()
     try:
         project = orchestrator.get_project(db, body.project_id)
         recover_stale_processing_status_if_possible(db, project)
@@ -73,10 +89,13 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
         orchestrator.assert_step_allowed(db, project, WorkflowStep.RENDER_VIDEO)
         acquire_project_task_lock(db, project, stage="s4_video")
         lock_acquired = True
+        logger.info("[VIDEO_ROUTE_AFTER_LOCK] route=%s method=%s project_id=%s", "/videos/generate", "POST", body.project_id)
         update_last_active_step(project, STEP_4)
         db.add(project)
         db.commit()
+        logger.info("[VIDEO_ROUTE_BEFORE_EXECUTOR] route=%s method=%s project_id=%s", "/videos/generate", "POST", body.project_id)
         r = render_executor_service.generate_segment_videos(db, body.project_id)
+        logger.info("[VIDEO_ROUTE_EXECUTOR_RETURNED] route=%s method=%s project_id=%s", "/videos/generate", "POST", body.project_id)
         post_db = SessionLocal()
         try:
             mark_project_stage_succeeded(post_db, body.project_id, stage="s4_video", status_after="video_rendering")
@@ -97,29 +116,27 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
             errors=r.errors,
         )
     except ShortDramaVideoInputError as e:
+        _fail_after_lock("video_input_error", str(e))
         log_api_error(logger, "POST /videos/generate", str(e), project_id=body.project_id)
         raise_short_drama_http(e)
     except (ShortDramaVideoProviderError, ShortDramaVideoSaveError) as e:
+        _fail_after_lock("video_provider_or_save_error", str(e))
         log_api_error(logger, "POST /videos/generate", str(e), project_id=body.project_id)
         raise_short_drama_http(e)
     except HTTPException as e:
+        et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+        if isinstance(e.detail, dict):
+            et = str(e.detail.get("error_type") or et)
+        _fail_after_lock(et, str(e.detail))
         if lock_acquired:
-            fail_db = SessionLocal()
-            try:
-                et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
-                if isinstance(e.detail, dict):
-                    et = str(e.detail.get("error_type") or et)
-                mark_project_stage_failed(
-                    fail_db,
-                    body.project_id,
-                    stage="s4_video",
-                    error_type_value=et,
-                    message=str(e.detail),
-                )
-            except Exception:
-                pass
-            finally:
-                fail_db.close()
+            logger.error(
+                "[VIDEO_ROUTE_EXCEPTION_AFTER_LOCK] route=%s method=%s project_id=%s error_type=%s message=%s",
+                "/videos/generate",
+                "POST",
+                body.project_id,
+                et,
+                str(e.detail),
+            )
         log_api_error(
             logger,
             "POST /videos/generate",
@@ -127,6 +144,18 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
             project_id=body.project_id,
             status_code=e.status_code,
         )
+        raise
+    except Exception as e:
+        _fail_after_lock("unexpected_exception", str(e))
+        if lock_acquired:
+            logger.exception(
+                "[VIDEO_ROUTE_EXCEPTION_AFTER_LOCK] route=%s method=%s project_id=%s error_type=%s message=%s",
+                "/videos/generate",
+                "POST",
+                body.project_id,
+                "unexpected_exception",
+                str(e),
+            )
         raise
 
 
@@ -154,6 +183,22 @@ async def generate_one_segment_video(
         segment_id=segment_id,
     )
     lock_acquired = False
+    def _fail_after_lock(error_type_value: str, message: str) -> None:
+        if not lock_acquired:
+            return
+        fail_db = SessionLocal()
+        try:
+            mark_project_stage_failed(
+                fail_db,
+                body.project_id,
+                stage="s4_video",
+                error_type_value=error_type_value,
+                message=message,
+            )
+        except Exception:
+            pass
+        finally:
+            fail_db.close()
     try:
         project = orchestrator.get_project(db, body.project_id)
         recover_stale_processing_status_if_possible(db, project)
@@ -184,9 +229,23 @@ async def generate_one_segment_video(
         orchestrator.assert_step_allowed(db, project, WorkflowStep.RENDER_VIDEO)
         acquire_project_task_lock(db, project, stage="s4_video")
         lock_acquired = True
+        logger.info(
+            "[VIDEO_ROUTE_AFTER_LOCK] route=%s method=%s project_id=%s segment_id=%s",
+            "/videos/generate/{segment_id}",
+            "POST",
+            body.project_id,
+            segment_id,
+        )
         update_last_active_step(project, STEP_4)
         db.add(project)
         db.commit()
+        logger.info(
+            "[VIDEO_ROUTE_BEFORE_EXECUTOR] route=%s method=%s project_id=%s segment_id=%s",
+            "/videos/generate/{segment_id}",
+            "POST",
+            body.project_id,
+            segment_id,
+        )
         job = render_executor_service.enqueue_single_segment_video(db, body.project_id, segment_id)
         background_tasks.add_task(
             render_executor_service.run_single_segment_video_job,
@@ -199,6 +258,13 @@ async def generate_one_segment_video(
             mark_project_stage_succeeded(post_db, body.project_id, stage="s4_video", status_after="video_rendering")
         finally:
             post_db.close()
+        logger.info(
+            "[VIDEO_ROUTE_EXECUTOR_RETURNED] route=%s method=%s project_id=%s segment_id=%s",
+            "/videos/generate/{segment_id}",
+            "POST",
+            body.project_id,
+            segment_id,
+        )
         log_api_success(
             logger,
             "POST /videos/generate/{segment_id}",
@@ -219,6 +285,7 @@ async def generate_one_segment_video(
             error=None,
         )
     except ShortDramaVideoInputError as e:
+        _fail_after_lock("video_input_error", str(e))
         log_api_error(
             logger,
             "POST /videos/generate/{segment_id}",
@@ -228,6 +295,7 @@ async def generate_one_segment_video(
         )
         raise_short_drama_http(e)
     except (ShortDramaVideoProviderError, ShortDramaVideoSaveError) as e:
+        _fail_after_lock("video_provider_or_save_error", str(e))
         log_api_error(
             logger,
             "POST /videos/generate/{segment_id}",
@@ -237,23 +305,20 @@ async def generate_one_segment_video(
         )
         raise_short_drama_http(e)
     except HTTPException as e:
+        et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+        if isinstance(e.detail, dict):
+            et = str(e.detail.get("error_type") or et)
+        _fail_after_lock(et, str(e.detail))
         if lock_acquired:
-            fail_db = SessionLocal()
-            try:
-                et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
-                if isinstance(e.detail, dict):
-                    et = str(e.detail.get("error_type") or et)
-                mark_project_stage_failed(
-                    fail_db,
-                    body.project_id,
-                    stage="s4_video",
-                    error_type_value=et,
-                    message=str(e.detail),
-                )
-            except Exception:
-                pass
-            finally:
-                fail_db.close()
+            logger.error(
+                "[VIDEO_ROUTE_EXCEPTION_AFTER_LOCK] route=%s method=%s project_id=%s segment_id=%s error_type=%s message=%s",
+                "/videos/generate/{segment_id}",
+                "POST",
+                body.project_id,
+                segment_id,
+                et,
+                str(e.detail),
+            )
         log_api_error(
             logger,
             "POST /videos/generate/{segment_id}",
@@ -262,6 +327,19 @@ async def generate_one_segment_video(
             segment_id=segment_id,
             status_code=e.status_code,
         )
+        raise
+    except Exception as e:
+        _fail_after_lock("unexpected_exception", str(e))
+        if lock_acquired:
+            logger.exception(
+                "[VIDEO_ROUTE_EXCEPTION_AFTER_LOCK] route=%s method=%s project_id=%s segment_id=%s error_type=%s message=%s",
+                "/videos/generate/{segment_id}",
+                "POST",
+                body.project_id,
+                segment_id,
+                "unexpected_exception",
+                str(e),
+            )
         raise
 
 

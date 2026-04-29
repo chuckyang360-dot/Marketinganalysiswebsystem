@@ -38,6 +38,7 @@ from ..services.pipeline_video_state import (
     segment_row_video_fields,
 )
 from ..services.read_models import (
+    all_segment_scripts_have_video,
     latest_final_video_url,
     list_asset_rows,
     list_pipeline_asset_rows,
@@ -46,7 +47,14 @@ from ..services.read_models import (
     list_segment_scripts,
 )
 from ..services.workflow_orchestrator import orchestrator
-from ..services.project_task_guard import can_retry, current_stage, error_message, error_type, failed_stage
+from ..services.project_task_guard import (
+    can_retry,
+    compute_project_effective_status,
+    current_stage,
+    error_message,
+    error_type,
+    failed_stage,
+)
 from ..utils.enums import ProjectStatus
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, normalize_target_market
@@ -150,6 +158,10 @@ def _project_to_response(
     effective_status: str | None = None,
     suggested_status: str | None = None,
     status_recoverable: bool = False,
+    has_final_video: bool | None = None,
+    has_all_segment_videos: bool | None = None,
+    segment_video_count: int | None = None,
+    segment_video_total: int | None = None,
 ) -> ShortDramaProjectResponse:
     final_video = latest_final_video_url(db, p.id)
     step_status = normalize_step_status(p.step_status)
@@ -187,6 +199,10 @@ def _project_to_response(
         error_type=error_type(p) or None,
         can_retry=can_retry(p),
         final_video_url=_public_media_url(final_video),
+        has_final_video=has_final_video,
+        has_all_segment_videos=has_all_segment_videos,
+        segment_video_count=segment_video_count,
+        segment_video_total=segment_video_total,
         cover_asset=_project_cover_asset(db, p.id),
         created_at=p.created_at,
         updated_at=p.updated_at,
@@ -306,7 +322,33 @@ async def list_projects(user_id: int = Query(...), db: Session = Depends(get_db)
         )
         .all()
     )
-    projects = [_project_to_response(db, p) for p in rows]
+    projects = []
+    for p in rows:
+        effective_info = compute_project_effective_status(db, p)
+        segs = list_segment_scripts(db, p.id)
+        segment_video_total = len(segs)
+        segment_video_count = 0
+        for s in segs:
+            script = s.script_json if isinstance(s.script_json, dict) else {}
+            vr = script.get("video_render") if isinstance(script.get("video_render"), dict) else {}
+            video_url = str(vr.get("video_url") or "").strip()
+            if video_url:
+                segment_video_count += 1
+        has_final_video = bool(str(latest_final_video_url(db, p.id) or "").strip())
+        has_all_segment_videos = bool(all_segment_scripts_have_video(db, p.id)) if segment_video_total > 0 else False
+        projects.append(
+            _project_to_response(
+                db,
+                p,
+                effective_status=str(effective_info.get("effective_status") or ""),
+                suggested_status=str(effective_info.get("suggested_status") or ""),
+                status_recoverable=bool(effective_info.get("status_recoverable", False)),
+                has_final_video=has_final_video,
+                has_all_segment_videos=has_all_segment_videos,
+                segment_video_count=segment_video_count,
+                segment_video_total=segment_video_total,
+            )
+        )
     logger.info("[PROJECT_LIST_FETCH] user_id=%s total=%s", user_id, len(projects))
     log_api_success(logger, "GET /project", user_id=user_id, total=len(projects))
     return ShortDramaProjectListResponse(projects=projects)
@@ -506,35 +548,13 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
         has_story_blueprint = sb is not None
         has_product_context = pc is not None
         segment_scripts_count = len(segs)
-        runtime = dict((project.step_status or {}).get("_runtime") or {})
-        task_running = bool(runtime.get("task_running", False))
-        current_stage = str(runtime.get("current_stage") or "").strip()
+        effective_info = compute_project_effective_status(db, project)
+        effective_status = str(effective_info.get("effective_status") or "")
+        suggested_status = str(effective_info.get("suggested_status") or "")
+        status_recoverable = bool(effective_info.get("status_recoverable", False))
         current_status = str(project.status or "").strip()
-        if task_running:
-            effective_status = "processing"
-        elif has_final_video:
-            effective_status = "completed"
-        elif has_all_segment_videos:
-            effective_status = "video_segments_ready"
-        elif segment_scripts_count > 0:
-            effective_status = "segments_generated"
-        elif asset_rows_total > 0 and image_url_filled == asset_rows_total:
-            effective_status = "assets_ready"
-        elif asset_rows_total > 0:
-            effective_status = "asset_specs_generated"
-        elif has_story_blueprint:
-            effective_status = "story_generated"
-        elif has_product_context:
-            effective_status = "product_parsed"
-        else:
-            effective_status = "created"
-        suggested_status = effective_status
-        status_recoverable = bool(
-            current_status == "processing"
-            and (not task_running)
-            and effective_status != "processing"
-            and effective_status != current_status
-        )
+        task_running = bool(effective_info.get("task_running", False))
+        current_stage = str(effective_info.get("current_stage") or "").strip()
         logger.info(
             "[PROJECT_EFFECTIVE_STATUS] project_id=%s raw_status=%s effective_status=%s task_running=%s "
             "current_stage=%s asset_rows_total=%s image_url_filled=%s segment_scripts_count=%s "
@@ -604,6 +624,10 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
                     effective_status=effective_status,
                     suggested_status=suggested_status,
                     status_recoverable=status_recoverable,
+                    has_final_video=has_final_video,
+                    has_all_segment_videos=has_all_segment_videos,
+                    segment_video_count=sum(1 for item in seg_payload if str(item.get("video_url") or "").strip()),
+                    segment_video_total=len(seg_payload),
                 ),
                 lightweight=True,
                 has_product_context=pc is not None,
@@ -631,6 +655,10 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
                 effective_status=effective_status,
                 suggested_status=suggested_status,
                 status_recoverable=status_recoverable,
+                has_final_video=has_final_video,
+                has_all_segment_videos=has_all_segment_videos,
+                segment_video_count=sum(1 for item in seg_payload if str(item.get("video_url") or "").strip()),
+                segment_video_total=len(seg_payload),
             ),
             lightweight=False,
             has_product_context=pc is not None,

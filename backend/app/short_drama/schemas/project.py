@@ -58,6 +58,10 @@ class ShortDramaProjectResponse(BaseModel):
     error_type: Optional[str] = None
     can_retry: Optional[bool] = None
     final_video_url: Optional[str] = None
+    has_final_video: Optional[bool] = None
+    has_all_segment_videos: Optional[bool] = None
+    segment_video_count: Optional[int] = None
+    segment_video_total: Optional[int] = None
     cover_asset: ProjectCoverAsset = Field(default_factory=ProjectCoverAsset)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

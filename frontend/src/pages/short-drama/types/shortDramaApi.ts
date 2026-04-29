@@ -30,6 +30,10 @@ export type ShortDramaProjectDto = {
   error_type?: string | null;
   can_retry?: boolean | null;
   final_video_url?: string | null;
+  has_final_video?: boolean | null;
+  has_all_segment_videos?: boolean | null;
+  segment_video_count?: number | null;
+  segment_video_total?: number | null;
   cover_asset?: {
     asset_type: 'character' | 'product' | 'scene' | null;
     name: string | null;

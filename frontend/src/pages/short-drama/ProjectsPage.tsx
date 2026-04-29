@@ -53,11 +53,23 @@ function stepLabel(step: ShortDramaProjectDto['last_active_step']): string {
   return '项目设置';
 }
 
-function step4StatusLabel(status: string | undefined): string {
-  if (status === 'generating') return '视频生成中';
-  if (status === 'stale') return '视频需更新';
-  if (status === 'completed') return '视频已完成';
-  if (status === 'failed') return '视频失败';
+function step4StatusLabel(project: ShortDramaProjectDto): string {
+  const hasFinal = Boolean(project.final_video_url) || Boolean(project.has_final_video);
+  if (hasFinal) return '视频已完成';
+  if (project.has_all_segment_videos) return '片段视频已生成';
+  const segDone = Number(project.segment_video_count || 0);
+  const segTotal = Number(project.segment_video_total || 0);
+  if (segDone > 0 && segTotal > 0 && segDone < segTotal) return '部分片段已生成';
+  const effectiveStatus = String(project.effective_status || project.suggested_status || project.status || '').trim();
+  if (
+    effectiveStatus === 'video_rendering' ||
+    String(project.status || '').trim() === 'video_rendering' ||
+    (effectiveStatus === 'processing' && String(project.current_stage || '').trim() === 's4_video')
+  ) {
+    return '视频生成中';
+  }
+  if (String(project.step_status?.step_4 || '').trim() === 'stale') return '视频需更新';
+  if (String(project.step_status?.step_4 || '').trim() === 'failed') return '视频失败';
   return '视频未开始';
 }
 
@@ -256,7 +268,7 @@ export function ShortDramaProjectsPage() {
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-[#8E8E93]">视频状态</span>
-                        <span className="font-medium text-[#1D1D1F]">{step4StatusLabel(p.step_status?.step_4)}</span>
+                        <span className="font-medium text-[#1D1D1F]">{step4StatusLabel(p)}</span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-[#8E8E93]">最终成片</span>
