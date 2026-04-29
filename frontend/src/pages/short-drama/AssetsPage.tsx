@@ -337,7 +337,8 @@ export function ShortDramaAssetsPage() {
   const { effectiveProjectId, projectName } = useEffectiveShortDramaProjectId();
   const [activeTab, setActiveTab] = useState<TabType>('characters');
   const [data, setData] = useState<Record<TabType, AssetLibraryItemDto[]>>({ characters: [], scenes: [], assets: [] });
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetInteractionEntity | null>(null);
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
@@ -365,9 +366,16 @@ export function ShortDramaAssetsPage() {
   const pipelinePollFailureRef = useRef(0);
   const pipelinePollAbortRef = useRef<AbortController | null>(null);
 
-  const reload = useCallback(async () => {
+  const hasVisibleAssets = useMemo(
+    () => data.characters.length > 0 || data.scenes.length > 0 || data.assets.length > 0,
+    [data],
+  );
+
+  const reload = useCallback(async (opts?: { background?: boolean }) => {
     if (!effectiveProjectId) return;
-    setLoading(true);
+    const background = opts?.background ?? hasVisibleAssets;
+    if (background) setRefreshing(true);
+    else setInitialLoading(true);
     setError(null);
     try {
       const [characters, scenes, products] = await Promise.all([
@@ -384,9 +392,10 @@ export function ShortDramaAssetsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败');
     } finally {
-      setLoading(false);
+      if (background) setRefreshing(false);
+      else setInitialLoading(false);
     }
-  }, [effectiveProjectId]);
+  }, [effectiveProjectId, hasVisibleAssets]);
 
   useEffect(() => {
     const projectId = toPositiveInt(effectiveProjectId);
@@ -394,9 +403,11 @@ export function ShortDramaAssetsPage() {
     const cached = getCachedShortDramaPipeline(projectId);
     if (!cached) {
       console.info('[CACHE_PIPELINE_MISS]', { projectId, sourcePage: 'step3' });
+      if (!hasVisibleAssets) setInitialLoading(true);
       return;
     }
     console.info('[CACHE_PIPELINE_HIT]', { projectId, sourcePage: 'step3' });
+    setInitialLoading(false);
     setData((prev) => {
       const hasExisting = prev.characters.length || prev.scenes.length || prev.assets.length;
       if (hasExisting) return prev;
@@ -406,7 +417,7 @@ export function ShortDramaAssetsPage() {
     setPipelineOverallStatus(String(cached.project?.overall_status || ''));
     setPipelineStepStatus((cached.project?.step_status || {}) as Record<string, string>);
     setPipelineCurrentStage(String(cached.project?.current_stage || ''));
-  }, [effectiveProjectId]);
+  }, [effectiveProjectId, hasVisibleAssets]);
 
   useEffect(() => {
     const run = async () => {
@@ -427,6 +438,7 @@ export function ShortDramaAssetsPage() {
         const pipeline = await getShortDramaPipeline(projectId);
         setCachedShortDramaPipeline(projectId, pipeline);
         console.info('[CACHE_PIPELINE_REFRESH_SUCCESS]', { projectId, sourcePage: 'step3', durationMs: Math.round(performance.now() - startedAt) });
+        setInitialLoading(false);
         setPipelineEffectiveStatus(String(pipeline.project?.effective_status || pipeline.project?.suggested_status || pipeline.project?.status || ''));
         setPipelineOverallStatus(String(pipeline.project?.overall_status || ''));
         setPipelineStepStatus((pipeline.project?.step_status || {}) as Record<string, string>);
@@ -487,7 +499,7 @@ export function ShortDramaAssetsPage() {
           setAutoHint('资产图片生成中，正在同步进度…');
         }
 
-        await reload();
+        await reload({ background: true });
         if (effectiveAfterImages === 'assets_rendering' || (effectiveAfterImages === 'processing' && String(pipelineAfterSpecs.project?.current_stage || '') === 's3_images')) {
           setAutoPhase('generating_images');
         } else {
@@ -501,7 +513,7 @@ export function ShortDramaAssetsPage() {
         });
         setAutoPhase('error');
         setAutoHint('资产自动生成失败，请点击重试或刷新页面。');
-        await reload();
+        await reload({ background: true });
       } finally {
         if (autoRunProjectRef.current === projectId) autoRunProjectRef.current = null;
       }
@@ -629,7 +641,7 @@ export function ShortDramaAssetsPage() {
       });
       if (result.warning) window.alert(result.warning);
       setIsDirty(true);
-      await reload();
+      await reload({ background: true });
       if (detail?.id === assetId) await openDetail(assetId);
     } catch {
       window.alert('参考图分析失败，请重试。');
@@ -683,7 +695,7 @@ export function ShortDramaAssetsPage() {
           setPipelineStepStatus((p.project?.step_status || {}) as Record<string, string>);
           setPipelineCurrentStage(String(p.project?.current_stage || ''));
           pipelinePollFailureRef.current = 0;
-          await reload();
+          await reload({ background: true });
           console.info('[S3_EFFECTIVE_STATUS_CHECK]', {
             project_id: projectId,
             status: String(p.project?.status || ''),
@@ -741,7 +753,7 @@ export function ShortDramaAssetsPage() {
               type_fields: {},
             });
             setIsDirty(true);
-            await reload();
+            await reload({ background: true });
           } catch (e) {
             window.alert(e instanceof Error ? e.message : '创建失败');
           } finally {
@@ -767,7 +779,7 @@ export function ShortDramaAssetsPage() {
               optional_name: sanitizeAssetName(draft.name),
             });
             setIsDirty(true);
-            await reload();
+            await reload({ background: true });
           } catch (e) {
             window.alert(e instanceof Error ? e.message : '创建失败，请重试。');
           } finally {
@@ -810,7 +822,8 @@ export function ShortDramaAssetsPage() {
           </div>
         </div>
         <div className="px-6 lg:px-10 py-7">
-          {loading ? <div className="text-[13px] text-[#8E8E93]">加载中…</div> : null}
+          {initialLoading && !hasVisibleAssets ? <div className="text-[13px] text-[#8E8E93]">加载中…</div> : null}
+          {refreshing && hasVisibleAssets ? <div className="mb-2 text-[12px] text-[#AEAEB2]">正在同步最新状态...</div> : null}
           {error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</div> : null}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {currentRows.map((row) => {
@@ -1015,7 +1028,7 @@ export function ShortDramaAssetsPage() {
               logPatchFailure('[S3_PATCH_SAVE_FAILED]', detail.id, patchPayload, e);
               throw e;
             }
-            await reload();
+            await reload({ background: true });
             await openDetail(detail.id);
           } catch (e) {
             window.alert('保存失败，请稍后重试。');
@@ -1033,7 +1046,7 @@ export function ShortDramaAssetsPage() {
               current_image_prompt: String(payload.currentImagePrompt || '').trim(),
             });
             setIsDirty(true);
-            await reload();
+            await reload({ background: true });
             await openDetail(detail.id);
           } catch (e) {
             console.error('[S3_REGENERATE_FAILED]', {
