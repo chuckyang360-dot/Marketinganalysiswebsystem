@@ -248,6 +248,7 @@ def acquire_project_task_lock(db: Session, project: ShortDramaProject, *, stage:
         {
             "task_running": True,
             "current_stage": stage,
+            "previous_status": old_status,
             "failed_stage": "",
             "error_message": "",
             "error_type": "",
@@ -259,7 +260,15 @@ def acquire_project_task_lock(db: Session, project: ShortDramaProject, *, stage:
     db.add(project)
     db.commit()
     db.refresh(project)
-    logger.info("[PROJECT_TASK_LOCK_ACQUIRED] project_id=%s user_id=%s stage=%s", project.id, project.user_id, stage)
+    logger.info(
+        "[PROJECT_TASK_LOCK_ACQUIRED] project_id=%s user_id=%s stage=%s old_status=%s new_status=%s previous_status=%s",
+        project.id,
+        project.user_id,
+        stage,
+        old_status,
+        project.status,
+        old_status,
+    )
     logger.info(
         "[PROJECT_STAGE_STARTED] project_id=%s stage=%s old_status=%s new_status=%s",
         project.id,

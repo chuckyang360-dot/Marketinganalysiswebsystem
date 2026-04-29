@@ -22,11 +22,12 @@ from ..services.asset_library_service import asset_library_service
 from ..services.workflow_orchestrator import ASSET_IMAGE_RENDER_ALLOWED_STATUSES, orchestrator
 from ..services.project_task_guard import (
     acquire_project_task_lock,
+    current_stage,
     mark_project_stage_failed,
     mark_project_stage_succeeded,
     recover_stale_processing_status_if_possible,
 )
-from ..utils.enums import ProjectStatus
+from ..utils.enums import ProjectStatus, WorkflowStep
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,15 @@ async def generate_all_asset_images(
     forbid_repeat = st in ("video_rendering", "video_segments_ready", "completed")
 
     try:
+        runtime_now = dict((proj.step_status or {}).get("_runtime") or {})
+        logger.info(
+            "[STEP_ALLOWED_CHECK_BEFORE_LOCK] project_id=%s step=%s current_status=%s allowed_statuses=%s",
+            pid,
+            "render_assets",
+            st,
+            sorted(ASSET_IMAGE_RENDER_ALLOWED_STATUSES),
+        )
+        orchestrator.assert_step_allowed(db, proj, WorkflowStep.RENDER_ASSETS)
         acquire_project_task_lock(db, proj, stage="s3_images")
         lock_acquired = True
         result = asset_image_service.generate_all_asset_images(db, pid)
@@ -179,6 +189,9 @@ async def generate_all_asset_images(
                 fail_db.close()
         if he.status_code == status.HTTP_409_CONFLICT:
             detail_s = _detail_to_str(he.detail)
+            prev_status = str(runtime_now.get("previous_status") or "")
+            stage_now = current_stage(proj)
+            task_running = bool(runtime_now.get("task_running", False))
             if st == "failed":
                 reason = "project_failed"
             elif not allowed:
@@ -198,6 +211,15 @@ async def generate_all_asset_images(
                 meta=meta,
                 forbid_repeat=forbid_repeat,
                 prereq_insufficient=prereq_insufficient,
+            )
+            logger.warning(
+                "[STEP_ASSERT_DENIED_CONTEXT] project_id=%s current_status=%s previous_status=%s current_stage=%s task_running=%s allowed_statuses=%s",
+                pid,
+                st,
+                prev_status,
+                stage_now,
+                task_running,
+                sorted(ASSET_IMAGE_RENDER_ALLOWED_STATUSES),
             )
         raise
     except (ShortDramaImageProviderError, ShortDramaImageSaveError) as e:

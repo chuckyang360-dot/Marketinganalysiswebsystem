@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from ..models import ShortDramaProject
 from ..utils.enums import ProjectStatus, WorkflowStep
 from ..utils.flow_logging import log_orchestrator
+from .project_task_guard import current_stage
 from .read_models import (
     all_segment_scripts_have_video,
     latest_final_video_url,
@@ -190,6 +191,10 @@ class WorkflowOrchestrator:
 
     def assert_step_allowed(self, db: Session, project: ShortDramaProject, step: WorkflowStep) -> None:
         self.recover_failed_project_status(db, project)
+        runtime = dict((project.step_status or {}).get("_runtime") or {})
+        prev_status = str(runtime.get("previous_status") or "")
+        task_running = bool(runtime.get("task_running", False))
+        stage_now = current_stage(project)
         if step == WorkflowStep.RENDER_ASSETS:
             if project.status not in _RENDER_ASSETS_ALLOWED:
                 log_orchestrator(
@@ -200,6 +205,9 @@ class WorkflowOrchestrator:
                     step=step.value,
                     reason="invalid_status_for_asset_render",
                     status=project.status,
+                    previous_status=prev_status,
+                    current_stage=stage_now,
+                    task_running=task_running,
                     allowed=sorted(_RENDER_ASSETS_ALLOWED),
                 )
                 raise HTTPException(

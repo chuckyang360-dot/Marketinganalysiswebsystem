@@ -17,6 +17,7 @@ from ..providers.image_provider_factory import build_short_drama_image_provider
 from ..utils.image_prompts import prepare_image_prompt
 from ..utils.image_storage import mime_to_ext, save_image_bytes
 from .workflow_orchestrator import orchestrator
+from .project_task_guard import current_stage
 
 logger = logging.getLogger(__name__)
 
@@ -631,8 +632,11 @@ class AssetImageService:
     def generate_all_asset_images(self, db: Session, project_id: int) -> AssetImageBatchResult:
         project = orchestrator.get_project(db, project_id)
         self._prepare_project_for_asset_image_batch(db, project)
-        orchestrator.begin_asset_image_render(db, project)
-        db.commit()
+        # /assets/images/generate route acquires task lock first and sets status=processing.
+        # In that flow, business-step validation already happened before lock.
+        if not (str(project.status or "").strip() == "processing" and current_stage(project) == "s3_images"):
+            orchestrator.begin_asset_image_render(db, project)
+            db.commit()
         result = AssetImageBatchResult(project_id=project_id)
         try:
             chars = (
