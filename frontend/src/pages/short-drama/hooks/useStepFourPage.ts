@@ -382,25 +382,32 @@ export function useStepFourPage() {
   const stepFourVideoLanguage = useMemo(() => resolveStepFourVideoLanguage(pipeline), [pipeline]);
 
   const projectStatus = pipelineVm.projectStatus;
+  const pipelineEffectiveStatus = String(pipeline?.project?.effective_status || '').trim();
   const suggestedStatus = String(pipeline?.project?.suggested_status || '').trim();
   const statusRecoverable = Boolean(pipeline?.project?.status_recoverable);
-  const effectiveStatus =
-    projectStatus === 'processing' && statusRecoverable && suggestedStatus
-      ? suggestedStatus
-      : projectStatus;
+  const effectiveStatus = pipelineEffectiveStatus || projectStatus || suggestedStatus;
   const canGenerateVideos = VIDEO_ALLOWED_STATUSES.has(effectiveStatus);
   const videoStatusBlockedHint = `当前项目状态尚不允许生成片段视频（当前 ${effectiveStatus || 'unknown'}，需 assets_ready / segments_generated / video_rendering / video_segments_ready / completed）。请在后端流程到达可渲染阶段后再试。`;
   const hasBackendSegmentScripts = pipelineVm.coreSegments.length > 0;
   useEffect(() => {
     if (!pipeline?.project) return;
-    console.info('[S4_EFFECTIVE_STATUS]', {
-      status: projectStatus,
+    console.info('[S4_EFFECTIVE_STATUS_CHECK]', {
+      status: String(pipeline.project.status || ''),
+      effective_status: pipelineEffectiveStatus || null,
       suggested_status: suggestedStatus || null,
       status_recoverable: statusRecoverable,
       effectiveStatus,
       canGenerateVideo: canGenerateVideos,
     });
-  }, [pipeline?.project, projectStatus, suggestedStatus, statusRecoverable, effectiveStatus, canGenerateVideos]);
+    console.info('[S4_EFFECTIVE_STATUS]', {
+      status: projectStatus,
+      effective_status: pipelineEffectiveStatus || null,
+      suggested_status: suggestedStatus || null,
+      status_recoverable: statusRecoverable,
+      effectiveStatus,
+      canGenerateVideo: canGenerateVideos,
+    });
+  }, [pipeline?.project, projectStatus, pipelineEffectiveStatus, suggestedStatus, statusRecoverable, effectiveStatus, canGenerateVideos]);
 
   useEffect(() => {
     if (pipelineVm.coreSegments.length === 0) {

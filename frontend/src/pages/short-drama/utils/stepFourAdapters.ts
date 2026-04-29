@@ -680,6 +680,9 @@ export type StepFourPipelineViewModel = {
 
 /** 无 segment_scripts 时返回空 coreSegments，禁止用假片段冒充真实数据 */
 export function pipelineToStepFourViewModel(pipeline: PipelineSummaryDto | null): StepFourPipelineViewModel {
+  const effectiveStatus = String(
+    pipeline?.project?.effective_status || pipeline?.project?.suggested_status || pipeline?.project?.status || '',
+  ).trim();
   const rowsRaw = pipeline?.segment_scripts;
   const rows: SegmentScriptPipelineRowDto[] = Array.isArray(rowsRaw)
     ? rowsRaw.filter((r): r is SegmentScriptPipelineRowDto => r != null && typeof r === 'object' && 'segment_id' in r)
@@ -690,7 +693,7 @@ export function pipelineToStepFourViewModel(pipeline: PipelineSummaryDto | null)
       coreSegments: [],
       videoStatusFromPipeline: {},
       canMergeAll: false,
-      projectStatus: pipeline?.project?.status ?? '',
+      projectStatus: effectiveStatus,
       currentVideoStage: pipeline?.current_video_stage,
       hasAllSegmentVideos: pipeline?.has_all_segment_videos,
       hasFinalVideo: pipeline?.has_final_video,
@@ -726,7 +729,7 @@ export function pipelineToStepFourViewModel(pipeline: PipelineSummaryDto | null)
     coreSegments,
     videoStatusFromPipeline,
     canMergeAll,
-    projectStatus: pipeline?.project?.status ?? '',
+    projectStatus: effectiveStatus,
     currentVideoStage: pipeline?.current_video_stage,
     hasAllSegmentVideos: pipeline?.has_all_segment_videos ?? allUrlsLocal,
     hasFinalVideo: pipeline?.has_final_video,

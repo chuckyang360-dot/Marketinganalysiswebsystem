@@ -33,6 +33,7 @@ class ShortDramaProjectResponse(BaseModel):
     user_id: int
     project_name: str
     status: str
+    effective_status: Optional[str] = None
     suggested_status: Optional[str] = None
     status_recoverable: bool = False
     duration: Optional[str] = None

@@ -38,6 +38,10 @@ const CAN_LEAVE_ASSETS_FOR_STEP4 = new Set([
   'completed',
 ]);
 
+function projectEffectiveStatus(p: PipelineSummaryDto | null | undefined): string {
+  return String(p?.project?.effective_status || p?.project?.suggested_status || p?.project?.status || '').trim();
+}
+
 async function waitUntilNotAssetRendering(
   projectId: number,
   initial: PipelineSummaryDto,
@@ -45,7 +49,7 @@ async function waitUntilNotAssetRendering(
 ): Promise<PipelineSummaryDto> {
   let p = initial;
   let failures = 0;
-  for (let i = 0; i < POLL_MAX && p.project.status === 'assets_rendering'; i++) {
+  for (let i = 0; i < POLL_MAX && projectEffectiveStatus(p) === 'assets_rendering'; i++) {
     await new Promise((r) => setTimeout(r, POLL_MS));
     try {
       p = await getShortDramaPipeline(projectId);
@@ -120,9 +124,20 @@ export function useAssetsPage() {
     try {
       let p = await getShortDramaPipeline(effectivePid);
       setPipeline(p);
+      const effectiveStatus = projectEffectiveStatus(p);
+      const taskRunning = Boolean(p.project?.current_stage);
+      console.info('[S3_EFFECTIVE_STATUS_CHECK]', {
+        project_id: effectivePid,
+        status: p.project?.status || '',
+        effective_status: effectiveStatus,
+        current_stage: p.project?.current_stage || '',
+        task_running: taskRunning,
+        asset_rows_total: p.asset_rows_total ?? null,
+        image_url_filled: p.image_url_filled ?? null,
+      });
       touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
 
-      if (p.project.status === 'assets_rendering') {
+      if (effectiveStatus === 'assets_rendering') {
         setPhase('generating_images');
         setEmptyHint('检测到资产图任务进行中，正在同步状态…');
         console.info('[FRONT_STEP3_GENERATION_STARTED]', { project_id: effectivePid, stage: 'asset_images_resume' });
@@ -134,7 +149,7 @@ export function useAssetsPage() {
 
       const comp = getAssetsBundleCompleteness(p.assets);
 
-      if (p.project.status === 'story_generated') {
+      if (effectiveStatus === 'story_generated') {
         if (comp === 'partial') {
           console.warn(
             `[FE_ASSET_SPECS_BLOCKED] projectId=${effectivePid} status=${p.project.status} reason=story_generated_asset_bundle_partial_use_next_or_retry`,
@@ -158,7 +173,7 @@ export function useAssetsPage() {
         console.info(
           `[FE_ASSET_SPECS_BLOCKED] projectId=${effectivePid} status=${p.project.status} reason=skip_auto_specs_asset_rows_already_present`,
         );
-        if (p.project.status === 'asset_specs_generated') {
+        if (projectEffectiveStatus(p) === 'asset_specs_generated') {
           await runImageBatch(effectivePid);
           p = await getShortDramaPipeline(effectivePid);
           setPipeline(p);
@@ -168,7 +183,7 @@ export function useAssetsPage() {
         return;
       }
 
-      if (p.project.status !== 'story_generated') {
+      if (effectiveStatus !== 'story_generated') {
         console.info(
           `[FE_ASSET_SPECS_BLOCKED] projectId=${effectivePid} status=${p.project.status} reason=prerequisite_not_story_generated`,
         );
@@ -191,7 +206,7 @@ export function useAssetsPage() {
           setPipeline(p);
           touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
           if (!assetsBundleEmpty(p.assets)) {
-            if (p.project.status === 'asset_specs_generated') {
+            if (projectEffectiveStatus(p) === 'asset_specs_generated') {
               await runImageBatch(effectivePid);
               p = await getShortDramaPipeline(effectivePid);
               setPipeline(p);
@@ -211,7 +226,7 @@ export function useAssetsPage() {
 
       if (assetsBundleEmpty(p.assets)) {
         setEmptyHint(SHORT_DRAMA_UI.empty.assetsAfterCall);
-      } else if (p.project.status === 'asset_specs_generated') {
+      } else if (projectEffectiveStatus(p) === 'asset_specs_generated') {
         await runImageBatch(effectivePid);
         p = await getShortDramaPipeline(effectivePid);
         setPipeline(p);
@@ -222,7 +237,7 @@ export function useAssetsPage() {
         setEmptyHint(SHORT_DRAMA_UI.empty.assetsAfterCall);
       }
       setPhase('ready');
-      if (p.project.status !== 'assets_rendering') {
+      if (projectEffectiveStatus(p) !== 'assets_rendering') {
         console.info('[FRONT_STEP3_GENERATION_SUCCEEDED]', { project_id: effectivePid, stage: 'asset_specs' });
       }
     } catch (e) {
@@ -260,11 +275,12 @@ export function useAssetsPage() {
       let p = await getShortDramaPipeline(effectivePid);
       setPipeline(p);
       touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
-      console.info(`[FE_STEP3_NEXT_CLICK] projectId=${effectivePid} status=${p.project.status}`);
+      console.info(`[FE_STEP3_NEXT_CLICK] projectId=${effectivePid} status=${p.project.status} effective_status=${projectEffectiveStatus(p)}`);
 
       const comp = getAssetsBundleCompleteness(p.assets);
+      let st = projectEffectiveStatus(p);
 
-      if (p.project.status === 'story_generated' && comp !== 'complete') {
+      if (st === 'story_generated' && comp !== 'complete') {
         console.info(
           `[FE_STEP3_NEXT_FORCE_SPECS] projectId=${effectivePid} completeness=${comp} status=${p.project.status}`,
         );
@@ -295,20 +311,22 @@ export function useAssetsPage() {
         touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
       }
 
-      if (p.project.status === 'asset_specs_generated') {
+      st = projectEffectiveStatus(p);
+      if (st === 'asset_specs_generated') {
         await runImageBatch(effectivePid);
         p = await getShortDramaPipeline(effectivePid);
         setPipeline(p);
         touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
       }
 
-      if (p.project.status === 'assets_rendering') {
+      st = projectEffectiveStatus(p);
+      if (st === 'assets_rendering') {
         p = await waitUntilNotAssetRendering(effectivePid, p, setPipeline);
         setPipeline(p);
         touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
       }
 
-      const finalSt = p.project.status;
+      const finalSt = projectEffectiveStatus(p);
       if (CAN_LEAVE_ASSETS_FOR_STEP4.has(finalSt)) {
         return { shouldNavigate: true, statusAfter: finalSt };
       }
@@ -350,7 +368,7 @@ export function useAssetsPage() {
       touchProjectNameFromPipeline(effectivePid, p.project?.project_name);
       if (assetsBundleEmpty(p.assets)) {
         setEmptyHint(SHORT_DRAMA_UI.empty.assetsStillNone);
-      } else if (p.project.status === 'asset_specs_generated') {
+      } else if (projectEffectiveStatus(p) === 'asset_specs_generated') {
         await runImageBatch(effectivePid);
         p = await getShortDramaPipeline(effectivePid);
         setPipeline(p);
@@ -380,7 +398,7 @@ export function useAssetsPage() {
   });
 
   const canClickNext = useMemo(() => {
-    const st = pipeline?.project?.status;
+    const st = projectEffectiveStatus(pipeline);
     if (effectiveProjectId == null || st == null) return false;
     if (CAN_LEAVE_ASSETS_FOR_STEP4.has(st)) return true;
     return st === 'story_generated' || st === 'asset_specs_generated' || st === 'assets_rendering';

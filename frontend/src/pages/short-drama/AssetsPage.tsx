@@ -283,8 +283,9 @@ export function ShortDramaAssetsPage() {
   const [regenerating, setRegenerating] = useState(false);
   const [autoPhase, setAutoPhase] = useState<Step3AutoPhase>('idle');
   const [, setAutoHint] = useState<string | null>(null);
-  const [pipelineStatus, setPipelineStatus] = useState<string>('');
+  const [pipelineEffectiveStatus, setPipelineEffectiveStatus] = useState<string>('');
   const [pipelineOverallStatus, setPipelineOverallStatus] = useState<string>('');
+  const [pipelineCurrentStage, setPipelineCurrentStage] = useState<string>('');
   const [pipelineStepStatus, setPipelineStepStatus] = useState<Record<string, string>>({});
   const [imageLoadFailedIds, setImageLoadFailedIds] = useState<Set<number>>(() => new Set());
   const [imageGenerationFailedIds, setImageGenerationFailedIds] = useState<Set<number>>(() => new Set());
@@ -336,15 +337,29 @@ export function ShortDramaAssetsPage() {
       try {
         console.info('[S3_AUTO_PIPELINE_REQUEST]', JSON.stringify({ project_id: projectId }));
         const pipeline = await getShortDramaPipeline(projectId);
-        setPipelineStatus(String(pipeline.project?.status || ''));
+        setPipelineEffectiveStatus(String(pipeline.project?.effective_status || pipeline.project?.suggested_status || pipeline.project?.status || ''));
         setPipelineOverallStatus(String(pipeline.project?.overall_status || ''));
         setPipelineStepStatus((pipeline.project?.step_status || {}) as Record<string, string>);
+        setPipelineCurrentStage(String(pipeline.project?.current_stage || ''));
+        console.info('[S3_EFFECTIVE_STATUS_CHECK]', {
+          project_id: projectId,
+          status: String(pipeline.project?.status || ''),
+          effective_status: String(pipeline.project?.effective_status || pipeline.project?.suggested_status || pipeline.project?.status || ''),
+          current_stage: String(pipeline.project?.current_stage || ''),
+          status_recoverable: Boolean(pipeline.project?.status_recoverable),
+          asset_rows_total: pipeline.asset_rows_total ?? null,
+          image_url_filled: pipeline.image_url_filled ?? null,
+        });
+        const effectiveStatus = String(
+          pipeline.project?.effective_status || pipeline.project?.suggested_status || pipeline.project?.status || '',
+        );
         console.info('[S3_AUTO_FLOW_CHECK]', JSON.stringify({
           project_id: projectId,
           project_status: pipeline.project.status,
+          effective_status: effectiveStatus,
           assets_rows_total: pipeline.asset_rows_total ?? null,
         }));
-        if (pipeline.project.status === 'story_generated') {
+        if (effectiveStatus === 'story_generated') {
           setAutoPhase('generating_specs');
           setAutoHint('正在自动生成角色/场景/产品资产规范…');
           console.info('[S3_AUTO_TRIGGER_SPECS]', JSON.stringify({ project_id: projectId, trigger: 'assets_page_auto' }));
@@ -352,28 +367,36 @@ export function ShortDramaAssetsPage() {
         }
 
         let pipelineAfterSpecs = await getShortDramaPipeline(projectId);
-        setPipelineStatus(String(pipelineAfterSpecs.project?.status || ''));
+        setPipelineEffectiveStatus(String(pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || ''));
         setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
         setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
-        if (pipelineAfterSpecs.project.status === 'asset_specs_generated') {
+        setPipelineCurrentStage(String(pipelineAfterSpecs.project?.current_stage || ''));
+        const effectiveAfterSpecs = String(
+          pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || '',
+        );
+        if (effectiveAfterSpecs === 'asset_specs_generated') {
           setAutoPhase('generating_images');
           setAutoHint('正在生成资产图片，请稍候…');
           console.info('[S3_AUTO_TRIGGER_IMAGES]', JSON.stringify({ project_id: projectId }));
           const imageResult = await generateShortDramaAssetImages(projectId);
           setImageGenerationFailedIds(extractFailedAssetIds(imageResult.errors));
           pipelineAfterSpecs = await getShortDramaPipeline(projectId);
-          setPipelineStatus(String(pipelineAfterSpecs.project?.status || ''));
+          setPipelineEffectiveStatus(String(pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || ''));
           setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
           setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
+          setPipelineCurrentStage(String(pipelineAfterSpecs.project?.current_stage || ''));
         }
 
-        if (pipelineAfterSpecs.project.status === 'assets_rendering') {
+        const effectiveAfterImages = String(
+          pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || '',
+        );
+        if (effectiveAfterImages === 'assets_rendering' || (effectiveAfterImages === 'processing' && String(pipelineAfterSpecs.project?.current_stage || '') === 's3_images')) {
           setAutoPhase('generating_images');
           setAutoHint('资产图片生成中，正在同步进度…');
         }
 
         await reload();
-        if (pipelineAfterSpecs.project.status === 'assets_rendering') {
+        if (effectiveAfterImages === 'assets_rendering' || (effectiveAfterImages === 'processing' && String(pipelineAfterSpecs.project?.current_stage || '') === 's3_images')) {
           setAutoPhase('generating_images');
         } else {
           setAutoPhase('ready');
@@ -532,9 +555,8 @@ export function ShortDramaAssetsPage() {
   const isAssetGenerationPending =
     autoPhase === 'generating_specs'
     || autoPhase === 'generating_images'
-    || pipelineStatus === 'story_generated'
-    || pipelineStatus === 'asset_specs_generated'
-    || pipelineStatus === 'assets_rendering'
+    || pipelineEffectiveStatus === 'assets_rendering'
+    || (pipelineEffectiveStatus === 'processing' && pipelineCurrentStage === 's3_images')
     || pipelineOverallStatus === 'generating'
     || String(pipelineStepStatus.step_3 || '').toLowerCase() === 'generating'
     || String(pipelineStepStatus.assets || '').toLowerCase() === 'generating';
@@ -563,15 +585,25 @@ export function ShortDramaAssetsPage() {
           const ctrl = new AbortController();
           pipelinePollAbortRef.current = ctrl;
           const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
-          setPipelineStatus(String(p.project?.status || ''));
+          setPipelineEffectiveStatus(String(p.project?.effective_status || p.project?.suggested_status || p.project?.status || ''));
           setPipelineOverallStatus(String(p.project?.overall_status || ''));
           setPipelineStepStatus((p.project?.step_status || {}) as Record<string, string>);
+          setPipelineCurrentStage(String(p.project?.current_stage || ''));
           pipelinePollFailureRef.current = 0;
           await reload();
+          console.info('[S3_EFFECTIVE_STATUS_CHECK]', {
+            project_id: projectId,
+            status: String(p.project?.status || ''),
+            effective_status: String(p.project?.effective_status || p.project?.suggested_status || p.project?.status || ''),
+            current_stage: String(p.project?.current_stage || ''),
+            status_recoverable: Boolean(p.project?.status_recoverable),
+            asset_rows_total: p.asset_rows_total ?? null,
+            image_url_filled: p.image_url_filled ?? null,
+          });
           const done =
-            p.project?.status === 'assets_ready'
-            || p.project?.status === 'segments_generated'
-            || p.project?.status === 'completed';
+            p.project?.effective_status === 'assets_ready'
+            || p.project?.effective_status === 'segments_generated'
+            || p.project?.effective_status === 'completed';
           if (done) {
             setAutoPhase('ready');
           }

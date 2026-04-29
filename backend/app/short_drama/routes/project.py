@@ -147,6 +147,7 @@ def _project_to_response(
     db: Session,
     p: ShortDramaProject,
     *,
+    effective_status: str | None = None,
     suggested_status: str | None = None,
     status_recoverable: bool = False,
 ) -> ShortDramaProjectResponse:
@@ -161,6 +162,7 @@ def _project_to_response(
         user_id=p.user_id,
         project_name=p.project_name,
         status=p.status,
+        effective_status=effective_status,
         suggested_status=suggested_status,
         status_recoverable=status_recoverable,
         duration=p.duration,
@@ -504,30 +506,50 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
         has_story_blueprint = sb is not None
         has_product_context = pc is not None
         segment_scripts_count = len(segs)
-        if has_final_video:
-            suggested_status = "completed"
-        elif has_all_segment_videos:
-            suggested_status = "video_segments_ready"
-        elif segment_scripts_count > 0:
-            suggested_status = "segments_generated"
-        elif asset_rows_total > 0 and image_url_filled == asset_rows_total:
-            suggested_status = "assets_ready"
-        elif asset_rows_total > 0:
-            suggested_status = "asset_specs_generated"
-        elif has_story_blueprint:
-            suggested_status = "story_generated"
-        elif has_product_context:
-            suggested_status = "product_parsed"
-        else:
-            suggested_status = "created"
         runtime = dict((project.step_status or {}).get("_runtime") or {})
         task_running = bool(runtime.get("task_running", False))
+        current_stage = str(runtime.get("current_stage") or "").strip()
         current_status = str(project.status or "").strip()
+        if task_running:
+            effective_status = "processing"
+        elif has_final_video:
+            effective_status = "completed"
+        elif has_all_segment_videos:
+            effective_status = "video_segments_ready"
+        elif segment_scripts_count > 0:
+            effective_status = "segments_generated"
+        elif asset_rows_total > 0 and image_url_filled == asset_rows_total:
+            effective_status = "assets_ready"
+        elif asset_rows_total > 0:
+            effective_status = "asset_specs_generated"
+        elif has_story_blueprint:
+            effective_status = "story_generated"
+        elif has_product_context:
+            effective_status = "product_parsed"
+        else:
+            effective_status = "created"
+        suggested_status = effective_status
         status_recoverable = bool(
             current_status == "processing"
             and (not task_running)
-            and suggested_status != "processing"
-            and suggested_status != current_status
+            and effective_status != "processing"
+            and effective_status != current_status
+        )
+        logger.info(
+            "[PROJECT_EFFECTIVE_STATUS] project_id=%s raw_status=%s effective_status=%s task_running=%s "
+            "current_stage=%s asset_rows_total=%s image_url_filled=%s segment_scripts_count=%s "
+            "has_all_segment_videos=%s has_final_video=%s status_recoverable=%s",
+            project_id,
+            current_status,
+            effective_status,
+            task_running,
+            current_stage,
+            asset_rows_total,
+            image_url_filled,
+            segment_scripts_count,
+            has_all_segment_videos,
+            has_final_video,
+            status_recoverable,
         )
         logger.info(
             "[PROJECT_STATUS_ARTIFACT_CHECK] project_id=%s current_status=%s suggested_status=%s status_recoverable=%s "
@@ -579,6 +601,7 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
                 project=_project_to_response(
                     db,
                     project,
+                    effective_status=effective_status,
                     suggested_status=suggested_status,
                     status_recoverable=status_recoverable,
                 ),
@@ -605,6 +628,7 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
             project=_project_to_response(
                 db,
                 project,
+                effective_status=effective_status,
                 suggested_status=suggested_status,
                 status_recoverable=status_recoverable,
             ),

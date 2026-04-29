@@ -48,6 +48,14 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
         project = orchestrator.get_project(db, body.project_id)
         recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
+        runtime_now = dict((project.step_status or {}).get("_runtime") or {})
+        logger.info(
+            "[S4_EFFECTIVE_STATUS_CHECK] project_id=%s raw_status=%s task_running=%s current_stage=%s",
+            body.project_id,
+            project.status,
+            bool(runtime_now.get("task_running", False)),
+            str(runtime_now.get("current_stage") or ""),
+        )
         logger.info(
             "[STEP_ALLOWED_CHECK_BEFORE_LOCK] project_id=%s step=%s current_status=%s allowed_statuses=%s all_segments=%s",
             body.project_id,
@@ -150,6 +158,15 @@ async def generate_one_segment_video(
         project = orchestrator.get_project(db, body.project_id)
         recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
+        runtime_now = dict((project.step_status or {}).get("_runtime") or {})
+        logger.info(
+            "[S4_EFFECTIVE_STATUS_CHECK] project_id=%s raw_status=%s task_running=%s current_stage=%s segment_id=%s",
+            body.project_id,
+            project.status,
+            bool(runtime_now.get("task_running", False)),
+            str(runtime_now.get("current_stage") or ""),
+            segment_id,
+        )
         logger.info(
             "[STEP_ALLOWED_CHECK_BEFORE_LOCK] project_id=%s step=%s current_status=%s allowed_statuses=%s segment_id=%s",
             body.project_id,

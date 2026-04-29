@@ -5,6 +5,7 @@ export type ShortDramaProjectDto = {
   user_id: number;
   project_name: string;
   status: string;
+  effective_status?: string | null;
   suggested_status?: string | null;
   status_recoverable?: boolean;
   duration?: string | null;
