@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import time
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from ...utils.r2_storage import upload_file
 from ..exceptions import ShortDramaFFmpegError, ShortDramaInvalidSegmentVideoError, ShortDramaMergeError
 from ..models import RenderJob
 from ..utils.enums import RenderJobStatus, RenderTargetType, WorkflowStep
@@ -20,7 +22,6 @@ from ..utils.video_storage import (
     is_short_drama_r2_video_url,
     is_short_drama_static_video_url,
     local_path_from_public_video_url,
-    save_final_video_bytes,
 )
 from .read_models import list_segment_scripts
 from .workflow_orchestrator import orchestrator
@@ -158,7 +159,17 @@ class MergeService:
             tmp_out = tmp_dir / "_merge_working_out.mp4"
             try:
                 merge_mp4_files(paths, tmp_out, project_id=project_id, segment_id="final_merge")
-                data = tmp_out.read_bytes()
+                file_exists = tmp_out.is_file()
+                file_size = tmp_out.stat().st_size if file_exists else 0
+                logger.info(
+                    "[FINAL_VIDEO_MERGE_OUTPUT] project_id=%s local_path=%s file_exists=%s file_size=%s",
+                    project_id,
+                    str(tmp_out.resolve()),
+                    file_exists,
+                    file_size,
+                )
+                if (not file_exists) or file_size <= 0:
+                    raise ShortDramaMergeError("Final merge output file missing or empty")
             except ShortDramaFFmpegError as e:
                 err_msg = str(e)
                 job.status = RenderJobStatus.FAILED.value
@@ -187,13 +198,37 @@ class MergeService:
                 db.commit()
                 logger.warning("[FINAL_RENDER_FAILED] project_id=%s job_id=%s error=%s", project_id, job.id, err_msg[:500])
                 raise ShortDramaMergeError(f"Final merge failed: {err_msg}") from e
-            finally:
-                try:
-                    tmp_out.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
-            final_url = save_final_video_bytes(project_id=project_id, data=data)
+            ts = int(time.time() * 1000)
+            storage_key = f"short-drama/videos/{project_id}/final_{project_id}_{ts}.mp4"
+            logger.info(
+                "[FINAL_VIDEO_UPLOAD_START] project_id=%s local_path=%s storage_key=%s",
+                project_id,
+                str(tmp_out.resolve()),
+                storage_key,
+            )
+            try:
+                final_url = upload_file(str(tmp_out.resolve()), storage_key)
+            except Exception as e:
+                logger.error(
+                    "[FINAL_VIDEO_UPLOAD_FAILED] project_id=%s error=%s",
+                    project_id,
+                    str(e),
+                )
+                err_msg = f"Final upload failed: {e}"
+                job.status = RenderJobStatus.FAILED.value
+                job.error_message = err_msg[:4000]
+                job.meta_json = {**(job.meta_json or {}), "stage": "failed", "error_class": type(e).__name__}
+                db.add(job)
+                db.commit()
+                raise ShortDramaMergeError(err_msg) from e
+            logger.info(
+                "[FINAL_VIDEO_UPLOAD_SUCCESS] project_id=%s storage_key=%s public_url=%s file_size=%s",
+                project_id,
+                storage_key,
+                final_url,
+                tmp_out.stat().st_size,
+            )
             job.status = RenderJobStatus.COMPLETED.value
             job.output_url = final_url
             job.meta_json = {**(job.meta_json or {}), "stage": "completed", "tool": "ffmpeg", "concat": "segment_mp4s"}
@@ -201,6 +236,11 @@ class MergeService:
             db.add(job)
             orchestrator.complete_final_merge(db, project)
             db.commit()
+            logger.info(
+                "[FINAL_VIDEO_URL_SAVED] project_id=%s final_video_url=%s storage=R2",
+                project_id,
+                final_url,
+            )
             logger.info("[FINAL_RENDER_COMPLETED] project_id=%s job_id=%s final_video_url=%s", project_id, job.id, final_url)
             final_video_url = final_url
             final_merge_ok = True
@@ -209,6 +249,10 @@ class MergeService:
             final_error = str(e)
             raise
         finally:
+            try:
+                tmp_out.unlink(missing_ok=True)
+            except Exception:
+                pass
             for pth in downloaded_temp_inputs:
                 try:
                     pth.unlink(missing_ok=True)
