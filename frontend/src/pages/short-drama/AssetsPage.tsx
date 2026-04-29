@@ -351,8 +351,12 @@ export function ShortDramaAssetsPage() {
   const [autoPhase, setAutoPhase] = useState<Step3AutoPhase>('idle');
   const [, setAutoHint] = useState<string | null>(null);
   const [pipelineEffectiveStatus, setPipelineEffectiveStatus] = useState<string>('');
+  const [pipelineRawStatus, setPipelineRawStatus] = useState<string>('');
   const [pipelineOverallStatus, setPipelineOverallStatus] = useState<string>('');
   const [pipelineCurrentStage, setPipelineCurrentStage] = useState<string>('');
+  const [pipelineTaskRunning, setPipelineTaskRunning] = useState(false);
+  const [pipelineAssetRowsTotal, setPipelineAssetRowsTotal] = useState(0);
+  const [pipelineImageUrlFilled, setPipelineImageUrlFilled] = useState(0);
   const [pipelineStepStatus, setPipelineStepStatus] = useState<Record<string, string>>({});
   const [imageLoadFailedIds, setImageLoadFailedIds] = useState<Set<number>>(() => new Set());
   const [imageGenerationFailedIds, setImageGenerationFailedIds] = useState<Set<number>>(() => new Set());
@@ -370,9 +374,15 @@ export function ShortDramaAssetsPage() {
     [data],
   );
 
-  const reload = useCallback(async (opts?: { background?: boolean }) => {
+  const reload = useCallback(async (opts?: { background?: boolean; reason?: string }) => {
     if (!effectiveProjectId) return;
     const background = opts?.background ?? true;
+    console.info('[S3_RELOAD]', {
+      projectId: effectiveProjectId,
+      reason: opts?.reason ?? 'unspecified',
+      background,
+      lightweight: false,
+    });
     if (!background) setInitialLoading(true);
     setError(null);
     try {
@@ -411,10 +421,14 @@ export function ShortDramaAssetsPage() {
       return pipelineAssetsToCachedCards(cached);
     });
     setPipelineEffectiveStatus(String(cached.project?.effective_status || cached.project?.suggested_status || cached.project?.status || ''));
+    setPipelineRawStatus(String(cached.project?.status || ''));
     setPipelineOverallStatus(String(cached.project?.overall_status || ''));
     setPipelineStepStatus((cached.project?.step_status || {}) as Record<string, string>);
     setPipelineCurrentStage(String(cached.project?.current_stage || ''));
-  }, [effectiveProjectId, hasVisibleAssets]);
+    setPipelineTaskRunning(Boolean(cached.project?.current_stage));
+    setPipelineAssetRowsTotal(Number(cached.asset_rows_total || 0));
+    setPipelineImageUrlFilled(Number(cached.image_url_filled || 0));
+  }, [effectiveProjectId]);
 
   useEffect(() => {
     const run = async () => {
@@ -437,9 +451,13 @@ export function ShortDramaAssetsPage() {
         console.info('[CACHE_PIPELINE_REFRESH_SUCCESS]', { projectId, sourcePage: 'step3', durationMs: Math.round(performance.now() - startedAt) });
         setInitialLoading(false);
         setPipelineEffectiveStatus(String(pipeline.project?.effective_status || pipeline.project?.suggested_status || pipeline.project?.status || ''));
+        setPipelineRawStatus(String(pipeline.project?.status || ''));
         setPipelineOverallStatus(String(pipeline.project?.overall_status || ''));
         setPipelineStepStatus((pipeline.project?.step_status || {}) as Record<string, string>);
         setPipelineCurrentStage(String(pipeline.project?.current_stage || ''));
+        setPipelineTaskRunning(Boolean(pipeline.project?.current_stage));
+        setPipelineAssetRowsTotal(Number(pipeline.asset_rows_total || 0));
+        setPipelineImageUrlFilled(Number(pipeline.image_url_filled || 0));
         console.info('[S3_EFFECTIVE_STATUS_CHECK]', {
           project_id: projectId,
           status: String(pipeline.project?.status || ''),
@@ -468,9 +486,13 @@ export function ShortDramaAssetsPage() {
         let pipelineAfterSpecs = await getShortDramaPipeline(projectId);
         setCachedShortDramaPipeline(projectId, pipelineAfterSpecs);
         setPipelineEffectiveStatus(String(pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || ''));
+        setPipelineRawStatus(String(pipelineAfterSpecs.project?.status || ''));
         setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
         setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
         setPipelineCurrentStage(String(pipelineAfterSpecs.project?.current_stage || ''));
+        setPipelineTaskRunning(Boolean(pipelineAfterSpecs.project?.current_stage));
+        setPipelineAssetRowsTotal(Number(pipelineAfterSpecs.asset_rows_total || 0));
+        setPipelineImageUrlFilled(Number(pipelineAfterSpecs.image_url_filled || 0));
         const effectiveAfterSpecs = String(
           pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || '',
         );
@@ -483,9 +505,13 @@ export function ShortDramaAssetsPage() {
           pipelineAfterSpecs = await getShortDramaPipeline(projectId);
           setCachedShortDramaPipeline(projectId, pipelineAfterSpecs);
           setPipelineEffectiveStatus(String(pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || ''));
+          setPipelineRawStatus(String(pipelineAfterSpecs.project?.status || ''));
           setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
           setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
           setPipelineCurrentStage(String(pipelineAfterSpecs.project?.current_stage || ''));
+          setPipelineTaskRunning(Boolean(pipelineAfterSpecs.project?.current_stage));
+          setPipelineAssetRowsTotal(Number(pipelineAfterSpecs.asset_rows_total || 0));
+          setPipelineImageUrlFilled(Number(pipelineAfterSpecs.image_url_filled || 0));
         }
 
         const effectiveAfterImages = String(
@@ -496,7 +522,7 @@ export function ShortDramaAssetsPage() {
           setAutoHint('资产图片生成中，正在同步进度…');
         }
 
-        await reload({ background: true });
+        await reload({ background: true, reason: 'auto_flow' });
         if (effectiveAfterImages === 'assets_rendering' || (effectiveAfterImages === 'processing' && String(pipelineAfterSpecs.project?.current_stage || '') === 's3_images')) {
           setAutoPhase('generating_images');
         } else {
@@ -510,7 +536,7 @@ export function ShortDramaAssetsPage() {
         });
         setAutoPhase('error');
         setAutoHint('资产自动生成失败，请点击重试或刷新页面。');
-        await reload({ background: true });
+        await reload({ background: true, reason: 'auto_flow_error_fallback' });
       } finally {
         if (autoRunProjectRef.current === projectId) autoRunProjectRef.current = null;
       }
@@ -653,20 +679,24 @@ export function ShortDramaAssetsPage() {
 
   const createLabel = activeTab === 'characters' ? '添加角色' : activeTab === 'scenes' ? '添加场景' : '添加产品';
   const currentRows = data[activeTab];
-  const isAssetGenerationPending =
-    autoPhase === 'generating_specs'
-    || autoPhase === 'generating_images'
-    || pipelineEffectiveStatus === 'assets_rendering'
-    || (pipelineEffectiveStatus === 'processing' && pipelineCurrentStage === 's3_images')
-    || pipelineOverallStatus === 'generating'
-    || String(pipelineStepStatus.step_3 || '').toLowerCase() === 'generating'
-    || String(pipelineStepStatus.assets || '').toLowerCase() === 'generating';
+  const isAssetGenerationRunning =
+    pipelineEffectiveStatus === 'assets_rendering'
+    || (pipelineRawStatus === 'processing' && pipelineCurrentStage === 's3_images' && pipelineTaskRunning);
   const isAssetGenerationFailed =
     autoPhase === 'error'
     || pipelineOverallStatus === 'failed'
     || String(pipelineStepStatus.step_3 || '').toLowerCase() === 'failed'
     || String(pipelineStepStatus.assets || '').toLowerCase() === 'failed';
-  const showSpecSkeletonCards = isAssetGenerationPending && currentRows.length === 0;
+  const hasVisibleAssetImages = useMemo(() => {
+    const tabsRows = [...data.characters, ...data.scenes, ...data.assets];
+    return tabsRows.some((row) => {
+      const cover = getAssetThumbnailUrl(row);
+      if (cover) return true;
+      return activeRenderableImages(row).length > 0;
+    });
+  }, [data]);
+  const shouldShowGeneratingCard = isAssetGenerationRunning && !hasVisibleAssetImages && currentRows.length === 0;
+  const showSpecSkeletonCards = shouldShowGeneratingCard;
   const showFailureCard = isAssetGenerationFailed && currentRows.length === 0;
   const showAddCard = !showSpecSkeletonCards && !showFailureCard;
   const tabs = useMemo(() => ([
@@ -677,8 +707,25 @@ export function ShortDramaAssetsPage() {
 
   useEffect(() => {
     const projectId = toPositiveInt(effectiveProjectId);
-    if (!projectId || !isAssetGenerationPending) return;
+    const shouldPoll = Boolean(projectId) && isAssetGenerationRunning;
+    console.info('[S3_POLLING_DECISION]', {
+      projectId: projectId ?? null,
+      effectiveStatus: pipelineEffectiveStatus,
+      rawStatus: pipelineRawStatus,
+      currentStage: pipelineCurrentStage,
+      taskRunning: pipelineTaskRunning,
+      isAssetGenerationRunning,
+      shouldPoll,
+    });
+    if (!projectId || !isAssetGenerationRunning) {
+      console.info('[S3_POLLING_STOP]', {
+        projectId: projectId ?? null,
+        reason: !projectId ? 'no_project' : 'should_poll_false',
+      });
+      return;
+    }
     pipelinePollFailureRef.current = 0;
+    console.info('[S3_POLLING_START]', { projectId });
     const timer = window.setInterval(() => {
       void (async () => {
         try {
@@ -688,11 +735,23 @@ export function ShortDramaAssetsPage() {
           const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
           setCachedShortDramaPipeline(projectId, p);
           setPipelineEffectiveStatus(String(p.project?.effective_status || p.project?.suggested_status || p.project?.status || ''));
+          setPipelineRawStatus(String(p.project?.status || ''));
           setPipelineOverallStatus(String(p.project?.overall_status || ''));
           setPipelineStepStatus((p.project?.step_status || {}) as Record<string, string>);
           setPipelineCurrentStage(String(p.project?.current_stage || ''));
+          setPipelineTaskRunning(Boolean(p.project?.current_stage));
+          setPipelineAssetRowsTotal(Number(p.asset_rows_total || 0));
+          setPipelineImageUrlFilled(Number(p.image_url_filled || 0));
           pipelinePollFailureRef.current = 0;
-          await reload({ background: true });
+          const runningNow =
+            String(p.project?.effective_status || p.project?.suggested_status || p.project?.status || '') === 'assets_rendering'
+            || (String(p.project?.status || '') === 'processing' && String(p.project?.current_stage || '') === 's3_images' && Boolean(p.project?.current_stage));
+          if (!runningNow) {
+            window.clearInterval(timer);
+            console.info('[S3_POLLING_STOP]', { projectId, reason: 'stage_settled' });
+            return;
+          }
+          await reload({ background: true, reason: 'polling' });
           console.info('[S3_EFFECTIVE_STATUS_CHECK]', {
             project_id: projectId,
             status: String(p.project?.status || ''),
@@ -713,6 +772,7 @@ export function ShortDramaAssetsPage() {
           pipelinePollFailureRef.current += 1;
           if (pipelinePollFailureRef.current >= 3) {
             window.clearInterval(timer);
+            console.info('[S3_POLLING_STOP]', { projectId, reason: 'polling_error_3x' });
             setAutoPhase('error');
             setAutoHint('pipeline 轮询连续失败，已自动停止，请稍后重试。');
           }
@@ -721,10 +781,48 @@ export function ShortDramaAssetsPage() {
     }, 3000);
     return () => {
       window.clearInterval(timer);
+      console.info('[S3_POLLING_STOP]', { projectId, reason: 'effect_cleanup' });
       pipelinePollAbortRef.current?.abort();
       pipelinePollAbortRef.current = null;
     };
-  }, [effectiveProjectId, isAssetGenerationPending, reload]);
+  }, [
+    effectiveProjectId,
+    isAssetGenerationRunning,
+    pipelineCurrentStage,
+    pipelineEffectiveStatus,
+    pipelineRawStatus,
+    pipelineTaskRunning,
+    reload,
+  ]);
+
+  useEffect(() => {
+    const projectId = toPositiveInt(effectiveProjectId);
+    const shouldPoll = Boolean(projectId) && isAssetGenerationRunning;
+    console.info('[S3_ASSET_RENDER_STATE]', {
+      projectId: projectId ?? null,
+      rawStatus: pipelineRawStatus,
+      effectiveStatus: pipelineEffectiveStatus,
+      currentStage: pipelineCurrentStage,
+      taskRunning: pipelineTaskRunning,
+      assetRowsTotal: pipelineAssetRowsTotal,
+      imageUrlFilled: pipelineImageUrlFilled,
+      hasVisibleAssets: hasVisibleAssetImages,
+      isAssetGenerationRunning,
+      shouldShowGeneratingCard,
+      shouldPoll,
+    });
+  }, [
+    effectiveProjectId,
+    pipelineRawStatus,
+    pipelineEffectiveStatus,
+    pipelineCurrentStage,
+    pipelineTaskRunning,
+    pipelineAssetRowsTotal,
+    pipelineImageUrlFilled,
+    hasVisibleAssetImages,
+    isAssetGenerationRunning,
+    shouldShowGeneratingCard,
+  ]);
 
   const submitAdd = useCallback(async () => {
     if (!effectiveProjectId) return;
@@ -826,7 +924,7 @@ export function ShortDramaAssetsPage() {
               const visualAnchor = getAssetThumbnailUrl(row);
               const roleLabel = resolveAssetRoleLabel(row);
               const imageLoadFailed = imageLoadFailedIds.has(row.id);
-              const isImageGenerating = isAssetGenerationPending && !visualAnchor && !imageLoadFailed;
+              const isImageGenerating = isAssetGenerationRunning && !visualAnchor && !imageLoadFailed;
               const hasFailedImage =
                 !visualAnchor &&
                 (imageGenerationFailedIds.has(row.id) || (row.images ?? []).some((img) => String(img.status || '').toLowerCase() === 'failed'));
