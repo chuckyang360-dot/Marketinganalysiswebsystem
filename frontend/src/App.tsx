@@ -19,6 +19,9 @@ import { ShortDramaStoryBlueprintPage } from './pages/short-drama/StoryBlueprint
 import { ShortDramaAssetsPage } from './pages/short-drama/AssetsPage';
 import { ShortDramaStepFourPage } from './pages/short-drama/StepFourPage';
 import { ShortDramaOverviewPage } from './pages/short-drama/OverviewPage';
+import { SettingsPage } from './pages/account/SettingsPage';
+import { PlanPage } from './pages/account/PlanPage';
+import { BillingPage } from './pages/account/BillingPage';
 import { AuthProvider } from './contexts/AuthContext';
 import { LanguageProvider } from './contexts/LanguageContext';
 
@@ -54,6 +57,9 @@ export function App() {
           <Route path="/short-drama/overview" element={<ShortDramaOverviewPage />} />
           <Route path="/result" element={<AnalysisResult />} />
           <Route path="/about" element={<About />} />
+          <Route path="/account/settings" element={<SettingsPage />} />
+          <Route path="/account/plan" element={<PlanPage />} />
+          <Route path="/account/billing" element={<BillingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="*" element={<Navigate to="/" replace />} />

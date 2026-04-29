@@ -13,8 +13,8 @@ export function ShortDramaHero() {
 
   return (
     <section
-      className="relative flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center overflow-hidden"
-      style={{ background: '#ffffff' }}
+      className="relative flex min-h-[calc(100vh-4.5rem)] flex-col items-center justify-center overflow-hidden"
+      style={{ background: 'linear-gradient(180deg, #F8FAFC 0%, #FFFFFF 45%)' }}
     >
       <div
         className="absolute top-0 left-0 right-0 h-px"
@@ -23,6 +23,10 @@ export function ShortDramaHero() {
 
       {/* Weak atmosphere: no external image — layered gradients + soft bloom */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+        <div
+          className="absolute -top-[20%] left-1/2 h-[min(48vh,420px)] w-[min(120vw,880px)] -translate-x-1/2 rounded-[50%] opacity-[0.2] blur-3xl"
+          style={{ background: 'radial-gradient(ellipse at center, rgba(196,181,253,0.2) 0%, rgba(191,219,254,0.12) 35%, transparent 72%)' }}
+        />
         <div
           className="absolute -bottom-[20%] left-1/2 h-[min(70vh,520px)] w-[min(140vw,900px)] -translate-x-1/2 rounded-[50%] opacity-[0.07] blur-3xl"
           style={{ background: 'radial-gradient(ellipse at center, #374151 0%, transparent 70%)' }}
@@ -41,7 +45,7 @@ export function ShortDramaHero() {
         <div className="absolute inset-0 bg-gradient-to-b from-white via-white/92 to-white" />
       </div>
 
-      <div className="relative z-10 mx-auto w-full max-w-5xl px-6 pb-16 pt-20 text-center md:pb-20 md:pt-28">
+      <div className="relative z-10 mx-auto w-full max-w-5xl px-6 pb-16 pt-28 text-center md:pb-20 md:pt-32">
         <div
           className="mb-10 inline-flex items-center gap-2 rounded-full px-4 py-2 text-[11.5px] font-semibold tracking-wider"
           style={{

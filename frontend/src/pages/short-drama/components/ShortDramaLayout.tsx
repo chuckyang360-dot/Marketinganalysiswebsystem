@@ -27,11 +27,11 @@ export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDra
   return (
     <div className="min-h-screen bg-white" style={{ color: sdColors.ink }}>
       <header
-        className="fixed top-0 left-0 right-0 z-50 flex h-14 items-center justify-between px-6 transition-all duration-300 lg:px-10"
+        className="fixed top-0 left-0 right-0 z-50 flex h-[72px] items-center justify-between px-6 transition-all duration-300 backdrop-blur-md lg:px-10"
         style={{
-          background: '#ffffff',
-          borderBottom: scrolled ? `1px solid ${sdColors.border}` : '1px solid transparent',
-          boxShadow: scrolled ? '0 1px 6px rgba(0,0,0,0.04)' : 'none',
+          background: scrolled ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.86)',
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          boxShadow: '0 8px 24px rgba(15, 23, 42, 0.04)',
         }}
       >
         <div className="flex min-w-0 items-center gap-3">
@@ -101,7 +101,7 @@ export function ShortDramaLayout({ children, headerMode = 'workflow' }: ShortDra
         </div>
       </header>
 
-      <div className="pt-14">{children}</div>
+      <div className="pt-[72px]">{children}</div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -12,6 +13,8 @@ export function Navbar({ homeMode = false, onOpenHistory }: NavbarProps) {
   const navigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
   const { language, setLanguage, t } = useLanguage();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const displayName = user?.name || user?.email?.split('@')[0] || 'User';
 
@@ -30,9 +33,26 @@ export function Navbar({ homeMode = false, onOpenHistory }: NavbarProps) {
     : 'shadow-[0_1px_8px_rgba(0,0,0,0.06)]';
 
   const handleLogout = () => {
+    setMenuOpen(false);
     logout();
     navigate('/');
   };
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClickOutside = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      if (!menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
 
   return (
     <header className={`fixed top-0 left-0 right-0 z-50 h-16 border-b border-[#EAEAEA] bg-white ${headerShadowClass} transition-shadow duration-300 lg:h-[68px]`}>
@@ -112,17 +132,67 @@ export function Navbar({ homeMode = false, onOpenHistory }: NavbarProps) {
           </button>
 
           {isAuthenticated ? (
-            <>
-              <span className="max-w-[180px] truncate px-2 text-[13px] font-medium leading-none text-[#111111]">
-                {displayName}
-              </span>
+            <div className="relative" ref={menuRef}>
               <button
-                onClick={handleLogout}
-                className="h-8 rounded-lg border border-[#EAEAEA] px-3 text-[13px] leading-none text-[#666666] transition-colors hover:bg-red-50 hover:text-red-600"
+                type="button"
+                onClick={() => setMenuOpen((v) => !v)}
+                className="flex h-9 max-w-[220px] items-center gap-2 rounded-lg border border-[#EAEAEA] px-3 text-[13px] font-medium text-[#111111] transition-colors hover:bg-[#F7F8FA]"
               >
-                {t('nav.logout')}
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(123,97,255,0.12)] text-[11px] font-semibold text-[#7B61FF]">
+                  {displayName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="truncate">{displayName}</span>
+                <span className={`ml-1 text-[10px] text-[#888888] transition-transform ${menuOpen ? 'rotate-180' : ''}`}>▼</span>
               </button>
-            </>
+
+              {menuOpen ? (
+                <div className="absolute right-0 z-50 mt-2 w-[220px] rounded-xl border border-[#EAEAEA] bg-white p-1.5 shadow-md">
+                  <button
+                    type="button"
+                    onClick={() => navigate('/workspace')}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-[#444444] transition-colors hover:bg-[rgba(123,97,255,0.08)] hover:text-[#7B61FF]"
+                  >
+                    进入工作台
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/short-drama/projects')}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-[#444444] transition-colors hover:bg-[rgba(123,97,255,0.08)] hover:text-[#7B61FF]"
+                  >
+                    项目管理
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/account/settings')}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-[#444444] transition-colors hover:bg-[rgba(123,97,255,0.08)] hover:text-[#7B61FF]"
+                  >
+                    账户设置
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/account/plan')}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-[#444444] transition-colors hover:bg-[rgba(123,97,255,0.08)] hover:text-[#7B61FF]"
+                  >
+                    升级计划
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate('/account/billing')}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-[#444444] transition-colors hover:bg-[rgba(123,97,255,0.08)] hover:text-[#7B61FF]"
+                  >
+                    账单
+                  </button>
+                  <div className="my-1 border-t border-[#EAEAEA]" />
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="block w-full rounded-lg px-3 py-2 text-left text-[13px] text-red-500 transition-colors hover:bg-red-50"
+                  >
+                    {t('nav.logout')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
           ) : (
             <Link to="/login" className="flex h-8 items-center rounded-lg border border-[#EAEAEA] px-3 text-[13px] leading-none text-[#666666] transition-colors hover:bg-[rgba(123,97,255,0.06)] hover:text-[#7B61FF]">
               {t('nav.login')}
