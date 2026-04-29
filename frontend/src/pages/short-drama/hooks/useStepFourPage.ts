@@ -39,6 +39,53 @@ function pipelineHasSegmentScripts(p: PipelineSummaryDto | null): boolean {
   return rows.some((r) => r != null && typeof r === 'object' && 'segment_id' in r);
 }
 
+function pipelineAssetsCount(p: PipelineSummaryDto | null | undefined): number {
+  if (!p?.assets) return 0;
+  const chars = Array.isArray(p.assets.characters) ? p.assets.characters.length : 0;
+  const scenes = Array.isArray(p.assets.scenes) ? p.assets.scenes.length : 0;
+  const products = Array.isArray(p.assets.products) ? p.assets.products.length : 0;
+  return chars + scenes + products;
+}
+
+function pipelineSegmentsCount(p: PipelineSummaryDto | null | undefined): number {
+  const rows = p?.segment_scripts;
+  if (!Array.isArray(rows)) return 0;
+  return rows.filter((r) => r != null && typeof r === 'object' && 'segment_id' in r).length;
+}
+
+function mergeLightweightPipeline(
+  prev: PipelineSummaryDto | null,
+  next: PipelineSummaryDto,
+): PipelineSummaryDto {
+  if (!next.lightweight) return next;
+  if (!prev) return next;
+
+  const merged: PipelineSummaryDto = {
+    ...prev,
+    ...next,
+    project: {
+      ...prev.project,
+      ...next.project,
+    },
+    assets: prev.assets,
+    segment_scripts: prev.segment_scripts,
+    product_context: prev.product_context,
+    story_blueprint: prev.story_blueprint,
+  };
+
+  console.info('[S4_LIGHTWEIGHT_PIPELINE_MERGE]', {
+    prevAssetsCount: pipelineAssetsCount(prev),
+    prevSegmentsCount: pipelineSegmentsCount(prev),
+    nextAssetsCount: pipelineAssetsCount(next),
+    nextSegmentsCount: pipelineSegmentsCount(next),
+    mergedAssetsCount: pipelineAssetsCount(merged),
+    mergedSegmentsCount: pipelineSegmentsCount(merged),
+    lightweight: next.lightweight === true,
+  });
+
+  return merged;
+}
+
 export type StepFourPhase = 'idle' | 'no_project' | 'loading' | 'generating_segments' | 'ready' | 'error';
 
 export function useStepFourPage() {
@@ -197,7 +244,7 @@ export function useStepFourPage() {
           pipelinePollAbortRef.current = ctrl;
           const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
           if (pollEpochRef.current !== epoch) return;
-          setPipeline(p);
+          setPipeline((prev) => mergeLightweightPipeline(prev, p));
           touchProjectNameFromPipeline(projectId, p.project?.project_name);
           pipelinePollFailureRef.current = 0;
           const st = p.current_video_stage ?? '';
@@ -410,10 +457,10 @@ export function useStepFourPage() {
   }, [pipeline?.project, projectStatus, pipelineEffectiveStatus, suggestedStatus, statusRecoverable, effectiveStatus, canGenerateVideos]);
 
   useEffect(() => {
-    if (pipelineVm.coreSegments.length === 0) {
+    if (pipelineVm.coreSegments.length === 0 && pipeline?.lightweight !== true) {
       setLocalAdditions([]);
     }
-  }, [pipelineVm.coreSegments.length, projectId]);
+  }, [pipelineVm.coreSegments.length, pipeline?.lightweight, projectId]);
 
   useEffect(() => {
     const ids = pipelineVm.coreSegments.map((s) => s.id);
