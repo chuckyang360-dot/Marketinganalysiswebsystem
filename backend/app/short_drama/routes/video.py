@@ -32,7 +32,7 @@ from ..services.project_task_guard import (
     recover_stale_processing_status_if_possible,
 )
 from ..services.render_executor_service import render_executor_service
-from ..utils.enums import RenderTargetType
+from ..utils.enums import RenderTargetType, WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,21 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
         project = orchestrator.get_project(db, body.project_id)
         recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
+        logger.info(
+            "[STEP_ALLOWED_CHECK_BEFORE_LOCK] project_id=%s step=%s current_status=%s allowed_statuses=%s all_segments=%s",
+            body.project_id,
+            "s4_video",
+            project.status,
+            [
+                "assets_ready",
+                "segments_generated",
+                "video_rendering",
+                "video_segments_ready",
+                "completed",
+            ],
+            True,
+        )
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.RENDER_VIDEO)
         acquire_project_task_lock(db, project, stage="s4_video")
         lock_acquired = True
         update_last_active_step(project, STEP_4)
@@ -135,6 +150,21 @@ async def generate_one_segment_video(
         project = orchestrator.get_project(db, body.project_id)
         recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
+        logger.info(
+            "[STEP_ALLOWED_CHECK_BEFORE_LOCK] project_id=%s step=%s current_status=%s allowed_statuses=%s segment_id=%s",
+            body.project_id,
+            "s4_video",
+            project.status,
+            [
+                "assets_ready",
+                "segments_generated",
+                "video_rendering",
+                "video_segments_ready",
+                "completed",
+            ],
+            segment_id,
+        )
+        orchestrator.assert_step_allowed(db, project, WorkflowStep.RENDER_VIDEO)
         acquire_project_task_lock(db, project, stage="s4_video")
         lock_acquired = True
         update_last_active_step(project, STEP_4)

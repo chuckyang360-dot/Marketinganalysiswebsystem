@@ -79,6 +79,10 @@ _VIDEO_RENDER_ALLOWED = frozenset(
     {
         ProjectStatus.ASSETS_READY.value,
         ProjectStatus.SEGMENTS_GENERATED.value,
+        # Allow idempotent/retry generation after a prior render run.
+        ProjectStatus.VIDEO_RENDERING.value,
+        ProjectStatus.VIDEO_SEGMENTS_READY.value,
+        ProjectStatus.COMPLETED.value,
     }
 )
 
@@ -268,6 +272,9 @@ class WorkflowOrchestrator:
                     step=step.value,
                     reason="invalid_status_for_video_render",
                     status=project.status,
+                    previous_status=prev_status,
+                    current_stage=stage_now,
+                    task_running=task_running,
                     allowed=sorted(_VIDEO_RENDER_ALLOWED),
                 )
                 raise HTTPException(

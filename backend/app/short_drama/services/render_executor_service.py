@@ -40,6 +40,7 @@ from ..utils.xai_reference_image import (
 )
 from .read_models import all_segment_scripts_have_video, list_asset_rows, list_segment_scripts
 from .workflow_orchestrator import orchestrator
+from .project_task_guard import current_stage, is_processing
 
 logger = logging.getLogger(__name__)
 _HARD_VIDEO_PROMPT_CHARS = 4096
@@ -119,6 +120,9 @@ class RenderExecutorService:
 
     def _utc_now_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _is_s4_video_task_locked(self, project: ShortDramaProject) -> bool:
+        return is_processing(project) and current_stage(project) == "s4_video"
 
     def _job_meta(self, job: RenderJob) -> dict[str, Any]:
         return dict(job.meta_json or {})
@@ -387,6 +391,12 @@ class RenderExecutorService:
                 )
 
             # Release DB connection before long external API calls.
+            logger.info(
+                "[S4_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s segment_id=%s action=%s",
+                project_id,
+                segment_id,
+                "submit_reference_segment_video",
+            )
             db.close()
             _trace(
                 "S4_FINAL_VIDEO_PROMPT_BEFORE_SUBMIT",
@@ -418,6 +428,13 @@ class RenderExecutorService:
             self._set_job_status(db, job, status=RenderJobStatus.RUNNING.value, progress=45, request_id=rid)
 
             # Release DB connection while waiting provider completion.
+            logger.info(
+                "[S4_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s segment_id=%s action=%s request_id=%s",
+                project_id,
+                segment_id,
+                "complete_segment_video",
+                rid,
+            )
             db.close()
             result = self._provider.complete_segment_video(
                 request_id=rid,
@@ -608,23 +625,11 @@ class RenderExecutorService:
     def enqueue_single_segment_video(self, db: Session, project_id: int, segment_id: str) -> RenderJob:
         project = orchestrator.get_project(db, project_id)
         orchestrator.recover_failed_project_status(db, project)
-        st = project.status
-        allowed = {
-            ProjectStatus.ASSETS_READY.value,
-            ProjectStatus.SEGMENTS_GENERATED.value,
-            ProjectStatus.VIDEO_RENDERING.value,
-            ProjectStatus.VIDEO_SEGMENTS_READY.value,
-            ProjectStatus.COMPLETED.value,
-        }
-        if st not in allowed:
-            raise ShortDramaVideoInputError(
-                f"Project status {st!r} does not allow segment video generation "
-                f"(need one of {sorted(allowed)})"
-            )
-        if st in ("assets_ready", "segments_generated"):
+        st = str(project.status or "")
+        if not self._is_s4_video_task_locked(project) and st in ("assets_ready", "segments_generated"):
             orchestrator.begin_video_render(db, project)
             db.commit()
-        elif st == ProjectStatus.VIDEO_SEGMENTS_READY.value:
+        elif not self._is_s4_video_task_locked(project) and st == ProjectStatus.VIDEO_SEGMENTS_READY.value:
             project.status = ProjectStatus.VIDEO_RENDERING.value
             db.add(project)
             db.commit()
@@ -787,8 +792,9 @@ class RenderExecutorService:
         if not records:
             raise ShortDramaVideoInputError("No segment scripts for project")
 
-        orchestrator.begin_video_render(db, project)
-        db.commit()
+        if not self._is_s4_video_task_locked(project):
+            orchestrator.begin_video_render(db, project)
+            db.commit()
 
         chars, scenes, products = list_asset_rows(db, project_id)
         project_ar = project.aspect_ratio
@@ -862,22 +868,10 @@ class RenderExecutorService:
         project = orchestrator.get_project(db, project_id)
         orchestrator.recover_failed_project_status(db, project)
         st = project.status
-        allowed = {
-            ProjectStatus.ASSETS_READY.value,
-            ProjectStatus.SEGMENTS_GENERATED.value,
-            ProjectStatus.VIDEO_RENDERING.value,
-            ProjectStatus.VIDEO_SEGMENTS_READY.value,
-            ProjectStatus.COMPLETED.value,
-        }
-        if st not in allowed:
-            raise ShortDramaVideoInputError(
-                f"Project status {st!r} does not allow segment video generation "
-                f"(need one of {sorted(allowed)})"
-            )
-        if st in ("assets_ready", "segments_generated"):
+        if not self._is_s4_video_task_locked(project) and st in ("assets_ready", "segments_generated"):
             orchestrator.begin_video_render(db, project)
             db.commit()
-        elif st == ProjectStatus.VIDEO_SEGMENTS_READY.value:
+        elif not self._is_s4_video_task_locked(project) and st == ProjectStatus.VIDEO_SEGMENTS_READY.value:
             # Regenerating one segment after all were ready: re-enter segment-rendering phase for honest UI.
             project.status = ProjectStatus.VIDEO_RENDERING.value
             db.add(project)

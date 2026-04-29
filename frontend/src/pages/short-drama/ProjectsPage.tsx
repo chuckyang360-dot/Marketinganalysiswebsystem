@@ -62,11 +62,19 @@ function step4StatusLabel(status: string | undefined): string {
 }
 
 function formatUpdatedAt(value: string | null | undefined): string {
-  if (!value) return '暂无更新时间';
+  if (!value) return '';
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
+  if (Number.isNaN(d.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function projectSortTimeMs(p: ShortDramaProjectDto): number {
+  const updated = p.updated_at ? new Date(p.updated_at).getTime() : NaN;
+  if (!Number.isNaN(updated)) return updated;
+  const created = p.created_at ? new Date(p.created_at).getTime() : NaN;
+  if (!Number.isNaN(created)) return created;
+  return 0;
 }
 
 function coverFallbackText(p: ShortDramaProjectDto): string {
@@ -115,7 +123,15 @@ export function ShortDramaProjectsPage() {
     })();
   }, [user?.id]);
 
-  const sorted = useMemo(() => projects, [projects]);
+  const sorted = useMemo(
+    () =>
+      [...projects].sort((a, b) => {
+        const timeDiff = projectSortTimeMs(b) - projectSortTimeMs(a);
+        if (timeDiff !== 0) return timeDiff;
+        return (b.id ?? 0) - (a.id ?? 0);
+      }),
+    [projects],
+  );
   const statusCounts = useMemo(() => {
     const counts: Record<ProjectStatusFilter, number> = {
       all: sorted.length,
@@ -191,6 +207,13 @@ export function ShortDramaProjectsPage() {
             {pagedProjects.map((p) => {
               const tone = overallStatusTone(p.overall_status);
               const cover = p.cover_asset ?? null;
+              const updatedText = formatUpdatedAt(p.updated_at);
+              const createdText = formatUpdatedAt(p.created_at);
+              const timeLabel = updatedText
+                ? `更新于：${updatedText}`
+                : createdText
+                  ? `创建于：${createdText}`
+                  : '创建于：未知时间';
               console.info('[FRONT_PROJECT_CARD_RENDERED]', { project_id: p.id, overall_status: p.overall_status || 'draft', cover_asset_type: cover?.asset_type || null });
               return (
                 <div
@@ -222,7 +245,7 @@ export function ShortDramaProjectsPage() {
                       <h2 className="truncate text-[15px] font-bold text-[#1D1D1F]">{p.project_name || `项目 ${p.id}`}</h2>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px] text-[#8E8E93]">
                         <span>项目 ID：{p.id}</span>
-                        <span>更新于：{formatUpdatedAt(p.updated_at)}</span>
+                        <span>{timeLabel}</span>
                       </div>
                     </div>
 

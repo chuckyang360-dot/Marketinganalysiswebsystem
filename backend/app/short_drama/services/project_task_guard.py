@@ -261,13 +261,14 @@ def acquire_project_task_lock(db: Session, project: ShortDramaProject, *, stage:
     db.commit()
     db.refresh(project)
     logger.info(
-        "[PROJECT_TASK_LOCK_ACQUIRED] project_id=%s user_id=%s stage=%s old_status=%s new_status=%s previous_status=%s",
+        "[PROJECT_TASK_LOCK_ACQUIRED] project_id=%s user_id=%s stage=%s old_status=%s new_status=%s previous_status=%s current_stage=%s",
         project.id,
         project.user_id,
         stage,
         old_status,
         project.status,
         old_status,
+        str(_runtime(project).get("current_stage") or ""),
     )
     logger.info(
         "[PROJECT_STAGE_STARTED] project_id=%s stage=%s old_status=%s new_status=%s",

@@ -4,6 +4,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 from ...database import get_db
 from ...models import User
@@ -288,7 +289,11 @@ async def list_projects(user_id: int = Query(...), db: Session = Depends(get_db)
     rows = (
         db.query(ShortDramaProject)
         .filter(ShortDramaProject.user_id == user_id)
-        .order_by(ShortDramaProject.updated_at.desc(), ShortDramaProject.id.desc())
+        .order_by(
+            ShortDramaProject.updated_at.desc().nullslast(),
+            ShortDramaProject.created_at.desc().nullslast(),
+            ShortDramaProject.id.desc(),
+        )
         .all()
     )
     projects = [_project_to_response(db, p) for p in rows]
@@ -351,6 +356,7 @@ async def touch_project_step(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     update_last_active_step(project, body.step)
+    project.updated_at = func.now()
     db.add(project)
     db.commit()
     db.refresh(project)
