@@ -7,6 +7,7 @@ import { pipelineUsesMockTestPatternVideo } from '../utils/stepFourAdapters';
 import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
 import { touchProjectNameFromPipeline } from '../utils/shortDramaStorage';
 import { workflowNavProjectName } from '../utils/workflowProjectName';
+import { getCachedShortDramaPipeline, setCachedShortDramaPipeline } from '../utils/shortDramaPipelineCache';
 import { useEffectiveShortDramaProjectId } from './useEffectiveShortDramaProjectId';
 
 export type OverviewPhase = 'idle' | 'no_project' | 'loading' | 'ready' | 'error';
@@ -26,19 +27,37 @@ export function useOverviewPage() {
       setError(null);
       return;
     }
-    setPhase('loading');
+    const cached = getCachedShortDramaPipeline(projectId);
+    if (cached) {
+      console.info('[CACHE_PIPELINE_HIT]', { projectId, sourcePage: 'overview' });
+      setPipeline(cached);
+      setPhase('ready');
+    } else {
+      console.info('[CACHE_PIPELINE_MISS]', { projectId, sourcePage: 'overview' });
+      setPhase('loading');
+    }
     setError(null);
     try {
+      const startedAt = performance.now();
       const p = await getShortDramaPipeline(projectId);
       setPipeline(p);
+      setCachedShortDramaPipeline(projectId, p);
       touchProjectNameFromPipeline(projectId, p.project?.project_name);
+      console.info('[CACHE_PIPELINE_REFRESH_SUCCESS]', {
+        projectId,
+        sourcePage: 'overview',
+        durationMs: Math.round(performance.now() - startedAt),
+      });
       console.info('[FRONT_PROJECT_DATA_RESTORED]', { project_id: projectId, page: 'overview' });
       setPhase('ready');
     } catch (e) {
       const msg =
         e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.error.overviewLoad;
-      setError(msg);
-      setPhase('error');
+      console.warn('[CACHE_PIPELINE_REFRESH_ERROR]', { projectId, sourcePage: 'overview', error: msg });
+      if (!cached) {
+        setError(msg);
+        setPhase('error');
+      }
     }
   }, [projectId]);
 

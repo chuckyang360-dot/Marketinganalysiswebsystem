@@ -5,10 +5,11 @@ import { AssetLightbox, type LightboxItem } from './components/AssetLightbox';
 import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEntity, type AssetKind } from './components/AssetInteractionModal';
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
 import { analyzeShortDramaAssetReferenceImage, createShortDramaAssetFromImage, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
-import type { AssetLibraryItemDto } from './types/shortDramaApi';
+import type { AssetLibraryItemDto, PipelineSummaryDto } from './types/shortDramaApi';
 import { getAssetThumbnailUrl, resolveAssetImageUrl } from './utils/assetsPageAdapters';
 import { withProjectQuery } from './utils/shortDramaRoutes';
 import { buildRawStructureSnapshot, buildStructureSummary, resolveAssetRoleLabel, resolveAssetSourceLabel, resolveNarrativeFunctionLabel, resolveTypeFields, resolveVisualAnchorImageId } from './utils/assetSpecDisplay';
+import { getCachedShortDramaPipeline, setCachedShortDramaPipeline } from './utils/shortDramaPipelineCache';
 
 type TabType = 'characters' | 'scenes' | 'assets';
 type Step3AutoPhase = 'idle' | 'checking' | 'generating_specs' | 'generating_images' | 'ready' | 'error';
@@ -265,6 +266,62 @@ function warnAssetDetailMismatch(row: AssetLibraryItemDto): void {
   }
 }
 
+function pipelineAssetsToCachedCards(pipeline: PipelineSummaryDto): Record<TabType, AssetLibraryItemDto[]> {
+  const assets = pipeline.assets;
+  if (!assets) return { characters: [], scenes: [], assets: [] };
+  const base = {
+    project_id: pipeline.project.id,
+    source: 'system_generated',
+    cover_image_id: null,
+    cover_image: null,
+    image_count: 0,
+    has_reference_images: false,
+    sort_order: 0,
+    status: 'active',
+    extra: {},
+    images: [],
+    reference_images: [],
+    created_at: null,
+    updated_at: null,
+    tags: [],
+  } as const;
+  return {
+    characters: assets.characters.map((c, idx) => ({
+      id: c.id,
+      asset_type: 'character',
+      name: c.name,
+      description: c.description,
+      base_prompt: c.visual_prompt,
+      ...base,
+      sort_order: idx,
+      image_count: c.image_url ? 1 : 0,
+      images: c.image_url ? [{ id: c.id * 1000 + 1, image_url: c.image_url, image_type: 'generated', variant_meta: {}, is_cover: true, status: 'active', created_at: null }] : [],
+    })),
+    scenes: assets.scenes.map((s, idx) => ({
+      id: s.id,
+      asset_type: 'scene',
+      name: s.name,
+      description: s.description,
+      base_prompt: s.visual_prompt,
+      ...base,
+      sort_order: idx,
+      image_count: s.image_url ? 1 : 0,
+      images: s.image_url ? [{ id: s.id * 1000 + 1, image_url: s.image_url, image_type: 'generated', variant_meta: {}, is_cover: true, status: 'active', created_at: null }] : [],
+    })),
+    assets: assets.products.map((p, idx) => ({
+      id: p.id,
+      asset_type: 'product',
+      name: p.name,
+      description: p.description,
+      base_prompt: p.visual_prompt,
+      ...base,
+      sort_order: idx,
+      image_count: p.image_url ? 1 : 0,
+      images: p.image_url ? [{ id: p.id * 1000 + 1, image_url: p.image_url, image_type: 'generated', variant_meta: {}, is_cover: true, status: 'active', created_at: null }] : [],
+    })),
+  };
+}
+
 export function ShortDramaAssetsPage() {
   const navigate = useNavigate();
   const { effectiveProjectId, projectName } = useEffectiveShortDramaProjectId();
@@ -322,6 +379,26 @@ export function ShortDramaAssetsPage() {
   }, [effectiveProjectId]);
 
   useEffect(() => {
+    const projectId = toPositiveInt(effectiveProjectId);
+    if (!projectId) return;
+    const cached = getCachedShortDramaPipeline(projectId);
+    if (!cached) {
+      console.info('[CACHE_PIPELINE_MISS]', { projectId, sourcePage: 'step3' });
+      return;
+    }
+    console.info('[CACHE_PIPELINE_HIT]', { projectId, sourcePage: 'step3' });
+    setData((prev) => {
+      const hasExisting = prev.characters.length || prev.scenes.length || prev.assets.length;
+      if (hasExisting) return prev;
+      return pipelineAssetsToCachedCards(cached);
+    });
+    setPipelineEffectiveStatus(String(cached.project?.effective_status || cached.project?.suggested_status || cached.project?.status || ''));
+    setPipelineOverallStatus(String(cached.project?.overall_status || ''));
+    setPipelineStepStatus((cached.project?.step_status || {}) as Record<string, string>);
+    setPipelineCurrentStage(String(cached.project?.current_stage || ''));
+  }, [effectiveProjectId]);
+
+  useEffect(() => {
     const run = async () => {
       const projectId = toPositiveInt(effectiveProjectId);
       console.info('[S3_AUTO_EFFECT_ENTER]', JSON.stringify({
@@ -336,7 +413,10 @@ export function ShortDramaAssetsPage() {
       setAutoHint('正在检查资产生成状态…');
       try {
         console.info('[S3_AUTO_PIPELINE_REQUEST]', JSON.stringify({ project_id: projectId }));
+        const startedAt = performance.now();
         const pipeline = await getShortDramaPipeline(projectId);
+        setCachedShortDramaPipeline(projectId, pipeline);
+        console.info('[CACHE_PIPELINE_REFRESH_SUCCESS]', { projectId, sourcePage: 'step3', durationMs: Math.round(performance.now() - startedAt) });
         setPipelineEffectiveStatus(String(pipeline.project?.effective_status || pipeline.project?.suggested_status || pipeline.project?.status || ''));
         setPipelineOverallStatus(String(pipeline.project?.overall_status || ''));
         setPipelineStepStatus((pipeline.project?.step_status || {}) as Record<string, string>);
@@ -367,6 +447,7 @@ export function ShortDramaAssetsPage() {
         }
 
         let pipelineAfterSpecs = await getShortDramaPipeline(projectId);
+        setCachedShortDramaPipeline(projectId, pipelineAfterSpecs);
         setPipelineEffectiveStatus(String(pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || ''));
         setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
         setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
@@ -381,6 +462,7 @@ export function ShortDramaAssetsPage() {
           const imageResult = await generateShortDramaAssetImages(projectId);
           setImageGenerationFailedIds(extractFailedAssetIds(imageResult.errors));
           pipelineAfterSpecs = await getShortDramaPipeline(projectId);
+          setCachedShortDramaPipeline(projectId, pipelineAfterSpecs);
           setPipelineEffectiveStatus(String(pipelineAfterSpecs.project?.effective_status || pipelineAfterSpecs.project?.suggested_status || pipelineAfterSpecs.project?.status || ''));
           setPipelineOverallStatus(String(pipelineAfterSpecs.project?.overall_status || ''));
           setPipelineStepStatus((pipelineAfterSpecs.project?.step_status || {}) as Record<string, string>);
@@ -585,6 +667,7 @@ export function ShortDramaAssetsPage() {
           const ctrl = new AbortController();
           pipelinePollAbortRef.current = ctrl;
           const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
+          setCachedShortDramaPipeline(projectId, p);
           setPipelineEffectiveStatus(String(p.project?.effective_status || p.project?.suggested_status || p.project?.status || ''));
           setPipelineOverallStatus(String(p.project?.overall_status || ''));
           setPipelineStepStatus((p.project?.step_status || {}) as Record<string, string>);

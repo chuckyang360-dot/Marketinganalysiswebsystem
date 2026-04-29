@@ -19,6 +19,7 @@ import { SHORT_DRAMA_UI } from '../utils/shortDramaUiCopy';
 import { withProjectQuery } from '../utils/shortDramaRoutes';
 import { touchProjectNameFromPipeline } from '../utils/shortDramaStorage';
 import { workflowNavProjectName } from '../utils/workflowProjectName';
+import { getCachedShortDramaPipeline, setCachedShortDramaPipeline } from '../utils/shortDramaPipelineCache';
 import { useEffectiveShortDramaProjectId } from './useEffectiveShortDramaProjectId';
 
 export type Step4MergeButtonType = 'merge_only' | 'merge_and_view';
@@ -133,6 +134,7 @@ export function useStepFourPage() {
     if (projectId == null) return null;
     const p = await getShortDramaPipeline(projectId);
     setPipeline(p);
+    setCachedShortDramaPipeline(projectId, p);
     touchProjectNameFromPipeline(projectId, p.project?.project_name);
     if (import.meta.env.DEV) {
       console.info('[STEP4_PIPELINE_VIDEO_STATE]', {
@@ -244,7 +246,11 @@ export function useStepFourPage() {
           pipelinePollAbortRef.current = ctrl;
           const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
           if (pollEpochRef.current !== epoch) return;
-          setPipeline((prev) => mergeLightweightPipeline(prev, p));
+          setPipeline((prev) => {
+            const merged = mergeLightweightPipeline(prev, p);
+            if (projectId != null) setCachedShortDramaPipeline(projectId, merged);
+            return merged;
+          });
           touchProjectNameFromPipeline(projectId, p.project?.project_name);
           pipelinePollFailureRef.current = 0;
           const st = p.current_video_stage ?? '';
@@ -287,6 +293,7 @@ export function useStepFourPage() {
     let cancelled = false;
 
     (async () => {
+      let hasCache = false;
       if (projectId == null) {
         setPhase('no_project');
         setPipeline(null);
@@ -298,7 +305,6 @@ export function useStepFourPage() {
         return;
       }
 
-      setPhase('loading');
       setLoadError(null);
       setSegmentScriptsError(null);
       setSegmentScriptsErrorRaw(null);
@@ -306,10 +312,28 @@ export function useStepFourPage() {
       setSegmentScriptsBlocked(null);
 
       try {
+        const cached = getCachedShortDramaPipeline(projectId);
+        if (cached) {
+          hasCache = true;
+          console.info('[CACHE_PIPELINE_HIT]', { projectId, sourcePage: 'step4' });
+          setPipeline(cached);
+          setPhase('ready');
+        } else {
+          console.info('[CACHE_PIPELINE_MISS]', { projectId, sourcePage: 'step4' });
+          setPhase('loading');
+        }
+
+        const startedAt = performance.now();
         let p = await getShortDramaPipeline(projectId);
         if (cancelled) return;
+        console.info('[CACHE_PIPELINE_REFRESH_SUCCESS]', {
+          projectId,
+          sourcePage: 'step4',
+          durationMs: Math.round(performance.now() - startedAt),
+        });
         touchProjectNameFromPipeline(projectId, p.project?.project_name);
         setPipeline(p);
+        setCachedShortDramaPipeline(projectId, p);
 
         const hasScripts = pipelineHasSegmentScripts(p);
         const st = p.project?.status ?? '';
@@ -322,6 +346,7 @@ export function useStepFourPage() {
               p = await getShortDramaPipeline(projectId);
               if (cancelled) return;
               setPipeline(p);
+              setCachedShortDramaPipeline(projectId, p);
               touchProjectNameFromPipeline(projectId, p.project?.project_name);
               if (!pipelineHasSegmentScripts(p)) {
                 setSegmentScriptsBusyError(false);
@@ -340,6 +365,7 @@ export function useStepFourPage() {
                 const refreshed = await getShortDramaPipeline(projectId);
                 if (!cancelled) {
                   setPipeline(refreshed);
+                  setCachedShortDramaPipeline(projectId, refreshed);
                   touchProjectNameFromPipeline(projectId, refreshed.project?.project_name);
                 }
               } catch {
@@ -357,8 +383,18 @@ export function useStepFourPage() {
         if (cancelled) return;
         const msg =
           e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.error.pipelineLoad;
-        setLoadError(msg);
-        setPhase('error');
+        console.warn('[CACHE_PIPELINE_REFRESH_ERROR]', {
+          projectId,
+          sourcePage: 'step4',
+          error: msg,
+        });
+        if (!hasCache) {
+          setLoadError(msg);
+          setPhase('error');
+        } else {
+          setGenerateError('后台刷新失败，已展示缓存数据。');
+          setPhase('ready');
+        }
       }
     })();
 

@@ -26,6 +26,7 @@ import { withProjectQuery } from './utils/shortDramaRoutes';
 import { touchProjectNameFromPipeline } from './utils/shortDramaStorage';
 import { workflowNavProjectName } from './utils/workflowProjectName';
 import { getUserFriendlyParseError, normalizeProductParseError } from './utils/productParseErrors';
+import { getCachedShortDramaPipeline, setCachedShortDramaPipeline } from './utils/shortDramaPipelineCache';
 import {
   PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_MESSAGE,
   PRODUCT_PARSE_UPSTREAM_UNAVAILABLE_TITLE,
@@ -182,29 +183,53 @@ export function ShortDramaProductInputPage() {
   useEffect(() => {
     if (projectId == null) return;
     let cancelled = false;
-    setPipelineLoading(true);
+    const hydrateFromPipeline = (pipe: Awaited<ReturnType<typeof getShortDramaPipeline>>) => {
+      const pc = pipe.product_context;
+      let draftForSanitize: ProductInputDraft = emptyDraft;
+      if (pc?.raw_inputs) {
+        const d = pipelineRawInputsToDraft(pc.raw_inputs);
+        if (d) {
+          setDraft(d);
+          draftForSanitize = d;
+        }
+      }
+      const iu = normalizeImageUnderstanding(pc?.image_understanding) ?? null;
+      setImageUnderstanding(iu);
+      if (pc?.normalized) {
+        const p = normalizedJsonToProductPreview(pc.normalized);
+        if (p) setPreview(sanitizePreviewForConfirm(p, iu, draftForSanitize));
+      }
+      if (typeof pc?.version === 'number') setParseVersion(pc.version);
+    };
+    const cached = getCachedShortDramaPipeline(projectId);
+    if (cached) {
+      console.info('[CACHE_PIPELINE_HIT]', { projectId, sourcePage: 'step1' });
+      hydrateFromPipeline(cached);
+      setPipelineLoading(false);
+    } else {
+      console.info('[CACHE_PIPELINE_MISS]', { projectId, sourcePage: 'step1' });
+      setPipelineLoading(true);
+    }
     void (async () => {
       try {
+        const startedAt = performance.now();
         const pipe = await getShortDramaPipeline(projectId);
         if (cancelled) return;
-        const pc = pipe.product_context;
-        let draftForSanitize: ProductInputDraft = emptyDraft;
-        if (pc?.raw_inputs) {
-          const d = pipelineRawInputsToDraft(pc.raw_inputs);
-          if (d) {
-            setDraft(d);
-            draftForSanitize = d;
-          }
-        }
-        const iu = normalizeImageUnderstanding(pc?.image_understanding) ?? null;
-        setImageUnderstanding(iu);
-        if (pc?.normalized) {
-          const p = normalizedJsonToProductPreview(pc.normalized);
-          if (p) setPreview(sanitizePreviewForConfirm(p, iu, draftForSanitize));
-        }
-        if (typeof pc?.version === 'number') setParseVersion(pc.version);
+        setCachedShortDramaPipeline(projectId, pipe);
+        hydrateFromPipeline(pipe);
+        console.info('[CACHE_PIPELINE_REFRESH_SUCCESS]', {
+          projectId,
+          sourcePage: 'step1',
+          durationMs: Math.round(performance.now() - startedAt),
+        });
+      } catch (e) {
+        console.warn('[CACHE_PIPELINE_REFRESH_ERROR]', {
+          projectId,
+          sourcePage: 'step1',
+          error: e instanceof Error ? e.message : String(e),
+        });
       } finally {
-        if (!cancelled) setPipelineLoading(false);
+        if (!cancelled && !cached) setPipelineLoading(false);
       }
     })();
     return () => {
