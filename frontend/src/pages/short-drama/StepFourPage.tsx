@@ -31,7 +31,6 @@ export function ShortDramaStepFourPage() {
     setPreviewTarget,
     videoStatus,
     batchGenerating,
-    mergeLoading,
     canMergeAll,
     canGenerateVideos,
     videoStatusBlockedHint,
