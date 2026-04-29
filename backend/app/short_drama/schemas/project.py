@@ -49,6 +49,11 @@ class ShortDramaProjectResponse(BaseModel):
     last_active_step: Optional[Literal["step_0", "step_1", "step_2", "step_3", "step_4", "overview"]] = None
     step_status: Dict[str, str] = Field(default_factory=dict)
     overall_status: Optional[Literal["draft", "stale", "generating", "completed", "failed"]] = None
+    current_stage: Optional[str] = None
+    failed_stage: Optional[str] = None
+    error_message: Optional[str] = None
+    error_type: Optional[str] = None
+    can_retry: Optional[bool] = None
     final_video_url: Optional[str] = None
     cover_asset: ProjectCoverAsset = Field(default_factory=ProjectCoverAsset)
     created_at: Optional[datetime] = None
@@ -96,3 +101,8 @@ class PipelineSummaryResponse(BaseModel):
     image_url_filled: int = 0
     #: 角色+场景+产品资产总行数
     asset_rows_total: int = 0
+    lightweight: bool = False
+    has_product_context: Optional[bool] = None
+    has_story_blueprint: Optional[bool] = None
+    asset_counts: Optional[Dict[str, int]] = None
+    segment_scripts_count: Optional[int] = None

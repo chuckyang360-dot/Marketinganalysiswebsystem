@@ -4,7 +4,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderError
 from ..http_errors import raise_short_drama_http
 from ..models import AssetEntity, AssetImage, CharacterAsset, ProductAsset, SceneAsset
@@ -43,6 +43,7 @@ from ..services.asset_library_service import asset_library_service
 from ..services.read_models import latest_product_context, latest_story_blueprint
 from ..services.workflow_orchestrator import orchestrator
 from ..services.image_understanding_service import validate_supported_image_data_url
+from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
@@ -311,9 +312,12 @@ async def update_one_asset(
 @router.post("/generate", response_model=GenerateAssetSpecsResponse)
 async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /assets/specs/generate", project_id=body.project_id)
+    lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_ASSET_SPECS)
+        acquire_project_task_lock(db, project, stage="s3_assets")
+        lock_acquired = True
         had_existing_assets = (
             db.query(CharacterAsset.id).filter(CharacterAsset.project_id == body.project_id).first() is not None
             or db.query(SceneAsset.id).filter(SceneAsset.project_id == body.project_id).first() is not None
@@ -373,6 +377,8 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
         )
 
         status_before = project.status
+        logger.info("[S3_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s", body.project_id)
+        db.close()
         try:
             req_state = inspect_asset_requirements_source(blueprint)
             if blueprint.creative_brief:
@@ -478,6 +484,7 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                 detail="Asset spec generation failed",
             )
 
+        logger.info("[S3_DB_REOPEN_FOR_WRITEBACK] project_id=%s", body.project_id)
         db.query(CharacterAsset).filter(CharacterAsset.project_id == body.project_id).delete(
             synchronize_session=False
         )
@@ -1085,6 +1092,12 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
         update_last_active_step(project, STEP_3)
         orchestrator.advance_on_success(db, project, WorkflowStep.GENERATE_ASSET_SPECS)
         db.commit()
+        final_status = project.status
+        post_db = SessionLocal()
+        try:
+            mark_project_stage_succeeded(post_db, body.project_id, stage="s3_assets", status_after=final_status)
+        finally:
+            post_db.close()
 
         chars = (
             db.query(CharacterAsset)
@@ -1161,6 +1174,23 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
         )
         return GenerateAssetSpecsResponse(project_id=body.project_id, assets=out_bundle)
     except HTTPException as e:
+        if lock_acquired:
+            et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+            if isinstance(e.detail, dict):
+                et = str(e.detail.get("error_type") or et)
+            fail_db = SessionLocal()
+            try:
+                mark_project_stage_failed(
+                    fail_db,
+                    body.project_id,
+                    stage="s3_assets",
+                    error_type_value=et,
+                    message=str(e.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         log_api_error(
             logger,
             "POST /assets/specs/generate",

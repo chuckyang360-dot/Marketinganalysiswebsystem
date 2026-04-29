@@ -171,8 +171,14 @@ export async function touchShortDramaProjectStep(
   });
 }
 
-export async function getShortDramaPipeline(projectId: number): Promise<PipelineSummaryDto> {
-  return sdFetchJson<PipelineSummaryDto>(`/api/short-drama/project/${projectId}/pipeline`);
+export async function getShortDramaPipeline(
+  projectId: number,
+  options?: { signal?: AbortSignal; lightweight?: boolean },
+): Promise<PipelineSummaryDto> {
+  const lightweight = options?.lightweight ? '?lightweight=true' : '';
+  return sdFetchJson<PipelineSummaryDto>(`/api/short-drama/project/${projectId}/pipeline${lightweight}`, {
+    signal: options?.signal,
+  });
 }
 
 export async function parseShortDramaProduct(
@@ -435,8 +441,10 @@ export async function generateShortDramaSingleSegmentVideo(
   );
 }
 
-export async function getShortDramaRenderJob(jobId: number): Promise<RenderJobStatusResponseDto> {
-  return sdFetchJson<RenderJobStatusResponseDto>(`/api/short-drama/videos/render-jobs/${jobId}`);
+export async function getShortDramaRenderJob(jobId: number, options?: { signal?: AbortSignal }): Promise<RenderJobStatusResponseDto> {
+  return sdFetchJson<RenderJobStatusResponseDto>(`/api/short-drama/videos/render-jobs/${jobId}`, {
+    signal: options?.signal,
+  });
 }
 
 export async function mergeShortDramaProjectVideo(projectId: number): Promise<MergeVideoResponseDto> {

@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ...config import settings
+from ...database import SessionLocal
 from ..models import CharacterAsset, ProductAsset, SceneAsset, ShortDramaProject
 from ..providers.generated_image import GeneratedImage
 from ..providers.image_provider_factory import build_short_drama_image_provider
@@ -191,6 +192,125 @@ class AssetImageService:
                 row.image_url = url
                 row.meta_json = merged
         return len(rows), ok, errors
+
+    def _run_parallel_scene(
+        self,
+        project_id: int,
+        rows: list[SceneAsset],
+    ) -> tuple[int, int, list[dict[str, Any]], dict[int, tuple[str, dict[str, Any]]]]:
+        if not rows:
+            return 0, 0, [], {}
+
+        errors: list[dict[str, Any]] = []
+        ok = 0
+        results: dict[int, tuple[str, dict[str, Any]]] = {}
+
+        def job(row: SceneAsset) -> tuple[int, str | None, GeneratedImage | None, Exception | None]:
+            try:
+                prompt = prepare_image_prompt(row.visual_prompt)
+                meta = dict(row.meta_json or {})
+                seed = meta.get("generation_seed")
+                gen = self._provider.generate_from_text(
+                    prompt=prompt,
+                    asset_type="scene",
+                    project_id=project_id,
+                    asset_id=row.id,
+                    metadata={"generation_seed": seed, "style_tags": meta.get("style_tags")},
+                )
+                ext = mime_to_ext(gen.mime_type)
+                url = save_image_bytes(
+                    project_id=project_id,
+                    asset_type="scene",
+                    asset_id=row.id,
+                    data=gen.data,
+                    ext=ext,
+                )
+                return row.id, url, gen, None
+            except Exception as e:
+                return row.id, None, None, e
+
+        with ThreadPoolExecutor(max_workers=min(self._max_workers(), len(rows))) as pool:
+            futures = [pool.submit(job, r) for r in rows]
+            for fut in as_completed(futures):
+                rid, url, gen, err = fut.result()
+                if err is not None:
+                    errors.append({"asset_type": "scene", "asset_id": rid, "error": str(err), "error_type": type(err).__name__})
+                    continue
+                ok += 1
+                results[rid] = (str(url or ""), dict(gen.meta or {}))
+        return len(rows), ok, errors, results
+
+    def _run_parallel_product(
+        self,
+        project_id: int,
+        rows: list[ProductAsset],
+    ) -> tuple[int, int, list[dict[str, Any]], dict[int, tuple[str, dict[str, Any]]]]:
+        if not rows:
+            return 0, 0, [], {}
+
+        errors: list[dict[str, Any]] = []
+        ok = 0
+        results: dict[int, tuple[str, dict[str, Any]]] = {}
+
+        def job(row: ProductAsset) -> tuple[int, str | None, GeneratedImage | None, Exception | None]:
+            try:
+                prompt = prepare_image_prompt(row.visual_prompt)
+                meta = dict(row.meta_json or {})
+                seed = meta.get("generation_seed")
+                gen = self._provider.generate_from_text(
+                    prompt=prompt,
+                    asset_type="product",
+                    project_id=project_id,
+                    asset_id=row.id,
+                    metadata={"generation_seed": seed, "style_tags": meta.get("style_tags")},
+                )
+                ext = mime_to_ext(gen.mime_type)
+                url = save_image_bytes(
+                    project_id=project_id,
+                    asset_type="product",
+                    asset_id=row.id,
+                    data=gen.data,
+                    ext=ext,
+                )
+                return row.id, url, gen, None
+            except Exception as e:
+                return row.id, None, None, e
+
+        with ThreadPoolExecutor(max_workers=min(self._max_workers(), len(rows))) as pool:
+            futures = [pool.submit(job, r) for r in rows]
+            for fut in as_completed(futures):
+                rid, url, gen, err = fut.result()
+                if err is not None:
+                    errors.append({"asset_type": "product", "asset_id": rid, "error": str(err), "error_type": type(err).__name__})
+                    continue
+                ok += 1
+                results[rid] = (str(url or ""), dict(gen.meta or {}))
+        return len(rows), ok, errors, results
+
+    def _writeback_image_result(self, *, project_id: int, asset_type: str, asset_id: int, image_url: str, meta_patch: dict[str, Any]) -> None:
+        logger.info("[S3_DB_REOPEN_FOR_WRITEBACK] project_id=%s asset_type=%s asset_id=%s", project_id, asset_type, asset_id)
+        wdb = SessionLocal()
+        try:
+            if asset_type == "character":
+                row = wdb.query(CharacterAsset).filter(CharacterAsset.id == asset_id, CharacterAsset.project_id == project_id).first()
+            elif asset_type == "scene":
+                row = wdb.query(SceneAsset).filter(SceneAsset.id == asset_id, SceneAsset.project_id == project_id).first()
+            else:
+                row = wdb.query(ProductAsset).filter(ProductAsset.id == asset_id, ProductAsset.project_id == project_id).first()
+            if row is None:
+                wdb.rollback()
+                return
+            merged = dict(row.meta_json or {})
+            merged.update(meta_patch or {})
+            row.image_url = image_url
+            row.meta_json = merged
+            wdb.add(row)
+            wdb.commit()
+        except Exception:
+            wdb.rollback()
+            raise
+        finally:
+            wdb.close()
 
     def _apply_scene_results(
         self,
@@ -533,6 +653,8 @@ class AssetImageService:
                 .order_by(ProductAsset.id)
                 .all()
             )
+            logger.info("[S3_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s", project_id)
+            db.close()
 
             try:
                 prov_id = self._provider.capabilities().get("provider_id", "unknown")
@@ -555,23 +677,47 @@ class AssetImageService:
                 result.characters_succeeded = ok
                 result.errors.extend(errs)
                 for row in chars:
-                    db.add(row)
+                    if row.image_url:
+                        self._writeback_image_result(
+                            project_id=project_id,
+                            asset_type="character",
+                            asset_id=int(row.id),
+                            image_url=str(row.image_url),
+                            meta_patch=dict(row.meta_json or {}),
+                        )
 
             if scenes:
-                n, ok, errs = self._apply_scene_results(db, project_id, scenes)
+                n, ok, errs, scene_results = self._run_parallel_scene(project_id, scenes)
                 result.scenes_attempted = n
                 result.scenes_succeeded = ok
                 result.errors.extend(errs)
+                for sid, (url, meta_patch) in scene_results.items():
+                    self._writeback_image_result(
+                        project_id=project_id,
+                        asset_type="scene",
+                        asset_id=int(sid),
+                        image_url=url,
+                        meta_patch=meta_patch,
+                    )
 
             if products:
-                n, ok, errs = self._apply_product_results(db, project_id, products)
+                n, ok, errs, product_results = self._run_parallel_product(project_id, products)
                 result.products_attempted = n
                 result.products_succeeded = ok
                 result.errors.extend(errs)
+                for pid, (url, meta_patch) in product_results.items():
+                    self._writeback_image_result(
+                        project_id=project_id,
+                        asset_type="product",
+                        asset_id=int(pid),
+                        image_url=url,
+                        meta_patch=meta_patch,
+                    )
 
+            db = SessionLocal()
             orchestrator.complete_asset_image_render(
                 db,
-                project,
+                orchestrator.get_project(db, project_id),
                 had_attempts=result.had_attempts,
                 any_success=result.any_success,
             )

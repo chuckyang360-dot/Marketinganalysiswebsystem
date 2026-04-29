@@ -5,7 +5,7 @@ import socket
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ..models import RenderJob
 from ..exceptions import (
     ShortDramaFFmpegError,
@@ -25,6 +25,7 @@ from ..schemas.video import (
 from ..services.merge_service import merge_service
 from ..services.project_state_service import OVERVIEW, STEP_4, update_last_active_step
 from ..services.workflow_orchestrator import orchestrator
+from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
 from ..services.render_executor_service import render_executor_service
 from ..utils.enums import RenderTargetType
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -37,12 +38,20 @@ router = APIRouter()
 @router.post("/generate", response_model=VideoBatchSummaryResponse)
 async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /videos/generate", project_id=body.project_id)
+    lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
+        acquire_project_task_lock(db, project, stage="s4_video")
+        lock_acquired = True
         update_last_active_step(project, STEP_4)
         db.add(project)
         db.commit()
         r = render_executor_service.generate_segment_videos(db, body.project_id)
+        post_db = SessionLocal()
+        try:
+            mark_project_stage_succeeded(post_db, body.project_id, stage="s4_video", status_after="video_rendering")
+        finally:
+            post_db.close()
         log_api_success(
             logger,
             "POST /videos/generate",
@@ -64,6 +73,23 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
         log_api_error(logger, "POST /videos/generate", str(e), project_id=body.project_id)
         raise_short_drama_http(e)
     except HTTPException as e:
+        if lock_acquired:
+            fail_db = SessionLocal()
+            try:
+                et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+                if isinstance(e.detail, dict):
+                    et = str(e.detail.get("error_type") or et)
+                mark_project_stage_failed(
+                    fail_db,
+                    body.project_id,
+                    stage="s4_video",
+                    error_type_value=et,
+                    message=str(e.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         log_api_error(
             logger,
             "POST /videos/generate",
@@ -97,8 +123,11 @@ async def generate_one_segment_video(
         project_id=body.project_id,
         segment_id=segment_id,
     )
+    lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
+        acquire_project_task_lock(db, project, stage="s4_video")
+        lock_acquired = True
         update_last_active_step(project, STEP_4)
         db.add(project)
         db.commit()
@@ -109,6 +138,11 @@ async def generate_one_segment_video(
             segment_id,
             job.id,
         )
+        post_db = SessionLocal()
+        try:
+            mark_project_stage_succeeded(post_db, body.project_id, stage="s4_video", status_after="video_rendering")
+        finally:
+            post_db.close()
         log_api_success(
             logger,
             "POST /videos/generate/{segment_id}",
@@ -147,6 +181,23 @@ async def generate_one_segment_video(
         )
         raise_short_drama_http(e)
     except HTTPException as e:
+        if lock_acquired:
+            fail_db = SessionLocal()
+            try:
+                et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+                if isinstance(e.detail, dict):
+                    et = str(e.detail.get("error_type") or et)
+                mark_project_stage_failed(
+                    fail_db,
+                    body.project_id,
+                    stage="s4_video",
+                    error_type_value=et,
+                    message=str(e.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         log_api_error(
             logger,
             "POST /videos/generate/{segment_id}",

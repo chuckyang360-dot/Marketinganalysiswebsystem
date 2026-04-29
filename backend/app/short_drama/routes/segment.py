@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderError
 from ..http_errors import raise_short_drama_http
 from ..models import SegmentScriptRecord
@@ -30,6 +30,7 @@ from ..services.read_models import (
 from ..services.segment_director_service import segment_director_service, segments_from_story_shot_plan
 from ..services.project_state_service import STEP_4, mark_step_completed, update_last_active_step
 from ..services.workflow_orchestrator import orchestrator
+from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
@@ -248,9 +249,12 @@ def _validate_step4_visual_anchor(assets: AssetSpecsBundleSchema) -> None:
 @router.post("/generate", response_model=GenerateSegmentsResponse)
 async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /segment/generate", project_id=body.project_id)
+    lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_SEGMENTS)
+        acquire_project_task_lock(db, project, stage="s4_segments")
+        lock_acquired = True
 
         sb_row = latest_story_blueprint(db, body.project_id)
         pc_row = latest_product_context(db, body.project_id)
@@ -393,6 +397,8 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             project_config["creative_intent"] or project_config["legacy_creative_intent_summary"]
         )
 
+        logger.info("[S4_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s", body.project_id)
+        db.close()
         try:
             segments = None if blueprint.creative_brief else segments_from_story_shot_plan(blueprint, assets=assets, project_config=project_config)
             source = "story_blueprint.shot_plan" if segments is not None else "segment_director_provider"
@@ -535,6 +541,7 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                 detail="Segment generation failed",
             )
 
+        logger.info("[S4_DB_REOPEN_FOR_WRITEBACK] project_id=%s", body.project_id)
         batch_ver = next_segment_batch_version(db, body.project_id)
         db.query(SegmentScriptRecord).filter(SegmentScriptRecord.project_id == body.project_id).delete(
             synchronize_session=False
@@ -572,6 +579,12 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
         update_last_active_step(project, STEP_4)
         orchestrator.advance_on_success(db, project, WorkflowStep.GENERATE_SEGMENTS)
         db.commit()
+        final_status = project.status
+        post_db = SessionLocal()
+        try:
+            mark_project_stage_succeeded(post_db, body.project_id, stage="s4_segments", status_after=final_status)
+        finally:
+            post_db.close()
 
         log_api_success(
             logger,
@@ -586,6 +599,23 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
             record_ids=record_ids,
         )
     except HTTPException as e:
+        if lock_acquired:
+            et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+            if isinstance(e.detail, dict):
+                et = str(e.detail.get("error_type") or et)
+            fail_db = SessionLocal()
+            try:
+                mark_project_stage_failed(
+                    fail_db,
+                    body.project_id,
+                    stage="s4_segments",
+                    error_type_value=et,
+                    message=str(e.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         log_api_error(
             logger,
             "POST /segment/generate",

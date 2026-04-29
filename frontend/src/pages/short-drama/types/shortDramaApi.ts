@@ -21,6 +21,11 @@ export type ShortDramaProjectDto = {
   last_active_step?: 'step_0' | 'step_1' | 'step_2' | 'step_3' | 'step_4' | 'overview' | null;
   step_status?: Record<string, string>;
   overall_status?: 'draft' | 'stale' | 'generating' | 'completed' | 'failed' | null;
+  current_stage?: string | null;
+  failed_stage?: string | null;
+  error_message?: string | null;
+  error_type?: string | null;
+  can_retry?: boolean | null;
   final_video_url?: string | null;
   cover_asset?: {
     asset_type: 'character' | 'product' | 'scene' | null;
@@ -322,6 +327,11 @@ export type SegmentScriptPipelineRowDto = {
 
 export type PipelineSummaryDto = {
   project: ShortDramaProjectDto;
+  lightweight?: boolean;
+  has_product_context?: boolean;
+  has_story_blueprint?: boolean;
+  asset_counts?: { characters: number; scenes: number; products: number };
+  segment_scripts_count?: number;
   product_context?: PipelineProductContextBlockDto | null;
   story_blueprint?: PipelineStoryBlueprintWrapper | null;
   assets?: PipelineAssetsBundleDto | null;

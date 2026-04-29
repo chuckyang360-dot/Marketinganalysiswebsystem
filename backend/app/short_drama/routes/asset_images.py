@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ..exceptions import ShortDramaImageProviderError, ShortDramaImageSaveError
 from ..http_errors import raise_short_drama_http
 from ..models import CharacterAsset, ProductAsset, SceneAsset, ShortDramaProject
@@ -20,6 +20,7 @@ from ..services.project_state_service import STEP_3, mark_step_completed, propag
 from ..services.asset_image_service import asset_image_service
 from ..services.asset_library_service import asset_library_service
 from ..services.workflow_orchestrator import ASSET_IMAGE_RENDER_ALLOWED_STATUSES, orchestrator
+from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
 from ..utils.enums import ProjectStatus
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,7 @@ async def generate_all_asset_images(
     """
     pid = body.project_id
     proj, meta = _asset_image_generate_preflight(db, pid)
+    lock_acquired = False
     if proj is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     if proj.status == ProjectStatus.FAILED.value:
@@ -118,13 +120,54 @@ async def generate_all_asset_images(
     forbid_repeat = st in ("video_rendering", "video_segments_ready", "completed")
 
     try:
+        acquire_project_task_lock(db, proj, stage="s3_images")
+        lock_acquired = True
         result = asset_image_service.generate_all_asset_images(db, pid)
         # Legacy image generation updates Character/Scene/ProductAsset.image_url;
         # sync them to unified asset library as Step3 data source.
         asset_library_service.sync_legacy_assets_for_project(db, pid)
         db.commit()
+        total_attempts = result.characters_attempted + result.scenes_attempted + result.products_attempted
+        total_succeeded = result.characters_succeeded + result.scenes_succeeded + result.products_succeeded
+        post_db = SessionLocal()
+        try:
+            if total_attempts > 0 and total_succeeded == 0:
+                mark_project_stage_failed(
+                    post_db,
+                    pid,
+                    stage="s3_images",
+                    error_type_value="image_generation_failed",
+                    message="Image generation failed for all assets. Please retry.",
+                )
+            else:
+                latest = post_db.query(ShortDramaProject).filter(ShortDramaProject.id == pid).first()
+                mark_project_stage_succeeded(
+                    post_db,
+                    pid,
+                    stage="s3_images",
+                    status_after=(latest.status if latest else proj.status),
+                )
+        finally:
+            post_db.close()
         return _to_response(result)
     except HTTPException as he:
+        if lock_acquired:
+            fail_db = SessionLocal()
+            try:
+                et = "storage_or_db_error" if he.status_code >= 500 else "request_conflict"
+                if isinstance(he.detail, dict):
+                    et = str(he.detail.get("error_type") or et)
+                mark_project_stage_failed(
+                    fail_db,
+                    pid,
+                    stage="s3_images",
+                    error_type_value=et,
+                    message=str(he.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         if he.status_code == status.HTTP_409_CONFLICT:
             detail_s = _detail_to_str(he.detail)
             if st == "failed":
@@ -149,6 +192,19 @@ async def generate_all_asset_images(
             )
         raise
     except (ShortDramaImageProviderError, ShortDramaImageSaveError) as e:
+        if lock_acquired:
+            fail_db = SessionLocal()
+            try:
+                et = "storage_or_db_error" if isinstance(e, ShortDramaImageSaveError) else "image_generation_failed"
+                mark_project_stage_failed(
+                    fail_db,
+                    pid,
+                    stage="s3_images",
+                    error_type_value=et,
+                    message=str(e),
+                )
+            finally:
+                fail_db.close()
         raise_short_drama_http(e)
 
 

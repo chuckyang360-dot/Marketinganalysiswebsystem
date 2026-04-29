@@ -1,5 +1,6 @@
 import logging
 import json
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -44,6 +45,7 @@ from ..services.read_models import (
     list_segment_scripts,
 )
 from ..services.workflow_orchestrator import orchestrator
+from ..services.project_task_guard import can_retry, current_stage, error_message, error_type, failed_stage
 from ..utils.enums import ProjectStatus
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, normalize_target_market
@@ -168,6 +170,11 @@ def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProject
         last_active_step=p.last_active_step,
         step_status=step_status,
         overall_status=compute_overall_status(db, p, final_video_url=final_video),
+        current_stage=current_stage(p) or None,
+        failed_stage=failed_stage(p) or None,
+        error_message=error_message(p) or None,
+        error_type=error_type(p) or None,
+        can_retry=can_retry(p),
         final_video_url=_public_media_url(final_video),
         cover_asset=_project_cover_asset(db, p.id),
         created_at=p.created_at,
@@ -355,7 +362,8 @@ async def touch_project_step(
 
 
 @router.get("/{project_id}/pipeline", response_model=PipelineSummaryResponse)
-async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
+async def get_pipeline(project_id: int, lightweight: bool = Query(default=False), db: Session = Depends(get_db)):
+    started_at = time.perf_counter()
     log_api_request(logger, "GET /project/{id}/pipeline", project_id=project_id)
     try:
         project = db.query(ShortDramaProject).filter(ShortDramaProject.id == project_id).first()
@@ -369,6 +377,11 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
         sb = latest_story_blueprint(db, project_id)
         chars, scenes, products = list_pipeline_asset_rows(db, project_id)
         segs = list_segment_scripts(db, project_id)
+        asset_counts = {
+            "characters": len(chars),
+            "scenes": len(scenes),
+            "products": len(products),
+        }
 
         def char_row(c) -> dict:
             return {
@@ -502,8 +515,36 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
             video_state.get("current_video_stage"),
         )
 
-        return PipelineSummaryResponse(
+        if lightweight:
+            logger.info("[PIPELINE_LIGHTWEIGHT_QUERY] project_id=%s", project_id)
+            response = PipelineSummaryResponse(
+                project=_project_to_response(db, project),
+                lightweight=True,
+                has_product_context=pc is not None,
+                has_story_blueprint=sb is not None,
+                asset_counts=asset_counts,
+                image_url_filled=image_url_filled,
+                asset_rows_total=asset_rows_total,
+                segment_scripts_count=len(segs),
+                final_video_url=final_u,
+                current_video_stage=video_state.get("current_video_stage"),
+                has_all_segment_videos=bool(video_state.get("has_all_segment_videos")),
+                has_final_video=bool(video_state.get("has_final_video")),
+                final_render_status=video_state.get("final_render_status"),
+                final_render_error=video_state.get("final_render_error"),
+                final_render_job_id=video_state.get("final_render_job_id"),
+            )
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            logger.info("[PIPELINE_QUERY_DURATION] project_id=%s elapsed_ms=%s", project_id, elapsed_ms)
+            return response
+
+        response = PipelineSummaryResponse(
             project=_project_to_response(db, project),
+            lightweight=False,
+            has_product_context=pc is not None,
+            has_story_blueprint=sb is not None,
+            asset_counts=asset_counts,
+            segment_scripts_count=len(segs),
             product_context=(
                 {
                     "id": pc.id,
@@ -544,8 +585,13 @@ async def get_pipeline(project_id: int, db: Session = Depends(get_db)):
             image_url_filled=image_url_filled,
             asset_rows_total=asset_rows_total,
         )
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info("[PIPELINE_QUERY_DURATION] project_id=%s elapsed_ms=%s", project_id, elapsed_ms)
+        return response
     except HTTPException:
         raise
     except Exception as e:
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.exception("[PIPELINE_QUERY_ERROR] project_id=%s elapsed_ms=%s error=%s", project_id, elapsed_ms, str(e))
         log_api_error(logger, "GET /project/{id}/pipeline", str(e), project_id=project_id)
         raise

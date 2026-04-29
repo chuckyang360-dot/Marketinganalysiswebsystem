@@ -102,6 +102,10 @@ export function useStepFourPage() {
 
   const pollEpochRef = useRef(0);
   const segmentJobPollersRef = useRef<Record<number, number>>({});
+  const segmentJobPollFailuresRef = useRef<Record<number, number>>({});
+  const segmentJobAbortRef = useRef<Record<number, AbortController>>({});
+  const pipelinePollFailureRef = useRef(0);
+  const pipelinePollAbortRef = useRef<AbortController | null>(null);
 
   const stopSegmentJobPolling = useCallback((segmentUiId: number) => {
     const timerId = segmentJobPollersRef.current[segmentUiId];
@@ -109,6 +113,9 @@ export function useStepFourPage() {
       window.clearInterval(timerId);
       delete segmentJobPollersRef.current[segmentUiId];
     }
+    segmentJobPollFailuresRef.current[segmentUiId] = 0;
+    segmentJobAbortRef.current[segmentUiId]?.abort();
+    delete segmentJobAbortRef.current[segmentUiId];
   }, []);
 
   const startSegmentJobPolling = useCallback(
@@ -120,7 +127,10 @@ export function useStepFourPage() {
 
       const tick = async () => {
         try {
-          const job: RenderJobStatusResponseDto = await getShortDramaRenderJob(renderJobId);
+          segmentJobAbortRef.current[segmentUiId]?.abort();
+          const ctrl = new AbortController();
+          segmentJobAbortRef.current[segmentUiId] = ctrl;
+          const job: RenderJobStatusResponseDto = await getShortDramaRenderJob(renderJobId, { signal: ctrl.signal });
           const st = (job.status || '').toLowerCase();
           const mapped: Step4VideoStatus =
             st === 'completed' ? 'completed' : st === 'failed' ? 'failed' : st === 'queued' || st === 'pending' ? 'queued' : 'running';
@@ -132,6 +142,7 @@ export function useStepFourPage() {
             video_url: job.video_url || '',
           });
           setSegmentStatusOverrides((prev) => ({ ...prev, [segmentUiId]: mapped }));
+          segmentJobPollFailuresRef.current[segmentUiId] = 0;
           console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segmentUiId, status: mapped });
           if (st === 'completed') {
             stopSegmentJobPolling(segmentUiId);
@@ -150,16 +161,19 @@ export function useStepFourPage() {
             await refreshPipeline();
           }
         } catch {
-          stopSegmentJobPolling(segmentUiId);
-          setSegmentStatusOverrides((prev) => ({ ...prev, [segmentUiId]: 'failed' }));
-          console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segmentUiId, status: 'failed' });
+          segmentJobPollFailuresRef.current[segmentUiId] = (segmentJobPollFailuresRef.current[segmentUiId] || 0) + 1;
+          if (segmentJobPollFailuresRef.current[segmentUiId] >= 3) {
+            stopSegmentJobPolling(segmentUiId);
+            setSegmentStatusOverrides((prev) => ({ ...prev, [segmentUiId]: 'failed' }));
+            console.info('[FRONT_SEGMENT_STATE_UPDATE]', { segment_ui_id: segmentUiId, status: 'failed' });
+          }
         }
       };
 
       void tick();
       const id = window.setInterval(() => {
         void tick();
-      }, 2500);
+      }, 3000);
       segmentJobPollersRef.current[segmentUiId] = id;
     },
     [refreshPipeline, stopSegmentJobPolling],
@@ -178,24 +192,31 @@ export function useStepFourPage() {
       void (async () => {
         if (pollEpochRef.current !== epoch) return;
         try {
-          const p = await getShortDramaPipeline(projectId);
+          pipelinePollAbortRef.current?.abort();
+          const ctrl = new AbortController();
+          pipelinePollAbortRef.current = ctrl;
+          const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
           if (pollEpochRef.current !== epoch) return;
           setPipeline(p);
           touchProjectNameFromPipeline(projectId, p.project?.project_name);
+          pipelinePollFailureRef.current = 0;
           const st = p.current_video_stage ?? '';
           if (st !== 'segment_rendering' && st !== 'final_rendering') {
             console.info('[STEP4_POLLING_STOP]', { reason: 'stage_settled', stage: st });
             pollEpochRef.current += 1;
           }
         } catch {
-          window.clearInterval(id);
-          console.info('[STEP4_POLLING_STOP]', { reason: 'fetch_error' });
-          setLoadError(SHORT_DRAMA_UI.error.pipelineLoad);
-          setPhase('error');
-          pollEpochRef.current += 1;
+          pipelinePollFailureRef.current += 1;
+          if (pipelinePollFailureRef.current >= 3) {
+            window.clearInterval(id);
+            console.info('[STEP4_POLLING_STOP]', { reason: 'fetch_error_3x' });
+            setLoadError(SHORT_DRAMA_UI.error.pipelineLoad);
+            setPhase('error');
+            pollEpochRef.current += 1;
+          }
         }
       })();
-    }, 2800);
+    }, 3000);
 
     const maxWait = window.setTimeout(
       () => {
@@ -211,6 +232,8 @@ export function useStepFourPage() {
     return () => {
       window.clearInterval(id);
       window.clearTimeout(maxWait);
+      pipelinePollAbortRef.current?.abort();
+      pipelinePollAbortRef.current = null;
     };
   }, [projectId, phase, pipeline?.current_video_stage]);
 
@@ -343,7 +366,10 @@ export function useStepFourPage() {
       Object.values(segmentJobPollersRef.current).forEach((id) => {
         window.clearInterval(id);
       });
+      Object.values(segmentJobAbortRef.current).forEach((c) => c.abort());
+      pipelinePollAbortRef.current?.abort();
       segmentJobPollersRef.current = {};
+      segmentJobAbortRef.current = {};
     };
   }, []);
 

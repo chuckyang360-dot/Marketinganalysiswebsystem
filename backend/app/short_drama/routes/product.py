@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderError
 from ..http_errors import raise_short_drama_http
 from ..models import ProductContextRecord
@@ -27,6 +27,11 @@ from ..services.project_state_service import (
 )
 from ..services.read_models import latest_product_context, next_product_context_version
 from ..services.workflow_orchestrator import orchestrator
+from ..services.project_task_guard import (
+    acquire_project_task_lock,
+    mark_project_stage_failed,
+    mark_project_stage_succeeded,
+)
 from ..utils.enums import ProjectStatus, WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
@@ -142,9 +147,12 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
         body.reparse_mode,
         safe_input,
     )
+    lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(db, project, WorkflowStep.PARSE_PRODUCT)
+        acquire_project_task_lock(db, project, stage="s1_product")
+        lock_acquired = True
         existing_context = latest_product_context(db, body.project_id)
         had_existing_context = existing_context is not None
 
@@ -158,35 +166,38 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
             },
             explicit_target_market=(project.target_market or "North America"),
         )
+        project_constraints = {
+            "duration": project.duration or "",
+            "format": project.format or "",
+            "style": project.style or "",
+            "visual_style": project.visual_style or "",
+            "aspect_ratio": project.aspect_ratio or "",
+            "target_market": language_policy["target_market"],
+            "creative_intent": project.creative_intent or "",
+            "legacy_creative_intent_summary": "；".join(
+                [
+                    x
+                    for x in [
+                        f"营销目标：{project.marketing_goal}" if project.marketing_goal else "",
+                        f"目标受众：{project.target_audience}" if project.target_audience else "",
+                        f"品牌调性：{project.brand_tone}" if project.brand_tone else "",
+                        f"补充说明：{project.creative_brief}" if project.creative_brief else "",
+                    ]
+                    if x
+                ]
+            ),
+            "workflow_language": language_policy["workflow_language"],
+            "video_language": language_policy["video_language"],
+            "language_policy": language_policy,
+            "language_prompt_rules": language_prompt_rules(language_policy),
+        }
+        logger.info("[S1_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s", body.project_id)
+        db.close()
         try:
             artifacts = product_parser_service.parse(
                 body.project_id,
                 body.input,
-                project_constraints={
-                    "duration": project.duration or "",
-                    "format": project.format or "",
-                    "style": project.style or "",
-                    "visual_style": project.visual_style or "",
-                    "aspect_ratio": project.aspect_ratio or "",
-                    "target_market": language_policy["target_market"],
-                    "creative_intent": project.creative_intent or "",
-                    "legacy_creative_intent_summary": "；".join(
-                        [
-                            x
-                            for x in [
-                                f"营销目标：{project.marketing_goal}" if project.marketing_goal else "",
-                                f"目标受众：{project.target_audience}" if project.target_audience else "",
-                                f"品牌调性：{project.brand_tone}" if project.brand_tone else "",
-                                f"补充说明：{project.creative_brief}" if project.creative_brief else "",
-                            ]
-                            if x
-                        ]
-                    ),
-                    "workflow_language": language_policy["workflow_language"],
-                    "video_language": language_policy["video_language"],
-                    "language_policy": language_policy,
-                    "language_prompt_rules": language_prompt_rules(language_policy),
-                },
+                project_constraints=project_constraints,
             )
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
             logger.info(
@@ -218,49 +229,67 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
                 detail="产品解析服务暂时异常，请稍后重试。",
             )
 
-        prev_ctx = (
+        logger.info("[S1_DB_REOPEN_FOR_WRITEBACK] project_id=%s", body.project_id)
+        write_db = SessionLocal()
+        try:
+            write_project = orchestrator.get_project(write_db, body.project_id)
+            prev_ctx = (
             ProductContextSchema.model_validate(existing_context.normalized_context_json)
             if existing_context
             else None
-        )
-        merged_context, updated_fields, preserved_fields = _merge_context_by_mode(
-            body.reparse_mode,
-            prev_ctx,
-            artifacts.product_context,
-        )
-        version = next_product_context_version(db, body.project_id)
-        record = ProductContextRecord(
-            project_id=body.project_id,
-            raw_inputs_json=artifacts.raw_input.model_dump(),
-            image_understanding_json=artifacts.image_understanding.model_dump(),
-            normalized_context_json=merged_context.model_dump(),
-            parse_status="success",
-            version=version,
-        )
-        db.add(record)
-        _trace(
-            "S1_CONTEXT_NORMALIZED",
-            {
-                "project_id": body.project_id,
-                "updated_fields": updated_fields,
-                "preserved_fields": preserved_fields,
-                "fallback_or_overrides": [
-                    {"field": f, "reason": "preserve_user_edited"}
-                    for f in preserved_fields
-                ],
-                "normalized_context_final": merged_context.model_dump(),
-            },
-        )
-        mark_step_completed(project, STEP_1)
-        if had_existing_context:
-            propagate_downstream_stale(project, STEP_1)
-        update_last_active_step(project, STEP_1)
-        # First parse keeps linear bootstrap behavior; re-parse in later stages should
-        # not forcibly rewind project.status and only mark downstream steps stale.
-        if project.status == ProjectStatus.CREATED.value:
-            orchestrator.advance_on_success(db, project, WorkflowStep.PARSE_PRODUCT)
-        db.commit()
-        db.refresh(record)
+            )
+            merged_context, updated_fields, preserved_fields = _merge_context_by_mode(
+                body.reparse_mode,
+                prev_ctx,
+                artifacts.product_context,
+            )
+            version = next_product_context_version(write_db, body.project_id)
+            record = ProductContextRecord(
+                project_id=body.project_id,
+                raw_inputs_json=artifacts.raw_input.model_dump(),
+                image_understanding_json=artifacts.image_understanding.model_dump(),
+                normalized_context_json=merged_context.model_dump(),
+                parse_status="success",
+                version=version,
+            )
+            write_db.add(record)
+            _trace(
+                "S1_CONTEXT_NORMALIZED",
+                {
+                    "project_id": body.project_id,
+                    "updated_fields": updated_fields,
+                    "preserved_fields": preserved_fields,
+                    "fallback_or_overrides": [
+                        {"field": f, "reason": "preserve_user_edited"}
+                        for f in preserved_fields
+                    ],
+                    "normalized_context_final": merged_context.model_dump(),
+                },
+            )
+            mark_step_completed(write_project, STEP_1)
+            if had_existing_context:
+                propagate_downstream_stale(write_project, STEP_1)
+            update_last_active_step(write_project, STEP_1)
+            if write_project.status == ProjectStatus.CREATED.value:
+                orchestrator.advance_on_success(write_db, write_project, WorkflowStep.PARSE_PRODUCT)
+            write_db.commit()
+            write_db.refresh(record)
+            final_status = write_project.status
+        except Exception:
+            write_db.rollback()
+            raise
+        finally:
+            write_db.close()
+        post_db = SessionLocal()
+        try:
+            mark_project_stage_succeeded(
+                post_db,
+                body.project_id,
+                stage="s1_product",
+                status_after=final_status,
+            )
+        finally:
+            post_db.close()
 
         log_api_success(
             logger,
@@ -296,6 +325,20 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
         return resp
         
     except HTTPException as e:
+        if lock_acquired:
+            fail_db = SessionLocal()
+            try:
+                mark_project_stage_failed(
+                    fail_db,
+                    body.project_id,
+                    stage="s1_product",
+                    error_type_value="storage_or_db_error" if e.status_code >= 500 else "request_conflict",
+                    message=str(e.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         log_api_error(
             logger,
             "POST /product/parse",

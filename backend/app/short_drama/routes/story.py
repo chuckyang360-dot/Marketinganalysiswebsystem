@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderError
 from ..http_errors import raise_short_drama_http
 from ..models import StoryBlueprintRecord
@@ -18,6 +18,7 @@ from ..services.project_state_service import (
 )
 from ..services.story_planner_service import story_planner_service
 from ..services.workflow_orchestrator import orchestrator
+from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
 from ..utils.creative_brief import build_creative_brief
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -42,9 +43,12 @@ def _asset_req_preview_rows(rows: object, keys: list[str], limit: int = 2) -> li
 @router.post("/generate", response_model=GenerateStoryResponse)
 async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /story/generate", project_id=body.project_id)
+    lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_STORY)
+        acquire_project_task_lock(db, project, stage="s2_story")
+        lock_acquired = True
         had_existing_story = latest_story_blueprint(db, body.project_id) is not None
 
         pc_row = latest_product_context(db, body.project_id)
@@ -100,8 +104,12 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
         project_config["creative_brief_data"] = build_creative_brief(project_config, product)
 
         status_before = project.status
+        story_input_product = product
+        story_input_config = project_config
+        logger.info("[S2_DB_RELEASE_BEFORE_EXTERNAL_CALL] project_id=%s", body.project_id)
+        db.close()
         try:
-            blueprint = story_planner_service.generate(body.project_id, product, project_config)
+            blueprint = story_planner_service.generate(body.project_id, story_input_product, story_input_config)
         except (ShortDramaProviderError, ShortDramaInvalidModelOutputError) as e:
             logger.info(
                 "[SHORT_DRAMA_STEP_FAIL] project_id=%s step=%s error_type=%s project_status_before=%s project_status_after=%s",
@@ -153,21 +161,36 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
             },
         )
 
-        version = next_story_version(db, body.project_id)
-        record = StoryBlueprintRecord(
-            project_id=body.project_id,
-            blueprint_json=blueprint.model_dump(),
-            version=version,
-            approved=False,
-        )
-        db.add(record)
-        mark_step_completed(project, STEP_2)
-        if had_existing_story:
-            propagate_downstream_stale(project, STEP_2)
-        update_last_active_step(project, STEP_2)
-        orchestrator.advance_on_success(db, project, WorkflowStep.GENERATE_STORY)
-        db.commit()
-        db.refresh(record)
+        logger.info("[S2_DB_REOPEN_FOR_WRITEBACK] project_id=%s", body.project_id)
+        write_db = SessionLocal()
+        try:
+            write_project = orchestrator.get_project(write_db, body.project_id)
+            version = next_story_version(write_db, body.project_id)
+            record = StoryBlueprintRecord(
+                project_id=body.project_id,
+                blueprint_json=blueprint.model_dump(),
+                version=version,
+                approved=False,
+            )
+            write_db.add(record)
+            mark_step_completed(write_project, STEP_2)
+            if had_existing_story:
+                propagate_downstream_stale(write_project, STEP_2)
+            update_last_active_step(write_project, STEP_2)
+            orchestrator.advance_on_success(write_db, write_project, WorkflowStep.GENERATE_STORY)
+            write_db.commit()
+            write_db.refresh(record)
+            final_status = write_project.status
+        except Exception:
+            write_db.rollback()
+            raise
+        finally:
+            write_db.close()
+        post_db = SessionLocal()
+        try:
+            mark_project_stage_succeeded(post_db, body.project_id, stage="s2_story", status_after=final_status)
+        finally:
+            post_db.close()
 
         log_api_success(
             logger,
@@ -185,6 +208,23 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
             created_at=record.created_at,
         )
     except HTTPException as e:
+        if lock_acquired:
+            et = "storage_or_db_error" if e.status_code >= 500 else "request_conflict"
+            if isinstance(e.detail, dict):
+                et = str(e.detail.get("error_type") or et)
+            fail_db = SessionLocal()
+            try:
+                mark_project_stage_failed(
+                    fail_db,
+                    body.project_id,
+                    stage="s2_story",
+                    error_type_value=et,
+                    message=str(e.detail),
+                )
+            except Exception:
+                pass
+            finally:
+                fail_db.close()
         log_api_error(
             logger,
             "POST /story/generate",

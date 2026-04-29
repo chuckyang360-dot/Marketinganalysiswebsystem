@@ -294,6 +294,8 @@ export function ShortDramaAssetsPage() {
   const refTargetAssetId = useRef<number | null>(null);
   const uploadPickerRef = useRef<HTMLInputElement>(null);
   const autoRunProjectRef = useRef<number | null>(null);
+  const pipelinePollFailureRef = useRef(0);
+  const pipelinePollAbortRef = useRef<AbortController | null>(null);
 
   const reload = useCallback(async () => {
     if (!effectiveProjectId) return;
@@ -553,13 +555,18 @@ export function ShortDramaAssetsPage() {
   useEffect(() => {
     const projectId = toPositiveInt(effectiveProjectId);
     if (!projectId || !isAssetGenerationPending) return;
+    pipelinePollFailureRef.current = 0;
     const timer = window.setInterval(() => {
       void (async () => {
         try {
-          const p = await getShortDramaPipeline(projectId);
+          pipelinePollAbortRef.current?.abort();
+          const ctrl = new AbortController();
+          pipelinePollAbortRef.current = ctrl;
+          const p = await getShortDramaPipeline(projectId, { signal: ctrl.signal, lightweight: true });
           setPipelineStatus(String(p.project?.status || ''));
           setPipelineOverallStatus(String(p.project?.overall_status || ''));
           setPipelineStepStatus((p.project?.step_status || {}) as Record<string, string>);
+          pipelinePollFailureRef.current = 0;
           await reload();
           const done =
             p.project?.status === 'assets_ready'
@@ -569,11 +576,20 @@ export function ShortDramaAssetsPage() {
             setAutoPhase('ready');
           }
         } catch {
-          // keep current UI state; polling will retry
+          pipelinePollFailureRef.current += 1;
+          if (pipelinePollFailureRef.current >= 3) {
+            window.clearInterval(timer);
+            setAutoPhase('error');
+            setAutoHint('pipeline 轮询连续失败，已自动停止，请稍后重试。');
+          }
         }
       })();
-    }, 2200);
-    return () => window.clearInterval(timer);
+    }, 3000);
+    return () => {
+      window.clearInterval(timer);
+      pipelinePollAbortRef.current?.abort();
+      pipelinePollAbortRef.current = null;
+    };
   }, [effectiveProjectId, isAssetGenerationPending, reload]);
 
   const submitAdd = useCallback(async () => {

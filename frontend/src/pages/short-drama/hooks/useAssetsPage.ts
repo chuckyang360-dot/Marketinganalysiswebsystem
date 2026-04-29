@@ -27,7 +27,7 @@ export type AssetsPagePhase =
   | 'ready'
   | 'error';
 
-const POLL_MS = 2000;
+const POLL_MS = 3000;
 const POLL_MAX = 45;
 
 /** 与 AssetsPage 一致：可进入 Step4 的项目状态 */
@@ -44,10 +44,17 @@ async function waitUntilNotAssetRendering(
   onPipeline: (p: PipelineSummaryDto) => void,
 ): Promise<PipelineSummaryDto> {
   let p = initial;
+  let failures = 0;
   for (let i = 0; i < POLL_MAX && p.project.status === 'assets_rendering'; i++) {
     await new Promise((r) => setTimeout(r, POLL_MS));
-    p = await getShortDramaPipeline(projectId);
-    onPipeline(p);
+    try {
+      p = await getShortDramaPipeline(projectId);
+      onPipeline(p);
+      failures = 0;
+    } catch {
+      failures += 1;
+      if (failures >= 3) break;
+    }
   }
   return p;
 }
