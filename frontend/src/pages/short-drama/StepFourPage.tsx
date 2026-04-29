@@ -34,6 +34,7 @@ export function ShortDramaStepFourPage() {
     mergeLoading,
     canMergeAll,
     canGenerateVideos,
+    videoStatusBlockedHint,
     hasBackendSegmentScripts,
     doneCount,
     displayTotal,
@@ -213,7 +214,7 @@ export function ShortDramaStepFourPage() {
               )}
               {hasBackendSegmentScripts && !canGenerateVideos && (
                 <div className="text-[12px] px-3 py-2 rounded-lg" style={{ background: 'rgba(51,65,85,0.08)', color: '#334155', border: '1px solid rgba(51,65,85,0.2)' }}>
-                  {SHORT_DRAMA_UI.stepFour.videoStatusBlocked}
+                  {videoStatusBlockedHint}
                 </div>
               )}
               {projectVideoHeadline && (

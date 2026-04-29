@@ -143,7 +143,13 @@ def _project_cover_asset(db: Session, project_id: int) -> ProjectCoverAsset:
     return ProjectCoverAsset(asset_type=None, name=None, image_url=None, status="missing")
 
 
-def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProjectResponse:
+def _project_to_response(
+    db: Session,
+    p: ShortDramaProject,
+    *,
+    suggested_status: str | None = None,
+    status_recoverable: bool = False,
+) -> ShortDramaProjectResponse:
     final_video = latest_final_video_url(db, p.id)
     step_status = normalize_step_status(p.step_status)
     inferred_policy = build_language_policy(
@@ -155,6 +161,8 @@ def _project_to_response(db: Session, p: ShortDramaProject) -> ShortDramaProject
         user_id=p.user_id,
         project_name=p.project_name,
         status=p.status,
+        suggested_status=suggested_status,
+        status_recoverable=status_recoverable,
         duration=p.duration,
         format=p.format,
         style=_normalize_story_style(p.style),
@@ -498,40 +506,42 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
         segment_scripts_count = len(segs)
         if has_final_video:
             suggested_status = "completed"
-            suggested_reason = "final_video_exists"
         elif has_all_segment_videos:
             suggested_status = "video_segments_ready"
-            suggested_reason = "all_segment_videos_exist"
         elif segment_scripts_count > 0:
             suggested_status = "segments_generated"
-            suggested_reason = "segment_scripts_exist"
         elif asset_rows_total > 0 and image_url_filled == asset_rows_total:
             suggested_status = "assets_ready"
-            suggested_reason = "all_asset_images_ready"
         elif asset_rows_total > 0:
             suggested_status = "asset_specs_generated"
-            suggested_reason = "asset_specs_exist"
         elif has_story_blueprint:
             suggested_status = "story_generated"
-            suggested_reason = "story_blueprint_exists"
         elif has_product_context:
             suggested_status = "product_parsed"
-            suggested_reason = "product_context_exists"
         else:
             suggested_status = "created"
-            suggested_reason = "no_artifacts_found"
+        runtime = dict((project.step_status or {}).get("_runtime") or {})
+        task_running = bool(runtime.get("task_running", False))
+        current_status = str(project.status or "").strip()
+        status_recoverable = bool(
+            current_status == "processing"
+            and (not task_running)
+            and suggested_status != "processing"
+            and suggested_status != current_status
+        )
         logger.info(
-            "[PROJECT_STATUS_ARTIFACT_CHECK] project_id=%s old_status=%s asset_rows_total=%s image_url_filled=%s "
-            "segment_scripts_count=%s has_final_video=%s has_all_segment_videos=%s suggested_status=%s reason=%s",
+            "[PROJECT_STATUS_ARTIFACT_CHECK] project_id=%s current_status=%s suggested_status=%s status_recoverable=%s "
+            "asset_rows_total=%s image_url_filled=%s segment_scripts_count=%s has_final_video=%s "
+            "has_all_segment_videos=%s",
             project_id,
-            project.status,
+            current_status,
+            suggested_status,
+            status_recoverable,
             asset_rows_total,
             image_url_filled,
             segment_scripts_count,
             has_final_video,
             has_all_segment_videos,
-            suggested_status,
-            suggested_reason,
         )
 
         log_api_success(
@@ -566,7 +576,12 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
         if lightweight:
             logger.info("[PIPELINE_LIGHTWEIGHT_QUERY] project_id=%s", project_id)
             response = PipelineSummaryResponse(
-                project=_project_to_response(db, project),
+                project=_project_to_response(
+                    db,
+                    project,
+                    suggested_status=suggested_status,
+                    status_recoverable=status_recoverable,
+                ),
                 lightweight=True,
                 has_product_context=pc is not None,
                 has_story_blueprint=sb is not None,
@@ -587,7 +602,12 @@ async def get_pipeline(project_id: int, lightweight: bool = Query(default=False)
             return response
 
         response = PipelineSummaryResponse(
-            project=_project_to_response(db, project),
+            project=_project_to_response(
+                db,
+                project,
+                suggested_status=suggested_status,
+                status_recoverable=status_recoverable,
+            ),
             lightweight=False,
             has_product_context=pc is not None,
             has_story_blueprint=sb is not None,

@@ -382,8 +382,25 @@ export function useStepFourPage() {
   const stepFourVideoLanguage = useMemo(() => resolveStepFourVideoLanguage(pipeline), [pipeline]);
 
   const projectStatus = pipelineVm.projectStatus;
-  const canGenerateVideos = VIDEO_ALLOWED_STATUSES.has(projectStatus);
+  const suggestedStatus = String(pipeline?.project?.suggested_status || '').trim();
+  const statusRecoverable = Boolean(pipeline?.project?.status_recoverable);
+  const effectiveStatus =
+    projectStatus === 'processing' && statusRecoverable && suggestedStatus
+      ? suggestedStatus
+      : projectStatus;
+  const canGenerateVideos = VIDEO_ALLOWED_STATUSES.has(effectiveStatus);
+  const videoStatusBlockedHint = `当前项目状态尚不允许生成片段视频（当前 ${effectiveStatus || 'unknown'}，需 assets_ready / segments_generated / video_rendering / video_segments_ready / completed）。请在后端流程到达可渲染阶段后再试。`;
   const hasBackendSegmentScripts = pipelineVm.coreSegments.length > 0;
+  useEffect(() => {
+    if (!pipeline?.project) return;
+    console.info('[S4_EFFECTIVE_STATUS]', {
+      status: projectStatus,
+      suggested_status: suggestedStatus || null,
+      status_recoverable: statusRecoverable,
+      effectiveStatus,
+      canGenerateVideo: canGenerateVideos,
+    });
+  }, [pipeline?.project, projectStatus, suggestedStatus, statusRecoverable, effectiveStatus, canGenerateVideos]);
 
   useEffect(() => {
     if (pipelineVm.coreSegments.length === 0) {
@@ -496,7 +513,7 @@ export function useStepFourPage() {
   const runSingleGenerate = useCallback(
     async (segId: number) => {
       if (projectId == null || !canGenerateVideos) {
-        if (!canGenerateVideos) setGenerateError(SHORT_DRAMA_UI.stepFour.videoStatusBlocked);
+        if (!canGenerateVideos) setGenerateError(videoStatusBlockedHint);
         return;
       }
       const seg = segments.find((s) => s.id === segId);
@@ -528,7 +545,7 @@ export function useStepFourPage() {
         setGenerateError(msg);
       }
     },
-    [projectId, refreshPipeline, segments, canGenerateVideos, startSegmentJobPolling],
+    [projectId, refreshPipeline, segments, canGenerateVideos, startSegmentJobPolling, videoStatusBlockedHint],
   );
 
   const handleGenerateVideo = useCallback(
@@ -700,10 +717,12 @@ export function useStepFourPage() {
     segmentRenderJobs,
     canMergeAll,
     canGenerateVideos,
+    videoStatusBlockedHint,
     hasBackendSegmentScripts,
     doneCount,
     displayTotal,
     projectStatus,
+    effectiveStatus,
     assetLibraryVm,
     stepFourVideoLanguage,
     handleGenerateAll,
