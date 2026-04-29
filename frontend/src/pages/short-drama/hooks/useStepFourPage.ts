@@ -257,8 +257,7 @@ export function useStepFourPage() {
           if (pipelinePollFailureRef.current >= 3) {
             window.clearInterval(id);
             console.info('[STEP4_POLLING_STOP]', { reason: 'fetch_error_3x' });
-            setLoadError(SHORT_DRAMA_UI.error.pipelineLoad);
-            setPhase('error');
+            setGenerateError('当前片段生成状态查询失败，请稍后重试当前片段。');
             pollEpochRef.current += 1;
           }
         }
