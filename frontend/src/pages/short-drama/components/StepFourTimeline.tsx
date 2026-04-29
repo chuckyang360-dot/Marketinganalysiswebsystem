@@ -35,6 +35,9 @@ export function StepFourTimeline({
 }: TimelineProps) {
   const allDone = mergeReady;
   const doneCount = coreDoneCount;
+  // 临时止血：手动新增片段尚未具备后端持久化能力，先关闭入口避免假交互。
+  const addSegmentTemporarilyDisabled = true;
+  const addSegmentLocked = addSegmentDisabled || addSegmentTemporarilyDisabled;
 
   const timelineLabel = (seg: Step4SegmentItem): { label: string; source: string } => {
     if (seg.shortLabel?.trim()) return { label: seg.shortLabel.trim(), source: 'short_label' };
@@ -164,30 +167,33 @@ export function StepFourTimeline({
         {/* Add segment button */}
         <button
           type="button"
-          disabled={addSegmentDisabled}
-          onClick={onAddSegment}
+          disabled={addSegmentLocked}
+          title="手动新增片段暂未开放"
+          onClick={() => {
+            if (!addSegmentLocked) onAddSegment();
+          }}
           className="flex-shrink-0 h-11 flex items-center gap-1.5 px-3.5 rounded-xl transition-all duration-200 whitespace-nowrap"
           style={{
-            background: addSegmentDisabled ? "#F5F5F7" : "#ffffff",
-            border: addSegmentDisabled ? "1.5px solid #EAEAEA" : "1.5px dashed #D1D1D6",
-            color: addSegmentDisabled ? "#AEAEB2" : "#8E8E93",
-            cursor: addSegmentDisabled ? "not-allowed" : "pointer",
+            background: addSegmentLocked ? "#F5F5F7" : "#ffffff",
+            border: addSegmentLocked ? "1.5px solid #EAEAEA" : "1.5px dashed #D1D1D6",
+            color: addSegmentLocked ? "#AEAEB2" : "#8E8E93",
+            cursor: addSegmentLocked ? "not-allowed" : "pointer",
           }}
           onMouseEnter={(e) => {
-            if (addSegmentDisabled) return;
+            if (addSegmentLocked) return;
             (e.currentTarget as HTMLElement).style.background = "#F5F5F7";
             (e.currentTarget as HTMLElement).style.borderColor = "#1D1D1F";
             (e.currentTarget as HTMLElement).style.color = "#1D1D1F";
           }}
           onMouseLeave={(e) => {
-            if (addSegmentDisabled) return;
+            if (addSegmentLocked) return;
             (e.currentTarget as HTMLElement).style.background = "#ffffff";
             (e.currentTarget as HTMLElement).style.borderColor = "#D1D1D6";
             (e.currentTarget as HTMLElement).style.color = "#8E8E93";
           }}
         >
           <i className="ri-add-circle-line text-[14px]" />
-          <span className="text-[11.5px] font-medium">新增片段</span>
+          <span className="text-[11.5px] font-medium">手动新增片段暂未开放</span>
         </button>
       </div>
 
