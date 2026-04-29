@@ -1,4 +1,5 @@
 import logging
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -50,6 +51,10 @@ from ..utils.public_static_url import build_public_static_url
 from ..utils.segment_slots import normalize_segment_script_dict_for_read
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 _ALLOWED_STORY_STYLES = {"light_conflict", "healing", "comedy", "suspense", "emotional"}
@@ -179,6 +184,27 @@ async def create_project(body: CreateShortDramaProjectRequest, db: Session = Dep
         project_name=body.project_name,
     )
     try:
+        _trace(
+            "S0_USER_INPUT",
+            {
+                "project_id": None,
+                "user_id": body.user_id,
+                "project_name": body.project_name,
+                "duration": body.duration,
+                "content_format": body.format,
+                "story_style": body.style,
+                "visual_style": body.visual_style,
+                "aspect_ratio": body.aspect_ratio,
+                "language": {"workflow_language": body.workflow_language, "video_language": body.video_language},
+                "target_platform": None,
+                "target_market": body.target_market,
+                "target_audience": body.target_audience,
+                "marketing_goal": body.marketing_goal,
+                "brand_tone": body.brand_tone,
+                "creative_intent": body.creative_intent,
+                "creative_brief": body.creative_brief,
+            },
+        )
         user = db.query(User).filter(User.id == body.user_id).first()
         if not user:
             log_api_error(logger, "POST /project", "User not found", user_id=body.user_id)
@@ -209,6 +235,31 @@ async def create_project(body: CreateShortDramaProjectRequest, db: Session = Dep
         db.add(project)
         db.commit()
         db.refresh(project)
+        _trace(
+            "S0_NORMALIZED",
+            {
+                "project_id": project.id,
+                "story_style_normalized": _normalize_story_style(body.style),
+                "target_market_normalized": normalize_target_market(body.target_market or "North America"),
+                "language_policy": language_policy,
+                "persisted_fields": {
+                    "project_name": project.project_name,
+                    "duration": project.duration,
+                    "content_format": project.format,
+                    "story_style": project.style,
+                    "visual_style": project.visual_style,
+                    "aspect_ratio": project.aspect_ratio,
+                    "target_market": project.target_market,
+                    "target_audience": project.target_audience,
+                    "marketing_goal": project.marketing_goal,
+                    "brand_tone": project.brand_tone,
+                    "creative_intent": project.creative_intent,
+                    "creative_brief": project.creative_brief,
+                    "workflow_language": project.workflow_language,
+                    "video_language": project.video_language,
+                },
+            },
+        )
         log_api_success(
             logger,
             "POST /project",

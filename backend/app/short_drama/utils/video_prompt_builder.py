@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import logging
+import json
 from dataclasses import dataclass, field
 
 from ..exceptions import ShortDramaVideoInputError
@@ -18,7 +19,6 @@ from ..schemas.segment import SegmentScriptSchema
 SAFE_VIDEO_PROMPT_CHARS = 3200
 _HARD_XAI_VIDEO_PROMPT_CHARS = 4096
 _MAX_REFS = 7
-_STYLE_SUFFIX = "commercial ad video, consistent identity, no text overlay, no watermark"
 _REPETITIVE_PROMPT_PHRASES = (
     "Cinematic 9:16 vertical composition",
     "movie-grade lighting",
@@ -26,7 +26,6 @@ _REPETITIVE_PROMPT_PHRASES = (
 )
 logger = logging.getLogger(__name__)
 _SHOT_MAX_CHARS = 700
-_SHOT_MIN_CHARS = 400
 _SEGMENT_MAX_SHOTS = 3
 _PRODUCT_SHOWCASE_MAX_CONSTRAINTS = 3
 _FORBIDDEN_TOKENS = (
@@ -68,6 +67,10 @@ _RESULT_HINTS = (
     "笑",
     "结束",
 )
+
+
+def _trace(tag: str, payload: dict) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _get_shot_value(shot, key: str, default=None):
@@ -286,10 +289,6 @@ def _build_compact_shot_prompt(shot) -> tuple[str, dict]:
     compact = _drop_repetitive_boilerplate(compact)
     if len(compact) > _SHOT_MAX_CHARS:
         compact = _compact_text(compact, _SHOT_MAX_CHARS)
-    if len(compact) < _SHOT_MIN_CHARS and len(compact) > 0:
-        compact = f"{compact} {_STYLE_SUFFIX}"
-        compact = _compact_text(compact, _SHOT_MAX_CHARS)
-
     return compact, {
         "included_product_refs": bool(product_refs),
         "included_character_refs": bool(character_refs),
@@ -460,6 +459,22 @@ def build_segment_video_plan(
     if ":" not in ar:
         ar = "9:16"
     prompt, budget = _budgeted_segment_prompt(segment, aspect_ratio=ar)
+    execution_shots = [s.model_dump() if hasattr(s, "model_dump") else dict(s) for s in (segment.shots or [])]
+    _trace(
+        "S4_VIDEO_BUILDER_INPUT",
+        {
+            "segment_id": segment.segment_id,
+            "execution_shots": execution_shots,
+            "asset_refs": {
+                "character_refs": list(dict.fromkeys([r for s in segment.shots for r in _effective_character_refs(s)])),
+                "scene_refs": list(dict.fromkeys([_effective_scene_ref(s) for s in segment.shots if _effective_scene_ref(s)])),
+                "product_refs": list(dict.fromkeys([r for s in segment.shots for r in _effective_product_refs(s)])),
+            },
+            "visual_action": [str(_get_shot_value(s, "visual_action", "") or _get_shot_value(s, "action_description", "")) for s in segment.shots],
+            "shot_video_prompt": [str(_get_shot_value(s, "video_prompt", "") or "") for s in segment.shots],
+            "segment_video_prompt": "",
+        },
+    )
     duration = _duration_for_segment(segment)
     logger.info(
         "[S4_VIDEO_PROMPT_BUDGET] segment_id=%s before_chars=%s after_chars=%s truncated=%s dropped_sections=%s final_prompt_preview=%s",
@@ -510,6 +525,18 @@ def build_segment_video_plan(
 
     manual_video_prompt_used = any(str(_get_shot_value(s, "manual_video_prompt", "") or "").strip() for s in segment.shots)
     manual_refs_used = _manual_refs_used(segment)
+    prompt_source = "ai_shot_video_prompt_merge" if any(str(_get_shot_value(s, "video_prompt", "") or "").strip() for s in segment.shots) else "builder_fallback"
+    _trace(
+        "S4_VIDEO_BUILDER_OUTPUT",
+        {
+            "segment_id": segment.segment_id,
+            "segment_video_prompt": prompt,
+            "prompt_source": prompt_source,
+            "used_fields": ["visual_action", "scene_ref", "character_refs", "product_refs", "must_show", "must_avoid"],
+            "discarded_fields": budget.get("dropped_sections", []),
+            "final_prompt_length": len(prompt),
+        },
+    )
     logger.info(
         "[S4_MANUAL_OVERRIDE_APPLIED] segment_id=%s shot_id=%s manual_video_prompt_used=%s manual_refs_used=%s final_prompt_chars=%s",
         segment.segment_id,

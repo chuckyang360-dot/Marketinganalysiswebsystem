@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 from typing import Any, Dict, Protocol
 
@@ -22,6 +23,10 @@ from ..utils.segment_slots import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 def _first_character_ref(assets: AssetSpecsBundleSchema | None) -> str:
     if not assets or not assets.characters:
@@ -691,27 +696,58 @@ class XAISegmentDirectorProvider:
             segments: list[SegmentScriptSchema] = []
             last_quality_error: ShortDramaInvalidModelOutputError | None = None
             for attempt in range(2):
+                prompt_payload = {
+                    "project_id": project_id,
+                    "project_config": project_config,
+                    "language_policy": project_config.get("language_policy", {}),
+                    "language_prompt_rules": project_config.get("language_prompt_rules", ""),
+                    "creative_context": blueprint.creative_brief,
+                    "creative_intent": project_config.get("effective_creative_intent", ""),
+                    "story_blueprint": _trim_story_blueprint_for_segment_director(blueprint),
+                    "s2_execution_blueprint": s2_execution_blueprint,
+                    "asset_specs": _trim_asset_specs_for_segment_director(assets),
+                    "quality_retry": attempt > 0,
+                }
+                _trace(
+                    "S4_DIRECTOR_INPUT_CONTEXT",
+                    {
+                        "project_id": project_id,
+                        "project_config": project_config,
+                        "product_context": (project_config or {}).get("s1_visual_constraints", {}),
+                        "story_blueprint": blueprint.model_dump(),
+                        "segment_script": [x.model_dump() for x in blueprint.segment_plan],
+                        "assets_available": {
+                            "characters": len(assets.characters),
+                            "scenes": len(assets.scenes),
+                            "products": len(assets.products),
+                        },
+                        "character_assets": [x.model_dump() for x in assets.characters],
+                        "scene_assets": [x.model_dump() for x in assets.scenes],
+                        "product_assets": [x.model_dump() for x in assets.products],
+                    },
+                )
+                _trace(
+                    "S4_DIRECTOR_PROMPT",
+                    {
+                        "project_id": project_id,
+                        "system_prompt": SEGMENT_DIRECTOR_SYSTEM_PROMPT,
+                        "user_payload": prompt_payload,
+                        "provider": "xai_text_provider",
+                        "model": "effective_xai_text_model",
+                        "attempt": attempt + 1,
+                    },
+                )
                 data = self._text.generate_structured_json(
                     project_id=project_id,
                     service_name="segment_director",
                     system_prompt=SEGMENT_DIRECTOR_SYSTEM_PROMPT,
-                    user_payload={
-                        "project_id": project_id,
-                        "project_config": project_config,
-                        "language_policy": project_config.get("language_policy", {}),
-                        "language_prompt_rules": project_config.get("language_prompt_rules", ""),
-                        "creative_context": blueprint.creative_brief,
-                        "creative_intent": project_config.get("effective_creative_intent", ""),
-                        "story_blueprint": _trim_story_blueprint_for_segment_director(blueprint),
-                        "s2_execution_blueprint": s2_execution_blueprint,
-                        "asset_specs": _trim_asset_specs_for_segment_director(assets),
-                        "quality_retry": attempt > 0,
-                    },
+                    user_payload=prompt_payload,
                     image_urls=None,
                     expected_schema_name="SegmentScriptsBundle",
                     stage="SEGMENT_GENERATION",
                     max_output_tokens=max(1024, int(settings.SHORT_DRAMA_SEGMENT_DIRECTOR_MAX_OUTPUT_TOKENS)),
                 )
+                _trace("S4_DIRECTOR_RAW_RESPONSE", {"project_id": project_id, "response": data, "attempt": attempt + 1})
                 try:
                     segments = _validate_segments(
                         data, project_id=project_id, assets=assets, blueprint=blueprint

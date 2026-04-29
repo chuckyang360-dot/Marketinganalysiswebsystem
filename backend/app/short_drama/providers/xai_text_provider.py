@@ -19,6 +19,10 @@ from .xai_client import (
 logger = logging.getLogger(__name__)
 
 
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
+
+
 def _preview(text: str, *, max_len: int = 500) -> str:
     cleaned = str(text or "").replace("\n", " ").strip()
     if len(cleaned) <= max_len:
@@ -75,6 +79,17 @@ class XAITextProvider:
                 },
             )
             text = extract_assistant_text(raw)
+            if stage == "STORY_GENERATION":
+                _trace(
+                    "S2_RAW_RESPONSE",
+                    {
+                        "project_id": project_id,
+                        "service_name": service_name,
+                        "request_id": request_id,
+                        "raw_response": raw,
+                        "assistant_text": text,
+                    },
+                )
             extracted_text_len = len(text or "")
             response_status = raw.get("status")
             response_incomplete_details = raw.get("incomplete_details")
@@ -185,11 +200,27 @@ class XAITextProvider:
             raise ShortDramaInvalidModelOutputError("structured output empty or too short")
         parsed = try_parse_json_object(text)
         if parsed is not None and parsed.get("error") != "unrecoverable":
+            if stage == "STORY_GENERATION":
+                _trace(
+                    "S2_JSON_REPAIR_SKIPPED",
+                    {"project_id": project_id, "service_name": service_name, "reason": "json_parse_success"},
+                )
             return parsed
 
         current = text
         for repair_attempt in (1, 2):
             repair_user = _truncate_for_repair(current)
+            if stage == "STORY_GENERATION":
+                _trace(
+                    "S2_JSON_REPAIR_PROMPT",
+                    {
+                        "project_id": project_id,
+                        "service_name": service_name,
+                        "repair_attempt": repair_attempt,
+                        "system_prompt": JSON_REPAIR_SYSTEM_PROMPT,
+                        "user_payload": repair_user,
+                    },
+                )
             repair_content = [{"type": "input_text", "text": repair_user}]
             raw2, req2, _ = self._client.post_responses(
                 model=model,
@@ -208,6 +239,18 @@ class XAITextProvider:
                 },
             )
             text2 = extract_assistant_text(raw2)
+            if stage == "STORY_GENERATION":
+                _trace(
+                    "S2_JSON_REPAIR_RESPONSE",
+                    {
+                        "project_id": project_id,
+                        "service_name": service_name,
+                        "repair_attempt": repair_attempt,
+                        "request_id": req2,
+                        "raw_response": raw2,
+                        "assistant_text": text2,
+                    },
+                )
             current = text2
             parsed = try_parse_json_object(text2)
             if parsed is not None:

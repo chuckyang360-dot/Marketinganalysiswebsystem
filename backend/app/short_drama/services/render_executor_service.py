@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import logging
+import json
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -42,6 +43,10 @@ from .workflow_orchestrator import orchestrator
 
 logger = logging.getLogger(__name__)
 _HARD_VIDEO_PROMPT_CHARS = 4096
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def download_video(video_url: str, *, project_id: int, segment_id: str) -> Path:
@@ -333,6 +338,7 @@ class RenderExecutorService:
             model_name = effective_xai_video_model()
             final_prompt = plan.segment_video_prompt or ""
             final_prompt_len = len(final_prompt)
+            logger.info("[VIDEO_PROMPT] %s", final_prompt)
             if final_prompt_len > _HARD_VIDEO_PROMPT_CHARS:
                 raise ShortDramaVideoInputError(
                     f"segment {segment_id} video prompt exceeds {_HARD_VIDEO_PROMPT_CHARS} chars"
@@ -382,6 +388,20 @@ class RenderExecutorService:
 
             # Release DB connection before long external API calls.
             db.close()
+            _trace(
+                "S4_FINAL_VIDEO_PROMPT_BEFORE_SUBMIT",
+                {
+                    "project_id": project_id,
+                    "segment_id": segment_id,
+                    "final_prompt": plan.segment_video_prompt,
+                    "prompt_source": "ai_shot_video_prompt_merge"
+                    if (plan.execution_input or {}).get("manual_video_prompt_used") or (plan.execution_input or {}).get("shot_ids")
+                    else "builder_fallback",
+                    "reference_image_urls": ref_for_api,
+                    "provider": self._provider_label(),
+                    "model": model_name,
+                },
+            )
             rid = self._provider.submit_reference_segment_video(
                 prompt=plan.segment_video_prompt,
                 reference_image_urls=ref_for_api,

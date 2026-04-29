@@ -1,4 +1,5 @@
 import logging
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -34,6 +35,10 @@ from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 router = APIRouter()
 _SECONDARY_MUST_SHOW_LIMIT = 3
@@ -550,6 +555,14 @@ async def generate_segments(body: GenerateSegmentsRequest, db: Session = Depends
                 segment_id=seg.segment_id,
                 script_json=_build_layered_script_payload(seg.model_copy(update={"meta": meta})),
                 version=batch_ver,
+            )
+            _trace(
+                "S4_SCRIPT_JSON_BEFORE_SAVE",
+                {
+                    "project_id": body.project_id,
+                    "segment_id": seg.segment_id,
+                    "script_json": row.script_json,
+                },
             )
             db.add(row)
             db.flush()

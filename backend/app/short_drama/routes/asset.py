@@ -1,4 +1,5 @@
 import logging
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -47,6 +48,10 @@ from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 router = APIRouter()
 
@@ -480,6 +485,20 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
         db.query(ProductAsset).filter(ProductAsset.project_id == body.project_id).delete(synchronize_session=False)
 
         for c in bundle.characters:
+            _trace(
+                "S3_SPEC_BEFORE_SAVE",
+                {
+                    "project_id": body.project_id,
+                    "asset_type": "character",
+                    "asset_id": c.id,
+                    "name": c.name,
+                    "description": c.description,
+                    "visual_prompt": c.visual_prompt,
+                    "image_prompt": c.image_prompt,
+                    "type_fields": c.meta,
+                    "source_field": "bundle.characters",
+                },
+            )
             original_name = c.name.strip() if isinstance(c.name, str) else ""
             role_type = _as_text(c.role_type) or "main"
             raw_story_usage = _as_text((c.meta or {}).get("story_usage"))
@@ -671,6 +690,20 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
             )
         scene_description_names: dict[str, list[str]] = {}
         for idx, s in enumerate(bundle.scenes):
+            _trace(
+                "S3_SPEC_BEFORE_SAVE",
+                {
+                    "project_id": body.project_id,
+                    "asset_type": "scene",
+                    "asset_id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "visual_prompt": s.visual_prompt,
+                    "image_prompt": s.image_prompt,
+                    "type_fields": s.meta,
+                    "source_field": "bundle.scenes",
+                },
+            )
             original_name = s.name.strip() if isinstance(s.name, str) else ""
             resolved_scene = resolve_scene_fields(
                 scene=s,
@@ -874,6 +907,20 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
                 },
             )
         for p in bundle.products:
+            _trace(
+                "S3_SPEC_BEFORE_SAVE",
+                {
+                    "project_id": body.project_id,
+                    "asset_type": "product",
+                    "asset_id": p.id,
+                    "name": p.name,
+                    "description": p.description,
+                    "visual_prompt": p.visual_prompt,
+                    "image_prompt": p.image_prompt,
+                    "type_fields": p.meta,
+                    "source_field": "bundle.products",
+                },
+            )
             display_name = p.name.strip() if isinstance(p.name, str) else ""
             if _is_bad_display_text(display_name):
                 display_name = product.product_name or _zh_fallback_name("product")

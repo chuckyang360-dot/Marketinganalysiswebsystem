@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 from typing import Any, Dict, Protocol
 
@@ -13,6 +14,26 @@ from ..utils.creative_brief import build_creative_brief
 from ..utils.prompts import STORY_PLANNER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def _collect_non_empty_overwrites(before: dict[str, Any], after: dict[str, Any]) -> list[dict[str, Any]]:
+    overwrites: list[dict[str, Any]] = []
+    for key, before_v in before.items():
+        after_v = after.get(key)
+        if before_v != after_v and before_v not in (None, "", [], {}) and after_v not in (None, "", [], {}):
+            overwrites.append(
+                {
+                    "field_path": key,
+                    "before": before_v,
+                    "after": after_v,
+                    "reason": "_normalize_blueprint_for_execution",
+                }
+            )
+    return overwrites
 _SCRIPT_STRUCTURE_TYPES = {
     "product_demo_ad",
     "problem_solution_ad",
@@ -234,36 +255,78 @@ class XAIStoryPlannerProvider:
             {"project_id": project_id, "stage": "STORY_GENERATION", "provider": "xai"},
         )
         try:
+            s2_payload = {
+                "project_id": project_id,
+                "project_config": project_config,
+                "language_policy": project_config.get("language_policy", {}),
+                "language_prompt_rules": project_config.get("language_prompt_rules", ""),
+                "creative_context": project_config.get("creative_brief_data", {}),
+                "creative_intent": project_config.get("effective_creative_intent", ""),
+                "product_context": product.model_dump(),
+                "s1_context_for_story": {
+                    "product_name": product.product_name,
+                    "product_summary": product.product_summary,
+                    "core_selling_points": product.core_selling_points,
+                    "target_users": product.target_users,
+                    "usage_scenarios": product.usage_scenarios,
+                    "emotional_value": product.emotional_value,
+                    "suitable_story_angles": product.suitable_story_angles,
+                    "user_pain_points": product.user_pain_points,
+                    "immutable_structure_constraints": product.immutable_structure_constraints,
+                },
+            }
+            _trace(
+                "S2_INPUT_CONTEXT",
+                {
+                    "project_id": project_id,
+                    "project_config": project_config,
+                    "language_policy": project_config.get("language_policy", {}),
+                    "creative_context": project_config.get("creative_brief_data", {}),
+                    "creative_intent": project_config.get("effective_creative_intent", ""),
+                    "product_context": product.model_dump(),
+                    "s1_context_for_story": s2_payload.get("s1_context_for_story"),
+                },
+            )
+            logger.info(
+                "[S2_PROMPT] %s",
+                json.dumps(
+                    {
+                        "system_prompt": STORY_PLANNER_SYSTEM_PROMPT,
+                        "user_payload": s2_payload,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            _trace(
+                "S2_PROMPT",
+                {
+                    "project_id": project_id,
+                    "system_prompt": STORY_PLANNER_SYSTEM_PROMPT,
+                    "user_payload": s2_payload,
+                    "provider": "xai_text_provider",
+                    "model": "effective_xai_text_model",
+                },
+            )
             data = self._text.generate_structured_json(
                 project_id=project_id,
                 service_name="story_planner",
                 system_prompt=STORY_PLANNER_SYSTEM_PROMPT,
-                user_payload={
-                    "project_id": project_id,
-                    "project_config": project_config,
-                    "language_policy": project_config.get("language_policy", {}),
-                    "language_prompt_rules": project_config.get("language_prompt_rules", ""),
-                    "creative_context": project_config.get("creative_brief_data", {}),
-                    "creative_intent": project_config.get("effective_creative_intent", ""),
-                    "product_context": product.model_dump(),
-                    "s1_context_for_story": {
-                        "product_name": product.product_name,
-                        "product_summary": product.product_summary,
-                        "core_selling_points": product.core_selling_points,
-                        "target_users": product.target_users,
-                        "usage_scenarios": product.usage_scenarios,
-                        "emotional_value": product.emotional_value,
-                        "suitable_story_angles": product.suitable_story_angles,
-                        "user_pain_points": product.user_pain_points,
-                        "immutable_structure_constraints": product.immutable_structure_constraints,
-                    },
-                },
+                user_payload=s2_payload,
                 image_urls=None,
                 expected_schema_name="StoryBlueprint",
                 stage="STORY_GENERATION",
             )
+            logger.info("[S2_RESPONSE] %s", json.dumps(data, ensure_ascii=False))
+            _trace("S2_SCHEMA_VALIDATED", {"project_id": project_id, "schema": data})
             blueprint = StoryBlueprintSchema.model_validate(data)
+            before_normalize = blueprint.model_dump()
+            _trace("S2_BEFORE_NORMALIZE", {"project_id": project_id, "blueprint": before_normalize})
             blueprint = _normalize_blueprint_for_execution(blueprint, product, project_config)
+            after_normalize = blueprint.model_dump()
+            _trace("S2_AFTER_NORMALIZE", {"project_id": project_id, "blueprint": after_normalize})
+            overwrites = _collect_non_empty_overwrites(before_normalize, after_normalize)
+            if overwrites:
+                _trace("S2_NORMALIZE_OVERWRITE", {"project_id": project_id, "overwrites": overwrites})
             _warn_workflow_language_mismatch(
                 project_id=project_id,
                 blueprint=blueprint,
@@ -718,16 +781,31 @@ def _normalize_blueprint_for_execution(
     }
     defaults = tuple(stage_names)
     if len(plan) != segment_count and explicit_creative_context:
-        raise ShortDramaInvalidModelOutputError("S2 segment_plan length must match model story structure")
-    while len(plan) < segment_count:
-        idx = len(plan)
-        plan.append(SegmentPlanItemSchema(segment_id=f"seg_{idx + 1}", story_beat=defaults[idx]))
-    plan = plan[:segment_count]
+        logger.warning(
+            "[AI_CHAIN_TRACE][S2_SEGMENT_STRUCTURE_LENGTH_MISMATCH] %s",
+            json.dumps(
+                {
+                    "project_id": project_config.get("project_id"),
+                    "segment_plan_len": len(plan),
+                    "computed_segment_count": segment_count,
+                    "requested_segment_count": requested_segment_count,
+                    "story_framework_structure_len": len(stages),
+                    "desired_segment_count": desired_segment_count,
+                    "minimum_provider_safe_count": minimum_provider_safe_count,
+                    "action": "keep_ai_segment_plan",
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+    if not plan:
+        raise ShortDramaInvalidModelOutputError("S2 segment_plan is empty")
     is_brand_seeding = marketing_goal == "brand_seeding"
     next_plan: list[SegmentPlanItemSchema] = []
     mapping = dict(blueprint.product_selling_point_mapping or {})
     for idx, item in enumerate(plan):
         sid = f"seg_{idx + 1}"
+        stage_default = defaults[min(idx, len(defaults) - 1)] if defaults else f"段落{idx + 1}"
         fallback_goal = framework["structure"][min(idx, len(framework["structure"]) - 1)]
         selling_point = (
             item.source_selling_point
@@ -740,10 +818,10 @@ def _normalize_blueprint_for_execution(
         if is_brand_seeding:
             summary = _sanitize_brand_seeding_text(summary, fallback_goal)
         req_visual = list(dict.fromkeys([*item.required_visual_elements, *visual_features[:3]]))
-        story_beat = defaults[idx]
+        story_beat = stage_default
         goal = item.segment_goal or item.goal or ""
         if is_brand_seeding:
-            story_beat = _sanitize_brand_seeding_text(story_beat, defaults[idx])
+            story_beat = _sanitize_brand_seeding_text(story_beat, stage_default)
             goal = _sanitize_brand_seeding_text(goal, fallback_goal)
         asset_req = list(item.required_assets or item.expected_assets or [])
         placeholder = _safe_segment_placeholder(story_beat)
@@ -809,6 +887,8 @@ def _normalize_blueprint_for_execution(
             len(next_plan),
             max_segment_duration,
         )
+    if not next_plan:
+        raise ShortDramaInvalidModelOutputError("S2 segment_plan has no executable segment")
     scene_goals = dict(blueprint.scene_goals or {})
     for item in next_plan:
         scene_goals[item.segment_id] = scene_goals.get(item.segment_id) or item.goal or item.summary
@@ -898,13 +978,13 @@ def _normalize_blueprint_for_execution(
         goal_text = item.goal or item.summary
         action_text = item.summary or goal_text
         if is_brand_seeding:
-            function_text = _sanitize_brand_seeding_text(function_text, defaults[idx])
+            function_text = _sanitize_brand_seeding_text(function_text, item.story_beat or stage_default)
             goal_text = _sanitize_brand_seeding_text(goal_text, framework["structure"][min(idx, len(framework["structure"]) - 1)])
             action_text = _sanitize_brand_seeding_text(action_text, goal_text)
         shot_segments.append(
             {
                 "id": sid,
-                "name": item.story_beat or defaults[idx],
+                "name": item.story_beat or stage_default,
                 "function": function_text,
                 "goal": goal_text,
                 "action": action_text,

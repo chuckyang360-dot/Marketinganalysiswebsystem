@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -29,6 +30,10 @@ _CHARACTER_PROMPT_CORE_GUARDS = [
     "no contact sheet",
     "no lineup",
 ]
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _enforce_character_prompt_constraints(prompt: str, *, project_id: int, asset_id: int) -> str:
@@ -99,12 +104,41 @@ class AssetImageService:
 
         def job(row: CharacterAsset) -> tuple[int, str | None, GeneratedImage | None, Exception | None]:
             try:
+                _trace(
+                    "S3_IMAGE_ROW_INPUT",
+                    {
+                        "project_id": project_id,
+                        "asset_type": "character",
+                        "asset_id": row.id,
+                        "row_visual_prompt": row.visual_prompt,
+                        "row_image_prompt": (row.meta_json or {}).get("type_fields", {}).get("image_prompt"),
+                        "row_description": row.description,
+                        "row_type_fields": (row.meta_json or {}).get("type_fields"),
+                    },
+                )
                 audited_prompt = _enforce_character_prompt_constraints(
                     row.visual_prompt or "",
                     project_id=project_id,
                     asset_id=row.id,
                 )
+                _trace(
+                    "S3_IMAGE_PROMPT_BEFORE_PREPARE",
+                    {"project_id": project_id, "asset_type": "character", "asset_id": row.id, "before_prompt": audited_prompt},
+                )
                 prompt = prepare_image_prompt(audited_prompt)
+                _trace(
+                    "S3_IMAGE_PROMPT_AFTER_PREPARE",
+                    {
+                        "project_id": project_id,
+                        "asset_type": "character",
+                        "asset_id": row.id,
+                        "before_prompt": audited_prompt,
+                        "after_prompt": prompt,
+                        "added_parts": [],
+                        "removed_parts": [],
+                        "source": "ai_visual_prompt",
+                    },
+                )
                 meta = dict(row.meta_json or {})
                 seed = meta.get("generation_seed")
                 gen = self._provider.generate_from_text(
@@ -169,7 +203,21 @@ class AssetImageService:
 
         def job(row: SceneAsset) -> tuple[int, str | None, GeneratedImage | None, Exception | None]:
             try:
+                _trace(
+                    "S3_IMAGE_ROW_INPUT",
+                    {
+                        "project_id": project_id,
+                        "asset_type": "scene",
+                        "asset_id": row.id,
+                        "row_visual_prompt": row.visual_prompt,
+                        "row_image_prompt": (row.meta_json or {}).get("type_fields", {}).get("image_prompt"),
+                        "row_description": row.description,
+                        "row_type_fields": (row.meta_json or {}).get("type_fields"),
+                    },
+                )
+                _trace("S3_IMAGE_PROMPT_BEFORE_PREPARE", {"project_id": project_id, "asset_type": "scene", "asset_id": row.id, "before_prompt": row.visual_prompt})
                 prompt = prepare_image_prompt(row.visual_prompt)
+                _trace("S3_IMAGE_PROMPT_AFTER_PREPARE", {"project_id": project_id, "asset_type": "scene", "asset_id": row.id, "before_prompt": row.visual_prompt, "after_prompt": prompt, "added_parts": [], "removed_parts": [], "source": "ai_visual_prompt"})
                 meta = dict(row.meta_json or {})
                 seed = meta.get("generation_seed")
                 gen = self._provider.generate_from_text(
@@ -238,7 +286,21 @@ class AssetImageService:
 
         def job(row: ProductAsset) -> tuple[int, str | None, GeneratedImage | None, Exception | None]:
             try:
+                _trace(
+                    "S3_IMAGE_ROW_INPUT",
+                    {
+                        "project_id": project_id,
+                        "asset_type": "product",
+                        "asset_id": row.id,
+                        "row_visual_prompt": row.visual_prompt,
+                        "row_image_prompt": (row.meta_json or {}).get("type_fields", {}).get("image_prompt"),
+                        "row_description": row.description,
+                        "row_type_fields": (row.meta_json or {}).get("type_fields"),
+                    },
+                )
+                _trace("S3_IMAGE_PROMPT_BEFORE_PREPARE", {"project_id": project_id, "asset_type": "product", "asset_id": row.id, "before_prompt": row.visual_prompt})
                 prompt = prepare_image_prompt(row.visual_prompt)
+                _trace("S3_IMAGE_PROMPT_AFTER_PREPARE", {"project_id": project_id, "asset_type": "product", "asset_id": row.id, "before_prompt": row.visual_prompt, "after_prompt": prompt, "added_parts": [], "removed_parts": [], "source": "ai_visual_prompt"})
                 meta = dict(row.meta_json or {})
                 seed = meta.get("generation_seed")
                 gen = self._provider.generate_from_text(

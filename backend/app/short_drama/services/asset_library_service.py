@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import json
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -28,6 +29,10 @@ MAX_ASSET_IMAGES = 6
 logger = logging.getLogger(__name__)
 
 _UI_NAME_NOISE = {"新增角色", "添加角色", "新增场景", "添加场景", "新增产品", "添加产品"}
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _merge_type_fields_preserve_non_empty(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
@@ -83,7 +88,28 @@ class AssetLibraryService:
         if not base_prompt:
             raise ValueError("Asset base_prompt is empty; historical fallback also unavailable")
         clean_prompt = base_prompt
+        _trace(
+            "S3_LIBRARY_REGENERATE_BASE_PROMPT",
+            {
+                "project_id": asset.project_id,
+                "asset_id": asset.id,
+                "asset_type": asset.asset_type,
+                "variant_hint": variant_hint,
+                "base_prompt": clean_prompt,
+                "source": "asset.base_prompt/type_fields/description",
+            },
+        )
         final_prompt = prepare_image_prompt(clean_prompt)
+        _trace(
+            "S3_LIBRARY_REGENERATE_FINAL_PROMPT",
+            {
+                "project_id": asset.project_id,
+                "asset_id": asset.id,
+                "asset_type": asset.asset_type,
+                "variant_hint": variant_hint,
+                "final_prompt": final_prompt,
+            },
+        )
         if used_history_fallback:
             logger.warning(
                 "[ASSET_PROMPT_HISTORY_FALLBACK] project_id=%s asset_id=%s asset_type=%s fallback_source=%s",
@@ -107,6 +133,7 @@ class AssetLibraryService:
             clean_prompt,
             final_prompt,
         )
+        logger.info("[IMAGE_PROMPT] %s", final_prompt)
         logger.info("[FINAL_IMAGE_PROMPT] %s", final_prompt)
         return final_prompt
 

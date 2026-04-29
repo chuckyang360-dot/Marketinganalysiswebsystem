@@ -1,4 +1,5 @@
 import logging
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -31,6 +32,10 @@ from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 router = APIRouter()
 
@@ -121,6 +126,16 @@ def _merge_context_by_mode(
 async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)):
     log_api_request(logger, "POST /product/parse", project_id=body.project_id)
     safe_input = _sanitize_parse_input_for_log(body.input.model_dump())
+    _trace(
+        "S1_USER_INPUT",
+        {
+            "project_id": body.project_id,
+            "reparse_mode": body.reparse_mode,
+            "input": body.input.model_dump(),
+            "input_sanitized_for_log": safe_input,
+            "uploaded_image_count": len(body.input.product_images or []),
+        },
+    )
     logger.info(
         "[S1_PARSE_REQUEST] project_id=%s reparse_mode=%s input=%s",
         body.project_id,
@@ -223,6 +238,19 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
             version=version,
         )
         db.add(record)
+        _trace(
+            "S1_CONTEXT_NORMALIZED",
+            {
+                "project_id": body.project_id,
+                "updated_fields": updated_fields,
+                "preserved_fields": preserved_fields,
+                "fallback_or_overrides": [
+                    {"field": f, "reason": "preserve_user_edited"}
+                    for f in preserved_fields
+                ],
+                "normalized_context_final": merged_context.model_dump(),
+            },
+        )
         mark_step_completed(project, STEP_1)
         if had_existing_context:
             propagate_downstream_stale(project, STEP_1)

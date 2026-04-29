@@ -33,6 +33,10 @@ _S1_IMAGE_UNDERSTANDING_LIST_FIELDS = (
 )
 
 
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
+
+
 def _normalize_image_understanding_list_fields(project_id: int, data: dict[str, Any]) -> dict[str, Any]:
     out = dict(data or {})
     for field in _S1_IMAGE_UNDERSTANDING_LIST_FIELDS:
@@ -172,6 +176,17 @@ class ProductImageUnderstandingService:
             "project_id": project_id,
             "raw_input": text_payload,
         }
+        _trace(
+            "S1_IMAGE_UNDERSTANDING_PROMPT",
+            {
+                "project_id": project_id,
+                "system_prompt": PRODUCT_IMAGE_UNDERSTANDING_SYSTEM_PROMPT,
+                "user_payload": payload,
+                "image_urls_count": len(image_urls),
+                "provider": "xai_text_provider",
+                "model": "effective_xai_text_model",
+            },
+        )
         data = self._text.generate_structured_json(
             project_id=project_id,
             service_name="product_image_understanding",
@@ -182,6 +197,10 @@ class ProductImageUnderstandingService:
             stage="PRODUCT_IMAGE_UNDERSTANDING",
         )
         data = _normalize_image_understanding_list_fields(project_id, data)
+        _trace(
+            "S1_IMAGE_UNDERSTANDING_RESPONSE",
+            {"project_id": project_id, "response": data},
+        )
         out = ProductImageUnderstandingSchema.model_validate(data)
         logger.info("[S1_IMAGE_UNDERSTANDING_RESULT] project_id=%s result=%s", project_id, out.model_dump())
         return out

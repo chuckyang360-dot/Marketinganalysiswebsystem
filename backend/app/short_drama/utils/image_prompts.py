@@ -10,12 +10,8 @@ _MAX_LEN = 4000
 
 logger = logging.getLogger(__name__)
 
-NEGATIVE_PROMPT = "no text, no captions, no subtitles, no watermark, no logo"
-
-_STYLE_SUFFIX = (
-    "consistent commercial ad photography, clean composition, premium brand visual, "
-    "high detail, realistic style, natural lighting"
-)
+_BASE_NEGATIVE_TERMS = ("no text", "no watermark")
+_LOGO_NEGATIVE_TERM = "no logo"
 
 _UI_NOISE_TERMS = (
     "新增角色",
@@ -40,6 +36,34 @@ def _strip_ui_noise(text: str) -> str:
 
 def _contains_chinese(text: str) -> bool:
     return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _logo_must_be_preserved(text: str) -> bool:
+    low = str(text or "").lower()
+    preserve_markers = (
+        "logo must be preserved",
+        "keep logo",
+        "preserve logo",
+        "保留logo",
+        "保留 logo",
+        "logo需保留",
+        "logo 需保留",
+        "不得移除logo",
+        "不得移除 logo",
+    )
+    return any(marker in low for marker in preserve_markers)
+
+
+def _append_min_negative_terms(prompt: str) -> str:
+    out = str(prompt or "").strip()
+    low = out.lower()
+    terms = list(_BASE_NEGATIVE_TERMS)
+    if not _logo_must_be_preserved(out):
+        terms.append(_LOGO_NEGATIVE_TERM)
+    missing = [term for term in terms if term not in low]
+    if not missing:
+        return out
+    return f"{out}, {', '.join(missing)}"
 
 
 def _sanitize_source_for_prompt(text: str, max_len: int = 180) -> str:
@@ -129,9 +153,9 @@ def build_visual_prompt(asset_input: dict[str, str]) -> str:
     detail = ", ".join(detail_parts)
 
     if _contains_chinese(source):
-        return f"{subject}, {detail}, {NEGATIVE_PROMPT}"
+        return _append_min_negative_terms(f"{subject}, {detail}")
 
-    return f"{subject}, {detail}, {NEGATIVE_PROMPT}"
+    return _append_min_negative_terms(f"{subject}, {detail}")
 
 
 def prepare_image_prompt(visual_prompt: str | None) -> str:
@@ -155,11 +179,4 @@ def prepare_image_prompt(visual_prompt: str | None) -> str:
     if tokens and all(t in vague_only for t in tokens):
         raise ShortDramaImageProviderError("visual_prompt is too vague for image generation")
 
-    # Do not duplicate suffix if user already packed similar cues
-    low = raw.lower()
-    final_prompt = raw
-    if NEGATIVE_PROMPT not in low:
-        final_prompt = f"{final_prompt}, {NEGATIVE_PROMPT}"
-    if "commercial" not in low:
-        final_prompt = f"{final_prompt}. {_STYLE_SUFFIX}"
-    return final_prompt
+    return _append_min_negative_terms(raw)

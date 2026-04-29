@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from typing import Any
 
 from ...config import settings
@@ -9,6 +10,10 @@ from ..schemas.product import ProductContextSchema, ProductImageUnderstandingSch
 from ..utils.prompts import PRODUCT_CONTEXT_BUILDER_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 
 class ProductContextBuilderService:
@@ -60,6 +65,19 @@ class ProductContextBuilderService:
             "language_policy": (project_constraints or {}).get("language_policy", {}),
             "language_prompt_rules": (project_constraints or {}).get("language_prompt_rules", ""),
         }
+        _trace(
+            "S1_CONTEXT_BUILDER_PROMPT",
+            {
+                "project_id": project_id,
+                "system_prompt": PRODUCT_CONTEXT_BUILDER_SYSTEM_PROMPT,
+                "user_payload": payload,
+                "input_source": {
+                    "raw_input": "S1 user form",
+                    "image_understanding": "S1 image understanding response",
+                    "project_constraints": "S0 project config / language policy",
+                },
+            },
+        )
         data = self._text.generate_structured_json(
             project_id=project_id,
             service_name="product_context_builder",
@@ -70,7 +88,15 @@ class ProductContextBuilderService:
             stage="PRODUCT_CONTEXT_BUILD",
         )
         data = _normalize_source_trace(project_id, data)
+        _trace(
+            "S1_CONTEXT_BUILDER_RESPONSE",
+            {"project_id": project_id, "product_context_before_normalize": data},
+        )
         out = _normalize_product_context(ProductContextSchema.model_validate(data), raw_input, image_understanding)
+        _trace(
+            "S1_CONTEXT_NORMALIZED",
+            {"project_id": project_id, "product_context_after_normalize": out.model_dump()},
+        )
         logger.info("[S1_CONTEXT_BUILDER_RESULT] project_id=%s result=%s", project_id, out.model_dump())
         return out
 

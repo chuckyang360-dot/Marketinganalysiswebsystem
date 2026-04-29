@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import json
 import re
 from typing import Any, Dict, Protocol
 
@@ -14,6 +15,10 @@ from ..schemas.story import StoryBlueprintSchema
 from ..utils.prompts import ASSET_SPEC_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+def _trace(tag: str, payload: dict[str, Any]) -> None:
+    logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 _PLOT_STATE_TERMS = (
     "struggle",
@@ -843,34 +848,58 @@ class XAIAssetSpecProvider:
             {"project_id": project_id, "stage": "ASSET_SPEC_GENERATION", "provider": "xai"},
         )
         try:
+            prompt_payload = {
+                "project_id": project_id,
+                "product_context": product.model_dump(),
+                "s1_context_for_assets": {
+                    "visual_features": product.visual_features,
+                    "product_form": product.product_form,
+                    "consistency_notes": product.consistency_notes,
+                    "usage_scenarios": product.usage_scenarios,
+                    "user_pain_points": product.user_pain_points,
+                    "immutable_structure_constraints": product.immutable_structure_constraints,
+                    "visual_risk_notes": product.visual_risk_notes,
+                },
+                "creative_context": blueprint.creative_brief,
+                "creative_intent": (project_config or {}).get("effective_creative_intent", ""),
+                "story_blueprint": blueprint.model_dump(),
+                "project_config": project_config or {},
+                "language_policy": (project_config or {}).get("language_policy", {}),
+                "language_prompt_rules": (project_config or {}).get("language_prompt_rules", ""),
+                "s2_visual_requirements": blueprint.visual_requirements,
+            }
+            _trace(
+                "S3_SPEC_INPUT_CONTEXT",
+                {
+                    "project_id": project_id,
+                    "project_config": project_config or {},
+                    "product_context": product.model_dump(),
+                    "story_blueprint": blueprint.model_dump(),
+                    "segment_plan": [x.model_dump() for x in blueprint.segment_plan],
+                    "asset_requirements": blueprint.asset_requirements,
+                    "visual_requirements": blueprint.visual_requirements,
+                },
+            )
+            _trace(
+                "S3_SPEC_PROMPT",
+                {
+                    "project_id": project_id,
+                    "system_prompt": ASSET_SPEC_SYSTEM_PROMPT,
+                    "user_payload": prompt_payload,
+                    "provider": "xai_text_provider",
+                    "model": "effective_xai_text_model",
+                },
+            )
             data = self._text.generate_structured_json(
                 project_id=project_id,
                 service_name="asset_spec",
                 system_prompt=ASSET_SPEC_SYSTEM_PROMPT,
-                user_payload={
-                    "project_id": project_id,
-                    "product_context": product.model_dump(),
-                    "s1_context_for_assets": {
-                        "visual_features": product.visual_features,
-                        "product_form": product.product_form,
-                        "consistency_notes": product.consistency_notes,
-                        "usage_scenarios": product.usage_scenarios,
-                        "user_pain_points": product.user_pain_points,
-                        "immutable_structure_constraints": product.immutable_structure_constraints,
-                        "visual_risk_notes": product.visual_risk_notes,
-                    },
-                    "creative_context": blueprint.creative_brief,
-                    "creative_intent": (project_config or {}).get("effective_creative_intent", ""),
-                    "story_blueprint": blueprint.model_dump(),
-                    "project_config": project_config or {},
-                    "language_policy": (project_config or {}).get("language_policy", {}),
-                    "language_prompt_rules": (project_config or {}).get("language_prompt_rules", ""),
-                    "s2_visual_requirements": blueprint.visual_requirements,
-                },
+                user_payload=prompt_payload,
                 image_urls=None,
                 expected_schema_name="AssetSpecsBundle",
                 stage="ASSET_SPEC_GENERATION",
             )
+            _trace("S3_SPEC_RAW_RESPONSE", {"project_id": project_id, "response": data})
             constraints = _extract_market_constraints(blueprint, project_config, product)
             bundle = _normalize_asset_bundle(
                 _validate_asset_bundle(data),
