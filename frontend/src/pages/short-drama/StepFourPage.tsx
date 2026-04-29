@@ -48,8 +48,9 @@ export function ShortDramaStepFourPage() {
     handleSaveSegmentShot,
     mergeFinalVideo,
     mergePrimaryActionsEnabled,
+    mergeReadyByRequirement,
     timelineMergeLabel,
-    footerMergeLabel,
+    goOverview,
     isMockTestPatternVideo,
     handleAddSegment,
     goCreate,
@@ -166,29 +167,6 @@ export function ShortDramaStepFourPage() {
           </div>
         </div>
       ) : null}
-
-      {mergeLoading && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center"
-          style={{ background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(8px)' }}
-        >
-          <div className="text-center">
-            <div
-              className="w-20 h-20 flex items-center justify-center rounded-full mx-auto mb-6 relative"
-              style={{ background: '#F5F5F7', border: '1px solid #EAEAEA' }}
-            >
-              <div className="absolute inset-0 rounded-full animate-ping opacity-10" style={{ background: '#1D1D1F' }} />
-              <i className="ri-film-line text-[32px]" style={{ color: '#1D1D1F' }} />
-            </div>
-            <h3 className="text-xl font-bold mb-2" style={{ fontFamily: "'Syne', sans-serif", color: '#1D1D1F' }}>
-              {SHORT_DRAMA_UI.generating.merge}
-            </h3>
-            <p className="text-[14px]" style={{ color: '#8E8E93' }}>
-              {SHORT_DRAMA_UI.generating.mergeSubtitle}
-            </p>
-          </div>
-        </div>
-      )}
 
       <div className="flex flex-1 pt-14" style={{ minHeight: 'calc(100vh - 56px)' }}>
         <StepFourAssetLibrary library={assetLibraryVm} />
@@ -408,28 +386,49 @@ export function ShortDramaStepFourPage() {
           <i className="ri-arrow-left-line text-[12px]" />
           上一步
         </button>
-        <button
-          type="button"
-          disabled={mergeUiDisabled}
-          onClick={() =>
-            void mergeFinalVideo({ buttonType: 'merge_and_view', navigateOnSuccess: true })
-          }
-          className="flex items-center gap-2 px-7 py-2.5 rounded-xl text-[13.5px] font-semibold text-white transition-all duration-200 whitespace-nowrap"
-          style={{
-            background: mergeUiDisabled ? '#D1D1D6' : '#1D1D1F',
-            cursor: mergeUiDisabled ? 'not-allowed' : 'pointer',
-          }}
-          onMouseEnter={(e) => {
-            if (!mergeUiDisabled) (e.currentTarget as HTMLElement).style.background = '#374151';
-          }}
-          onMouseLeave={(e) => {
-            if (!mergeUiDisabled) (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
-          }}
-        >
-          <i className="ri-film-line text-[13px]" />
-          {footerMergeLabel}
-          <i className="ri-arrow-right-line text-[12px]" />
-        </button>
+        <div className="flex items-center gap-2">
+          {mergeReadyByRequirement ? (
+            <button
+              type="button"
+              disabled={mergeUiDisabled}
+              onClick={() =>
+                void mergeFinalVideo({ buttonType: 'merge_only', navigateOnSuccess: false })
+              }
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all duration-200 whitespace-nowrap"
+              style={{
+                background: '#ffffff',
+                color: mergeUiDisabled ? '#AEAEB2' : '#1D1D1F',
+                border: '1px solid #D1D1D6',
+                cursor: mergeUiDisabled ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <i className="ri-refresh-line text-[13px]" />
+              {timelineMergeLabel}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={!pipeline?.final_video_url}
+            onClick={() => goOverview()}
+            className="flex items-center gap-2 px-7 py-2.5 rounded-xl text-[13.5px] font-semibold text-white transition-all duration-200 whitespace-nowrap"
+            style={{
+              background: !pipeline?.final_video_url ? '#D1D1D6' : '#1D1D1F',
+              cursor: !pipeline?.final_video_url ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => {
+              if (!pipeline?.final_video_url) return;
+              (e.currentTarget as HTMLElement).style.background = '#374151';
+            }}
+            onMouseLeave={(e) => {
+              if (!pipeline?.final_video_url) return;
+              (e.currentTarget as HTMLElement).style.background = '#1D1D1F';
+            }}
+          >
+            <i className="ri-film-line text-[13px]" />
+            查看完整成片
+            <i className="ri-arrow-right-line text-[12px]" />
+          </button>
+        </div>
       </div>
     </div>
   );

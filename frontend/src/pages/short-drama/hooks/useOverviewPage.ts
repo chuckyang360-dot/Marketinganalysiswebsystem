@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getShortDramaPipeline, ShortDramaApiError } from '../services/shortDramaApi';
+import { getShortDramaPipeline, mergeShortDramaProjectVideo, ShortDramaApiError } from '../services/shortDramaApi';
 import type { PipelineSummaryDto } from '../types/shortDramaApi';
 import { pipelineToOverviewViewModel, type OverviewPageViewModel } from '../utils/overviewAdapters';
 import { pipelineUsesMockTestPatternVideo } from '../utils/stepFourAdapters';
@@ -19,6 +19,8 @@ export function useOverviewPage() {
   const [pipeline, setPipeline] = useState<PipelineSummaryDto | null>(null);
   const [phase, setPhase] = useState<OverviewPhase>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [mergeLoading, setMergeLoading] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (projectId == null) {
@@ -66,6 +68,42 @@ export function useOverviewPage() {
   }, [load]);
 
   const viewModel: OverviewPageViewModel = useMemo(() => pipelineToOverviewViewModel(pipeline), [pipeline]);
+  const effectiveStatus = String(
+    pipeline?.project?.effective_status || pipeline?.project?.suggested_status || pipeline?.project?.status || '',
+  ).trim();
+  const segmentVideoCount = Number(pipeline?.project?.segment_video_count ?? 0);
+  const segmentVideoTotal = Number(pipeline?.project?.segment_video_total ?? 0);
+  const hasAllSegmentsByCount =
+    Number.isFinite(segmentVideoCount) &&
+    Number.isFinite(segmentVideoTotal) &&
+    segmentVideoTotal > 0 &&
+    segmentVideoCount === segmentVideoTotal;
+  const canMergeFinalVideo =
+    pipeline?.has_all_segment_videos === true ||
+    hasAllSegmentsByCount ||
+    effectiveStatus === 'video_segments_ready' ||
+    effectiveStatus === 'completed';
+
+  const mergeFinalVideo = useCallback(async () => {
+    if (projectId == null || !canMergeFinalVideo || mergeLoading) return;
+    setMergeError(null);
+    setMergeLoading(true);
+    try {
+      await mergeShortDramaProjectVideo(projectId);
+      const refreshed = await getShortDramaPipeline(projectId);
+      setPipeline(refreshed);
+      setCachedShortDramaPipeline(projectId, refreshed);
+      touchProjectNameFromPipeline(projectId, refreshed.project?.project_name);
+      window.alert('完整视频已合成');
+    } catch (e) {
+      if (e instanceof ShortDramaApiError) {
+        console.warn('[OVERVIEW_MERGE_ERROR]', { project_id: projectId, status: e.status, message: e.message });
+      }
+      setMergeError('完整视频合成失败，请稍后重试');
+    } finally {
+      setMergeLoading(false);
+    }
+  }, [canMergeFinalVideo, mergeLoading, projectId]);
 
   const isMockTestPatternVideo = useMemo(() => pipelineUsesMockTestPatternVideo(pipeline), [pipeline]);
 
@@ -86,6 +124,10 @@ export function useOverviewPage() {
     viewModel,
     pipeline,
     reload: load,
+    mergeLoading,
+    mergeError,
+    canMergeFinalVideo,
+    mergeFinalVideo,
     goCreate,
     isMockTestPatternVideo,
   };

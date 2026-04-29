@@ -544,6 +544,17 @@ export function useStepFourPage() {
   }, [pipelineVm.videoStatusFromPipeline, runtimeStatusOverrides, localAdditions]);
 
   const canMergeAll = pipelineVm.canMergeAll;
+  const segmentVideoCount = Number(pipeline?.project?.segment_video_count ?? 0);
+  const segmentVideoTotal = Number(pipeline?.project?.segment_video_total ?? 0);
+  const hasAllSegmentsByCount =
+    Number.isFinite(segmentVideoCount) &&
+    Number.isFinite(segmentVideoTotal) &&
+    segmentVideoTotal > 0 &&
+    segmentVideoCount === segmentVideoTotal;
+  const hasAllSegmentsByStatus =
+    effectiveStatus === 'video_segments_ready' || effectiveStatus === 'completed';
+  const mergeReadyByRequirement = canMergeAll || hasAllSegmentsByStatus || hasAllSegmentsByCount;
+
 
   const hasFinalVideo = useMemo(
     () => !!resolvePublicMediaUrl(pipeline?.final_video_url),
@@ -551,22 +562,23 @@ export function useStepFourPage() {
   );
 
   const canCallMergeApi = useMemo(() => {
-    if (!canMergeAll) return false;
-    return projectStatus === 'video_segments_ready' || projectStatus === 'video_rendering';
-  }, [canMergeAll, projectStatus]);
+    if (!mergeReadyByRequirement) return false;
+    return true;
+  }, [mergeReadyByRequirement]);
 
   /** 时间轴 / 底栏：可点「合成」调 API，或已完成且已有成片时走「仅跳转」 */
   const mergePrimaryActionsEnabled = useMemo(() => {
     if (mergeLoading) return false;
-    return canCallMergeApi || (projectStatus === 'completed' && hasFinalVideo);
-  }, [mergeLoading, canCallMergeApi, projectStatus, hasFinalVideo]);
+    return canCallMergeApi || hasFinalVideo;
+  }, [mergeLoading, canCallMergeApi, hasFinalVideo]);
 
   const isMockTestPatternVideo = useMemo(() => pipelineUsesMockTestPatternVideo(pipeline), [pipeline]);
 
-  const timelineMergeLabel =
-    projectStatus === 'completed' && hasFinalVideo ? '查看完整视频' : '合成完整视频';
-  const footerMergeLabel =
-    projectStatus === 'completed' && hasFinalVideo ? '查看完整成片' : '合成并查看完整视频';
+  const timelineMergeLabel = mergeLoading
+    ? '合成中...'
+    : hasFinalVideo
+      ? '重新合成完整视频'
+      : '合成完整视频';
 
   const doneCount = useMemo(() => {
     return pipelineVm.coreSegments.filter((s) => !!resolvePublicMediaUrl(s.videoUrl)).length;
@@ -684,29 +696,24 @@ export function useStepFourPage() {
         has_final_video: hasFinalVideo,
       });
 
-      if (projectStatus === 'completed' && hasFinalVideo) {
-        const route = withProjectQuery('/short-drama/overview', projectId);
-        console.info('[STEP4_NAVIGATE_OVERVIEW]', { project_id: projectId, route, reason: 'completed_has_final' });
-        navigate(route);
-        return;
-      }
-
       if (!canCallMergeApi || mergeLoading) return;
 
       setMergeError(null);
       setMergeLoading(true);
       try {
         const res = await mergeShortDramaProjectVideo(projectId);
-        await refreshPipeline();
+        const refreshed = await refreshPipeline();
         console.info('[FRONT_STEP_STATUS_UPDATED]', { project_id: projectId, step: 'step_4', action: 'merge_final' });
-        const urlResolved = resolvePublicMediaUrl(res.final_video_url);
+        const finalUrlRaw = refreshed?.final_video_url || res.final_video_url;
+        const urlResolved = resolvePublicMediaUrl(finalUrlRaw);
         if (!urlResolved) {
           setMergeError(SHORT_DRAMA_UI.error.mergeNoFinalUrl);
           return;
         }
+        window.alert('完整视频已合成');
         console.info('[STEP4_MERGE_SUCCESS]', {
           button_type: buttonType,
-          final_video_url: res.final_video_url,
+          final_video_url: finalUrlRaw,
           navigate_on_success: navigateOnSuccess,
         });
         setPreviewTarget('final');
@@ -716,8 +723,10 @@ export function useStepFourPage() {
           navigate(route);
         }
       } catch (e) {
-        const msg = e instanceof ShortDramaApiError ? e.message : SHORT_DRAMA_UI.error.merge;
-        setMergeError(msg);
+        if (e instanceof ShortDramaApiError) {
+          console.warn('[STEP4_MERGE_ERROR]', { project_id: projectId, status: e.status, message: e.message });
+        }
+        setMergeError('完整视频合成失败，请稍后重试');
         await refreshPipeline();
       } finally {
         setMergeLoading(false);
@@ -725,14 +734,18 @@ export function useStepFourPage() {
     },
     [
       projectId,
-      projectStatus,
-      hasFinalVideo,
       canCallMergeApi,
       mergeLoading,
       refreshPipeline,
       navigate,
     ],
   );
+
+  const goOverview = useCallback(() => {
+    if (projectId == null) return;
+    const route = withProjectQuery('/short-drama/overview', projectId);
+    navigate(route);
+  }, [navigate, projectId]);
 
   const handleAddSegment = useCallback(() => {
     if (pipelineVm.coreSegments.length === 0) return;
@@ -805,6 +818,7 @@ export function useStepFourPage() {
     mergeLoading,
     segmentRenderJobs,
     canMergeAll,
+    mergeReadyByRequirement,
     canGenerateVideos,
     videoStatusBlockedHint,
     hasBackendSegmentScripts,
@@ -824,7 +838,7 @@ export function useStepFourPage() {
     canCallMergeApi,
     hasFinalVideo,
     timelineMergeLabel,
-    footerMergeLabel,
+    goOverview,
     isMockTestPatternVideo,
     handleAddSegment,
     goCreate,

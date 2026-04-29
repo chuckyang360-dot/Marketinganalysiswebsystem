@@ -15,6 +15,10 @@ export function ShortDramaOverviewPage() {
     viewModel,
     pipeline,
     reload,
+    mergeLoading,
+    mergeError,
+    canMergeFinalVideo,
+    mergeFinalVideo,
     goCreate,
     isMockTestPatternVideo,
   } = useOverviewPage();
@@ -383,6 +387,14 @@ export function ShortDramaOverviewPage() {
                     {isMockTestPatternVideo ? '测试拼接（dev mock）' : finalMetaChip}
                   </span>
                 </div>
+                {mergeError ? (
+                  <div
+                    className="mb-3 text-[12px] px-3 py-2 rounded-lg"
+                    style={{ background: 'rgba(220,38,38,0.06)', color: '#B91C1C', border: '1px solid rgba(220,38,38,0.2)' }}
+                  >
+                    {mergeError}
+                  </div>
+                ) : null}
                 {finalVideoUrl ? (
                   <div className="flex gap-4">
                     <div
@@ -415,6 +427,18 @@ export function ShortDramaOverviewPage() {
                           </div>
                         ))}
                       </div>
+                      {canMergeFinalVideo ? (
+                        <button
+                          type="button"
+                          disabled={mergeLoading}
+                          onClick={() => void mergeFinalVideo()}
+                          className="w-full mb-2 flex items-center justify-center gap-2 py-2.5 rounded-xl text-[12.5px] font-semibold transition-all duration-200 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: '#ffffff', color: '#1D1D1F', border: '1px solid #D1D1D6' }}
+                        >
+                          <i className={`${mergeLoading ? 'ri-loader-4-line animate-spin' : 'ri-refresh-line'} text-[12px]`} />
+                          {mergeLoading ? '合成中...' : '重新合成完整视频'}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         disabled={exportBusy}
@@ -455,14 +479,27 @@ export function ShortDramaOverviewPage() {
                     <p className="text-[12px] max-w-md" style={{ color: '#8E8E93' }}>
                       {SHORT_DRAMA_UI.empty.noFinalVideoHint}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => navigate(withProjectQuery('/short-drama/step4', projectId))}
-                      className="mt-2 px-4 py-2 rounded-lg text-[12px] font-medium cursor-pointer"
-                      style={{ background: '#1D1D1F', color: '#ffffff' }}
-                    >
-                      {SHORT_DRAMA_UI.overview.goStepFour}
-                    </button>
+                    <div className="mt-2 flex items-center gap-2">
+                      {canMergeFinalVideo ? (
+                        <button
+                          type="button"
+                          disabled={mergeLoading}
+                          onClick={() => void mergeFinalVideo()}
+                          className="px-4 py-2 rounded-lg text-[12px] font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          style={{ background: '#1D1D1F', color: '#ffffff' }}
+                        >
+                          {mergeLoading ? '合成中...' : '合成完整视频'}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => navigate(withProjectQuery('/short-drama/step4', projectId))}
+                        className="px-4 py-2 rounded-lg text-[12px] font-medium cursor-pointer"
+                        style={{ background: '#ffffff', color: '#1D1D1F', border: '1px solid #D1D1D6' }}
+                      >
+                        {SHORT_DRAMA_UI.overview.goStepFour}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
