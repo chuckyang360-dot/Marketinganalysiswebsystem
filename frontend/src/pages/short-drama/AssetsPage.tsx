@@ -338,7 +338,6 @@ export function ShortDramaAssetsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('characters');
   const [data, setData] = useState<Record<TabType, AssetLibraryItemDto[]>>({ characters: [], scenes: [], assets: [] });
   const [initialLoading, setInitialLoading] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<AssetInteractionEntity | null>(null);
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
@@ -373,9 +372,8 @@ export function ShortDramaAssetsPage() {
 
   const reload = useCallback(async (opts?: { background?: boolean }) => {
     if (!effectiveProjectId) return;
-    const background = opts?.background ?? hasVisibleAssets;
-    if (background) setRefreshing(true);
-    else setInitialLoading(true);
+    const background = opts?.background ?? true;
+    if (!background) setInitialLoading(true);
     setError(null);
     try {
       const [characters, scenes, products] = await Promise.all([
@@ -392,10 +390,9 @@ export function ShortDramaAssetsPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败');
     } finally {
-      if (background) setRefreshing(false);
-      else setInitialLoading(false);
+      if (!background) setInitialLoading(false);
     }
-  }, [effectiveProjectId, hasVisibleAssets]);
+  }, [effectiveProjectId]);
 
   useEffect(() => {
     const projectId = toPositiveInt(effectiveProjectId);
@@ -823,7 +820,6 @@ export function ShortDramaAssetsPage() {
         </div>
         <div className="px-6 lg:px-10 py-7">
           {initialLoading && !hasVisibleAssets ? <div className="text-[13px] text-[#8E8E93]">加载中…</div> : null}
-          {refreshing && hasVisibleAssets ? <div className="mb-2 text-[12px] text-[#AEAEB2]">正在同步最新状态...</div> : null}
           {error ? <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</div> : null}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {currentRows.map((row) => {
