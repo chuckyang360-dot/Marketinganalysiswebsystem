@@ -20,7 +20,12 @@ from ..services.project_state_service import STEP_3, mark_step_completed, propag
 from ..services.asset_image_service import asset_image_service
 from ..services.asset_library_service import asset_library_service
 from ..services.workflow_orchestrator import ASSET_IMAGE_RENDER_ALLOWED_STATUSES, orchestrator
-from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
+from ..services.project_task_guard import (
+    acquire_project_task_lock,
+    mark_project_stage_failed,
+    mark_project_stage_succeeded,
+    recover_stale_processing_status_if_possible,
+)
 from ..utils.enums import ProjectStatus
 
 logger = logging.getLogger(__name__)
@@ -114,6 +119,10 @@ async def generate_all_asset_images(
         orchestrator.recover_failed_project_status(db, proj)
         db.commit()
         db.refresh(proj)
+    recover_stale_processing_status_if_possible(db, proj)
+    proj = db.query(ShortDramaProject).filter(ShortDramaProject.id == pid).first()
+    if proj is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     st = proj.status or ""
     allowed = st in ASSET_IMAGE_RENDER_ALLOWED_STATUSES
     prereq_insufficient = st in ("created", "product_parsed", "story_generated")

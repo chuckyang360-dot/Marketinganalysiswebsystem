@@ -25,7 +25,12 @@ from ..schemas.video import (
 from ..services.merge_service import merge_service
 from ..services.project_state_service import OVERVIEW, STEP_4, update_last_active_step
 from ..services.workflow_orchestrator import orchestrator
-from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
+from ..services.project_task_guard import (
+    acquire_project_task_lock,
+    mark_project_stage_failed,
+    mark_project_stage_succeeded,
+    recover_stale_processing_status_if_possible,
+)
 from ..services.render_executor_service import render_executor_service
 from ..utils.enums import RenderTargetType
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -40,6 +45,8 @@ async def generate_all_segment_videos(body: VideoProjectRequest, db: Session = D
     log_api_request(logger, "POST /videos/generate", project_id=body.project_id)
     lock_acquired = False
     try:
+        project = orchestrator.get_project(db, body.project_id)
+        recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
         acquire_project_task_lock(db, project, stage="s4_video")
         lock_acquired = True
@@ -125,6 +132,8 @@ async def generate_one_segment_video(
     )
     lock_acquired = False
     try:
+        project = orchestrator.get_project(db, body.project_id)
+        recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
         acquire_project_task_lock(db, project, stage="s4_video")
         lock_acquired = True

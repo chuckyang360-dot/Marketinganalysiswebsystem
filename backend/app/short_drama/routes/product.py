@@ -31,6 +31,7 @@ from ..services.project_task_guard import (
     acquire_project_task_lock,
     mark_project_stage_failed,
     mark_project_stage_succeeded,
+    recover_stale_processing_status_if_possible,
 )
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -149,6 +150,8 @@ async def parse_product(body: ParseProductRequest, db: Session = Depends(get_db)
     )
     lock_acquired = False
     try:
+        project = orchestrator.get_project(db, body.project_id)
+        recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(db, project, WorkflowStep.PARSE_PRODUCT)
         acquire_project_task_lock(db, project, stage="s1_product")

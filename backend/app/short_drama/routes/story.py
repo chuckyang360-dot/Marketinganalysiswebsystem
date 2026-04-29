@@ -9,7 +9,13 @@ from ..http_errors import raise_short_drama_http
 from ..models import StoryBlueprintRecord
 from ..schemas.product import ProductContextSchema
 from ..schemas.story import GenerateStoryRequest, GenerateStoryResponse, StoryBlueprintSchema
-from ..services.read_models import latest_product_context, latest_story_blueprint, next_story_version
+from ..services.read_models import (
+    latest_product_context,
+    latest_story_blueprint,
+    list_pipeline_asset_rows,
+    list_segment_scripts,
+    next_story_version,
+)
 from ..services.project_state_service import (
     STEP_2,
     mark_step_completed,
@@ -18,8 +24,13 @@ from ..services.project_state_service import (
 )
 from ..services.story_planner_service import story_planner_service
 from ..services.workflow_orchestrator import orchestrator
-from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
-from ..services.project_task_guard import current_stage
+from ..services.project_task_guard import (
+    acquire_project_task_lock,
+    current_stage,
+    mark_project_stage_failed,
+    mark_project_stage_succeeded,
+    recover_stale_processing_status_if_possible,
+)
 from ..utils.creative_brief import build_creative_brief
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
@@ -47,46 +58,38 @@ async def generate_story(body: GenerateStoryRequest, db: Session = Depends(get_d
     lock_acquired = False
     try:
         project = orchestrator.get_project(db, body.project_id)
+        recover_stale_processing_status_if_possible(db, project)
+        project = orchestrator.get_project(db, body.project_id)
+        pc_for_check = latest_product_context(db, body.project_id)
+        sb_for_check = latest_story_blueprint(db, body.project_id)
+        chars, scenes, products = list_pipeline_asset_rows(db, body.project_id)
+        segs = list_segment_scripts(db, body.project_id)
         stage_now = current_stage(project)
         runtime_now = dict((project.step_status or {}).get("_runtime") or {})
         task_running_now = bool(runtime_now.get("task_running", False))
         logger.info(
-            "[STEP_ALLOWED_CHECK] project_id=%s step=%s current_status=%s required_status=%s current_stage=%s task_running=%s",
+            "[STEP_ALLOWED_CHECK] project_id=%s step=%s current_status=%s required_status=%s current_stage=%s task_running=%s has_product_context=%s has_story_blueprint=%s asset_counts=%s segment_scripts_count=%s",
             body.project_id,
             WorkflowStep.GENERATE_STORY.value,
             project.status,
             "product_parsed",
             stage_now,
             task_running_now,
+            bool(pc_for_check),
+            bool(sb_for_check),
+            {"characters": len(chars), "scenes": len(scenes), "products": len(products)},
+            len(segs),
         )
 
-        if str(project.status or "").strip() == "processing":
-            if stage_now == "s2_story" and task_running_now:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "detail": "Project is currently processing. Please wait or retry after it finishes.",
-                        "current_stage": stage_now,
-                        "status": project.status,
-                    },
-                )
-
-            if stage_now == "s1_product":
-                pc_row = latest_product_context(db, body.project_id)
-                if pc_row is not None:
-                    logger.warning(
-                        "[STEP_ALLOWED_STALE_LOCK_RECOVER] project_id=%s leaked_stage=%s status=%s action=repair_to_product_parsed",
-                        body.project_id,
-                        stage_now,
-                        project.status,
-                    )
-                    mark_project_stage_succeeded(
-                        db,
-                        body.project_id,
-                        stage="s1_product",
-                        success_status="product_parsed",
-                    )
-                    project = orchestrator.get_project(db, body.project_id)
+        if str(project.status or "").strip() == "processing" and task_running_now and stage_now:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "detail": "Project is currently processing. Please wait or retry after it finishes.",
+                    "current_stage": stage_now,
+                    "status": project.status,
+                },
+            )
 
         orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_STORY)
         acquire_project_task_lock(db, project, stage="s2_story")

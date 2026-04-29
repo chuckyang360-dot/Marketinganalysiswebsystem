@@ -43,7 +43,12 @@ from ..services.asset_library_service import asset_library_service
 from ..services.read_models import latest_product_context, latest_story_blueprint
 from ..services.workflow_orchestrator import orchestrator
 from ..services.image_understanding_service import validate_supported_image_data_url
-from ..services.project_task_guard import acquire_project_task_lock, mark_project_stage_failed, mark_project_stage_succeeded
+from ..services.project_task_guard import (
+    acquire_project_task_lock,
+    mark_project_stage_failed,
+    mark_project_stage_succeeded,
+    recover_stale_processing_status_if_possible,
+)
 from ..utils.enums import WorkflowStep
 from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 from ..utils.language import build_language_policy, language_prompt_rules
@@ -314,6 +319,8 @@ async def generate_asset_specs(body: GenerateAssetSpecsRequest, db: Session = De
     log_api_request(logger, "POST /assets/specs/generate", project_id=body.project_id)
     lock_acquired = False
     try:
+        project = orchestrator.get_project(db, body.project_id)
+        recover_stale_processing_status_if_possible(db, project)
         project = orchestrator.get_project(db, body.project_id)
         orchestrator.assert_step_allowed(db, project, WorkflowStep.GENERATE_ASSET_SPECS)
         acquire_project_task_lock(db, project, stage="s3_assets")
