@@ -24,7 +24,7 @@ from ...config import settings
 from ...database import SessionLocal
 from ...utils.r2_storage import upload_file
 from ..exceptions import ShortDramaInvalidSegmentVideoError, ShortDramaVideoInputError
-from ..models import RenderJob, SegmentScriptRecord, ShortDramaProject
+from ..models import AssetEntity, AssetImage, RenderJob, SegmentScriptRecord, ShortDramaProject
 from ..providers.xai_video_client import effective_xai_video_model
 from ..providers.xai_video_provider import SegmentVideoProvider, build_xai_video_provider
 from ..schemas.segment import SegmentScriptSchema
@@ -48,6 +48,169 @@ _HARD_VIDEO_PROMPT_CHARS = 4096
 
 def _trace(tag: str, payload: dict[str, Any]) -> None:
     logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def _extract_raw_character_asset_ids(seg: SegmentScriptSchema) -> list[Any]:
+    raw: list[Any] = []
+    for shot in seg.shots or []:
+        values = getattr(shot, "character_asset_ids", None) or []
+        if isinstance(values, list):
+            raw.extend(values)
+        asset_refs = getattr(shot, "asset_refs", None) or {}
+        if isinstance(asset_refs, dict):
+            nested = asset_refs.get("character_asset_ids") or []
+            if isinstance(nested, list):
+                raw.extend(nested)
+    return raw
+
+
+def _clean_character_asset_ids(values: list[Any] | None) -> list[int]:
+    out: list[int] = []
+    seen: set[int] = set()
+    for raw in values or []:
+        text = str(raw or "").strip()
+        if not text or not text.isdigit():
+            continue
+        asset_id = int(text)
+        if asset_id in seen:
+            continue
+        seen.add(asset_id)
+        out.append(asset_id)
+    return out
+
+
+def _resolve_character_assets_by_ids(
+    db: Session,
+    *,
+    project_id: int,
+    segment_id: str,
+    raw_character_asset_ids: list[Any],
+) -> dict[int, dict[str, str]]:
+    clean_ids = _clean_character_asset_ids(raw_character_asset_ids)
+    logger.info(
+        "[VIDEO_CHARACTER_ASSET_RESOLVE_START] project_id=%s segment_id=%s raw_character_asset_ids=%s clean_character_asset_ids=%s",
+        project_id,
+        segment_id,
+        list(raw_character_asset_ids or []),
+        clean_ids,
+    )
+    for raw in raw_character_asset_ids or []:
+        text = str(raw or "").strip()
+        if text and not text.isdigit():
+            logger.warning(
+                "[VIDEO_CHARACTER_ASSET_RESOLVE_RESULT] project_id=%s segment_id=%s character_asset_id=%s found=%s asset_type=%s asset_name=%s image_url=%s reason=%s",
+                project_id,
+                segment_id,
+                text,
+                False,
+                "",
+                "",
+                "",
+                "invalid_id",
+            )
+    if not clean_ids:
+        return {}
+
+    assets = (
+        db.query(AssetEntity)
+        .filter(
+            AssetEntity.project_id == project_id,
+            AssetEntity.id.in_(clean_ids),
+            AssetEntity.status == "active",
+        )
+        .all()
+    )
+    by_id = {int(row.id): row for row in assets}
+    cross_project_assets = (
+        db.query(AssetEntity)
+        .filter(
+            AssetEntity.id.in_(clean_ids),
+            AssetEntity.project_id != project_id,
+            AssetEntity.status == "active",
+        )
+        .all()
+    )
+    cross_project_ids = {int(row.id) for row in cross_project_assets}
+    image_rows = (
+        db.query(AssetImage)
+        .filter(
+            AssetImage.asset_id.in_(clean_ids),
+            AssetImage.status == "active",
+        )
+        .order_by(AssetImage.id.desc())
+        .all()
+    )
+    image_by_asset_id: dict[int, str] = {}
+    for image in image_rows:
+        aid = int(image.asset_id)
+        if aid in image_by_asset_id:
+            continue
+        image_url = str(image.image_url or "").strip()
+        if image_url:
+            image_by_asset_id[aid] = image_url
+
+    resolved: dict[int, dict[str, str]] = {}
+    for asset_id in clean_ids:
+        row = by_id.get(asset_id)
+        if row is None:
+            reason = "cross_project_blocked" if asset_id in cross_project_ids else "not_found"
+            logger.warning(
+                "[VIDEO_CHARACTER_ASSET_RESOLVE_RESULT] project_id=%s segment_id=%s character_asset_id=%s found=%s asset_type=%s asset_name=%s image_url=%s reason=%s",
+                project_id,
+                segment_id,
+                asset_id,
+                False,
+                "",
+                "",
+                "",
+                reason,
+            )
+            continue
+        asset_type = str(row.asset_type or "").strip().lower()
+        if asset_type != "character":
+            logger.warning(
+                "[VIDEO_CHARACTER_ASSET_RESOLVE_RESULT] project_id=%s segment_id=%s character_asset_id=%s found=%s asset_type=%s asset_name=%s image_url=%s reason=%s",
+                project_id,
+                segment_id,
+                asset_id,
+                False,
+                asset_type,
+                str(row.name or "").strip(),
+                "",
+                "wrong_asset_type",
+            )
+            continue
+        image_url = str(image_by_asset_id.get(asset_id) or "").strip()
+        if not image_url:
+            logger.warning(
+                "[VIDEO_CHARACTER_ASSET_RESOLVE_RESULT] project_id=%s segment_id=%s character_asset_id=%s found=%s asset_type=%s asset_name=%s image_url=%s reason=%s",
+                project_id,
+                segment_id,
+                asset_id,
+                False,
+                asset_type,
+                str(row.name or "").strip(),
+                "",
+                "empty_image_url",
+            )
+            continue
+        resolved[asset_id] = {
+            "name": str(row.name or "").strip(),
+            "image_url": image_url,
+            "asset_type": asset_type,
+        }
+        logger.info(
+            "[VIDEO_CHARACTER_ASSET_RESOLVE_RESULT] project_id=%s segment_id=%s character_asset_id=%s found=%s asset_type=%s asset_name=%s image_url=%s reason=%s",
+            project_id,
+            segment_id,
+            asset_id,
+            True,
+            asset_type,
+            resolved[asset_id]["name"],
+            image_url,
+            "found",
+        )
+    return resolved
 
 
 def download_video(video_url: str, *, project_id: int, segment_id: str) -> Path:
@@ -202,12 +365,20 @@ class RenderExecutorService:
         try:
             seg = SegmentScriptSchema.model_validate(rec.script_json)
             rec_script_json_snapshot = dict(rec.script_json) if isinstance(rec.script_json, dict) else {}
+            raw_character_asset_ids = _extract_raw_character_asset_ids(seg)
+            resolved_character_assets = _resolve_character_assets_by_ids(
+                db,
+                project_id=project_id,
+                segment_id=segment_id,
+                raw_character_asset_ids=raw_character_asset_ids,
+            )
             plan = build_segment_video_plan(
                 seg,
                 characters=chars,
                 scenes=scenes,
                 products=products,
                 project_aspect_ratio=project_ar,
+                resolved_character_assets=resolved_character_assets,
             )
             logger.info("[S4_EXECUTION_INPUT] project_id=%s input=%s", project_id, plan.execution_input)
             logger.info(
@@ -220,6 +391,14 @@ class RenderExecutorService:
                 str(plan.execution_input.get("scene_asset_id") or ""),
                 str(plan.execution_input.get("product_asset_id") or ""),
             )
+            if list(plan.execution_input.get("character_asset_ids") or []) and not list(plan.execution_input.get("character_names") or []):
+                logger.warning(
+                    "[VIDEO_CHARACTER_REFERENCE_MISSING] project_id=%s segment_id=%s character_asset_ids=%s reason=%s",
+                    project_id,
+                    segment_id,
+                    list(plan.execution_input.get("character_asset_ids") or []),
+                    "resolved_empty_before_provider",
+                )
             logger.info(
                 "[SEGMENT_REFERENCE_SOURCE_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,

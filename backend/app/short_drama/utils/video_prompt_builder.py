@@ -121,6 +121,21 @@ def _clean_asset_ids(values: list[str]) -> list[str]:
     return out
 
 
+def _clean_asset_ids_int(values: list[str]) -> list[int]:
+    out: list[int] = []
+    seen: set[int] = set()
+    for raw in values:
+        value = str(raw or "").strip()
+        if not value or not value.isdigit():
+            continue
+        n = int(value)
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+    return out
+
+
 def _shot_character_asset_ids(shot) -> list[str]:
     raw: list[str] = []
     for key in ("character_asset_ids",):
@@ -525,6 +540,7 @@ def build_segment_video_plan(
     scenes: list[SceneAsset],
     products: list[ProductAsset],
     project_aspect_ratio: str | None,
+    resolved_character_assets: dict[int, dict[str, str]] | None = None,
 ) -> SegmentVideoPlan:
     ar = (project_aspect_ratio or "9:16").strip()
     if ":" not in ar:
@@ -558,29 +574,30 @@ def build_segment_video_plan(
     )
 
     cmap = _char_by_name(characters)
-    cmap_id = _char_by_id(characters)
     smap = _scene_by_name(scenes)
     smap_id = _scene_by_id(scenes)
     pmap = _product_by_name(products)
     pmap_id = _product_by_id(products)
 
-    ref_urls: list[str] = []
+    character_ref_urls: list[str] = []
+    scene_ref_urls: list[str] = []
+    product_ref_urls: list[str] = []
     selected_character_names: list[str] = []
     requested_product_refs: list[str] = []
-    character_asset_ids = list(
-        dict.fromkeys([asset_id for s in segment.shots for asset_id in _shot_character_asset_ids(s)])
-    )
+    character_asset_ids = list(dict.fromkeys([asset_id for s in segment.shots for asset_id in _shot_character_asset_ids(s)]))
+    clean_character_asset_ids = _clean_asset_ids_int(character_asset_ids)
+    resolved_character_assets = resolved_character_assets or {}
     scene_asset_id = next((sid for s in segment.shots for sid in [_shot_scene_asset_id(s)] if sid), "")
     product_asset_id = next((pid for s in segment.shots for pid in [_shot_product_asset_id(s)] if pid), "")
 
     for shot in segment.shots:
         # If explicit character asset ids exist, do id-only strict lookup and never fallback to names.
-        if character_asset_ids:
-            for asset_id in _shot_character_asset_ids(shot):
-                row = cmap_id.get(asset_id)
-                if row and row.image_url:
-                    ref_urls.append(row.image_url)
-                    selected_character_names.append(str(row.name or "").strip())
+        if clean_character_asset_ids:
+            for asset_id in clean_character_asset_ids:
+                resolved = resolved_character_assets.get(asset_id)
+                if resolved and str(resolved.get("image_url") or "").strip():
+                    character_ref_urls.append(str(resolved.get("image_url") or "").strip())
+                    selected_character_names.append(str(resolved.get("name") or "").strip())
         else:
             for cref in _effective_character_refs(shot):
                 raw = str(cref).strip()
@@ -588,36 +605,36 @@ def build_segment_video_plan(
                     continue
                 row = cmap.get(_norm_name(raw))
                 if row and row.image_url:
-                    ref_urls.append(row.image_url)
+                    character_ref_urls.append(row.image_url)
                     selected_character_names.append(str(row.name or "").strip())
         if scene_asset_id:
             row = smap_id.get(scene_asset_id)
             if row and row.image_url:
-                ref_urls.append(row.image_url)
+                scene_ref_urls.append(row.image_url)
         else:
             sref = _norm_name(str(_effective_scene_ref(shot)))
             if sref:
                 row = smap.get(sref)
                 if row and row.image_url:
-                    ref_urls.append(row.image_url)
+                    scene_ref_urls.append(row.image_url)
         if product_asset_id:
             row = pmap_id.get(product_asset_id)
             if row and row.image_url:
-                ref_urls.append(row.image_url)
+                product_ref_urls.append(row.image_url)
         else:
             for pref in _effective_product_refs(shot):
                 requested_product_refs.append(pref)
                 raw = str(pref).strip()
                 row = pmap.get(_norm_name(raw))
                 if row and row.image_url:
-                    ref_urls.append(row.image_url)
+                    product_ref_urls.append(row.image_url)
 
     if not requested_product_refs and not product_asset_id:
         for p in sorted(products, key=lambda x: x.id):
             if p.image_url:
-                ref_urls.append(p.image_url)
+                product_ref_urls.append(p.image_url)
 
-    ref_urls = _dedupe_preserve(ref_urls)
+    ref_urls = _dedupe_preserve(character_ref_urls + scene_ref_urls + product_ref_urls)
     selected_character_names = _dedupe_preserve(selected_character_names)
     if not ref_urls:
         raise ShortDramaVideoInputError(
