@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ...database import SessionLocal, get_db
 from ..exceptions import ShortDramaInvalidModelOutputError, ShortDramaProviderError
+from ..exceptions import ShortDramaImageProviderError
 from ..http_errors import raise_short_drama_http
 from ..models import AssetEntity, AssetImage, CharacterAsset, ProductAsset, SceneAsset
 from ..schemas.asset import (
@@ -60,6 +61,26 @@ def _trace(tag: str, payload: dict) -> None:
     logger.info("[AI_CHAIN_TRACE][%s] %s", tag, json.dumps(payload, ensure_ascii=False, default=str))
 
 router = APIRouter()
+_XAI_IMAGE_QUOTA_DETAIL = "xAI 图片生成额度已耗尽或达到月度消费上限，请充值或提高 spending limit 后重试。"
+
+
+def _is_xai_image_quota_exhausted(exc: Exception) -> bool:
+    text = str(exc or "").lower()
+    category = str(getattr(exc, "category", "") or "").lower()
+    quota_markers = [
+        "429",
+        "quota",
+        "spending limit",
+        "rate limited",
+        "resource has been exhausted",
+        "used all available credits",
+        "monthly spending limit",
+    ]
+    if category in {"quota", "rate_limit"}:
+        return True
+    return any(marker in text for marker in quota_markers)
+
+
 
 
 def _preview_text(value: str | None, limit: int = 240) -> str:
@@ -1280,6 +1301,17 @@ async def regenerate_asset_library(body: RegenerateAssetRequest, db: Session = D
         return AssetDetailSchema.model_validate(asset_library_service.to_detail(db, row))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except ShortDramaImageProviderError as e:
+        if _is_xai_image_quota_exhausted(e):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "success": False,
+                    "error": "XAI_IMAGE_QUOTA_EXHAUSTED",
+                    "detail": _XAI_IMAGE_QUOTA_DETAIL,
+                },
+            )
+        raise
 
 
 @router.post("/library/{asset_id}/uploaded-images", response_model=AssetDetailSchema)

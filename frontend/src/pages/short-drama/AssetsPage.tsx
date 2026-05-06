@@ -4,7 +4,7 @@ import { SDWorkflowNav } from './components/SDWorkflowNav';
 import { AssetLightbox, type LightboxItem } from './components/AssetLightbox';
 import { AssetInteractionModal, type AssetEditorPayload, type AssetInteractionEntity, type AssetKind } from './components/AssetInteractionModal';
 import { useEffectiveShortDramaProjectId } from './hooks/useEffectiveShortDramaProjectId';
-import { analyzeShortDramaAssetReferenceImage, createShortDramaAssetFromImage, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
+import { ShortDramaApiError, analyzeShortDramaAssetReferenceImage, createShortDramaAssetFromImage, createShortDramaAssetLibrary, generateShortDramaAssetImages, generateShortDramaAssetSpecs, getShortDramaAssetLibraryDetail, getShortDramaPipeline, listShortDramaAssetLibrary, regenerateShortDramaAssetLibrary, touchShortDramaProjectStep, updateShortDramaAssetLibrary } from './services/shortDramaApi';
 import type { AssetImageDto, AssetLibraryItemDto, PipelineSummaryDto } from './types/shortDramaApi';
 import { getAssetThumbnailUrl, resolveAssetImageUrl } from './utils/assetsPageAdapters';
 import { withProjectQuery } from './utils/shortDramaRoutes';
@@ -220,6 +220,21 @@ function appendS3Debug(event: string, payload: Record<string, unknown>) {
   const w = window as Window & { __S3_DEBUG__?: Array<{ event: string; payload: Record<string, unknown> }> };
   if (!w.__S3_DEBUG__) w.__S3_DEBUG__ = [];
   w.__S3_DEBUG__.push({ event, payload });
+}
+
+function toReadableErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ShortDramaApiError) {
+    const detail = error.detail;
+    if (error.status === 429 && detail && typeof detail === 'object') {
+      const d = detail as { error?: unknown; detail?: unknown };
+      if (d.error === 'XAI_IMAGE_QUOTA_EXHAUSTED' && typeof d.detail === 'string' && d.detail.trim()) {
+        return d.detail.trim();
+      }
+    }
+    if (error.message) return error.message;
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
 }
 
 function toDataUrl(file: File): Promise<string> {
@@ -698,6 +713,7 @@ export function ShortDramaAssetsPage() {
   const shouldShowGeneratingCard = isAssetGenerationRunning && !hasVisibleAssetImages && currentRows.length === 0;
   const showSpecSkeletonCards = shouldShowGeneratingCard;
   const showFailureCard = isAssetGenerationFailed && currentRows.length === 0;
+  const showEmptyStateCard = !showSpecSkeletonCards && !showFailureCard && currentRows.length === 0;
   const showAddCard = !showSpecSkeletonCards && !showFailureCard;
   const tabs = useMemo(() => ([
     { key: 'characters' as const, label: '角色', count: data.characters.length, icon: 'ri-user-star-line' },
@@ -1059,6 +1075,13 @@ export function ShortDramaAssetsPage() {
                 </div>
               </div>
             ) : null}
+            {showEmptyStateCard ? (
+              <div className="flex h-full min-h-[340px] flex-col items-center justify-center rounded-2xl border border-[#EAEAEA] bg-[#FAFAFB] p-6 text-center">
+                <i className="ri-inbox-archive-line text-[24px] text-[#8E8E93]" />
+                <div className="mt-2 text-[14px] font-semibold text-[#1D1D1F]">暂无资产</div>
+                <div className="mt-1 text-[12px] text-[#8E8E93]">当前没有可展示资产。若系统正在生成请稍候；若无任务请点击“添加”创建资产。</div>
+              </div>
+            ) : null}
             {addPending?.tab === activeTab ? (
               <div className="flex h-full flex-col overflow-hidden rounded-2xl" style={{ background: '#fff', border: '1px solid #EAEAEA' }}>
                 <div className="h-48 animate-pulse bg-[#ECEDEF]" />
@@ -1149,7 +1172,7 @@ export function ShortDramaAssetsPage() {
               error_name: e instanceof Error ? e.name : undefined,
               error_message: e instanceof Error ? e.message : String(e),
             });
-            window.alert('重生成失败，请稍后重试。');
+            window.alert(toReadableErrorMessage(e, '重生成失败，请稍后重试。'));
           } finally {
             setRegenerating(false);
           }
