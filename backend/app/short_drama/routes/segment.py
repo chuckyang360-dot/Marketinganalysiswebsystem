@@ -746,10 +746,16 @@ async def update_segment_shot(
         p_shot["audio_intent"] = _safe_text(body.audio_intent)
     if body.character_refs is not None:
         p_shot["character_refs"] = _clean_string_list(body.character_refs)
+    if body.character_asset_ids is not None:
+        p_shot["character_refs"] = _clean_string_list(body.character_asset_ids)
     if body.scene_refs is not None:
         p_shot["scene_refs"] = _clean_string_list(body.scene_refs)
+    if body.scene_asset_id is not None:
+        p_shot["scene_refs"] = _clean_string_list([body.scene_asset_id])
     if body.product_refs is not None:
         p_shot["product_refs"] = _clean_string_list(body.product_refs)
+    if body.product_asset_id is not None:
+        p_shot["product_refs"] = _clean_string_list([body.product_asset_id])
     if body.duration_sec is not None:
         p_shot["duration_sec"] = float(body.duration_sec or 0)
     shot.setdefault("shot_id", shot_id)

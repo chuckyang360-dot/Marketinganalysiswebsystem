@@ -429,8 +429,11 @@ export type UpdateSegmentShotBody = {
   subtitle_text_presentation?: string;
   audio_intent?: string;
   character_refs?: string[];
+  character_asset_ids?: string[];
   scene_refs?: string[];
+  scene_asset_id?: string;
   product_refs?: string[];
+  product_asset_id?: string;
   duration_sec?: number;
 };
 

@@ -42,6 +42,12 @@ type AssetChip = {
   name: string;
   img: string | null;
 };
+type AssetOption = {
+  id: string;
+  name: string;
+  subtitle: string;
+  img: string | null;
+};
 
 interface SegmentWorkbenchProps {
   segments: Step4SegmentItem[];
@@ -184,8 +190,11 @@ export function StepFourSegmentWorkbench({
           subtitle_text_presentation: sd.subtitleText,
           audio_intent: sd.emotion,
           character_refs: sd.characterRefs,
+          character_asset_ids: sd.characterRefs,
           scene_refs: sd.sceneRef ? [sd.sceneRef] : [],
+          scene_asset_id: sd.sceneRef || undefined,
           product_refs: sd.productRefs,
+          product_asset_id: sd.productRefs[0] || undefined,
           manual_character_refs: sd.characterRefs,
           manual_scene_ref: sd.sceneRef,
           manual_product_refs: sd.productRefs,
@@ -809,12 +818,12 @@ function SegmentActions({
 
 function ReferenceSelector({ selector, library, draft, onClose, onSave }: { selector: { segId: number; shotId: number; kind: RefKind }; library: StepFourAssetLibraryVm; draft?: SegmentDraft; onClose: () => void; onSave: (values: string[]) => void }) {
   const current = draft?.shots[selector.shotId];
-  const options =
+  const options: AssetOption[] =
     selector.kind === "characters"
-      ? library.characters.map((x) => ({ name: x.name, subtitle: x.role, img: x.img }))
+      ? library.characters.map((x) => ({ id: String(x.id), name: x.name, subtitle: x.role, img: x.img }))
       : selector.kind === "scene"
-        ? library.scenes.map((x) => ({ name: x.name, subtitle: x.type, img: x.img }))
-        : library.products.map((x) => ({ name: x.name, subtitle: x.type, img: x.img }));
+        ? library.scenes.map((x) => ({ id: String(x.id), name: x.name, subtitle: x.type, img: x.img }))
+        : library.products.map((x) => ({ id: String(x.id), name: x.name, subtitle: x.type, img: x.img }));
   const initial = selector.kind === "characters" ? current?.characterRefs ?? [] : selector.kind === "scene" ? (current?.sceneRef ? [current.sceneRef] : []) : current?.productRefs ?? [];
   const [selected, setSelected] = useState<string[]>(initial);
   const multi = selector.kind !== "scene";
@@ -829,12 +838,13 @@ function ReferenceSelector({ selector, library, draft, onClose, onSave }: { sele
         </div>
         <div className="p-4 max-h-[55vh] overflow-y-auto space-y-2">
           {options.map((opt) => {
-            const active = selected.includes(opt.name);
+            const active = selected.includes(opt.id);
             return (
-              <button key={opt.name} type="button" onClick={() => setSelected((prev) => (multi ? (prev.includes(opt.name) ? prev.filter((x) => x !== opt.name) : [...prev, opt.name]) : [opt.name]))} className="w-full flex items-center gap-3 p-2 rounded-xl text-left" style={{ border: `1px solid ${active ? "#1D1D1F" : "#EAEAEA"}`, background: active ? "#F5F5F7" : "#fff" }}>
+              <button key={opt.id} type="button" onClick={() => setSelected((prev) => (multi ? (prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id]) : [opt.id]))} className="w-full flex items-center gap-3 p-2 rounded-xl text-left" style={{ border: `1px solid ${active ? "#1D1D1F" : "#EAEAEA"}`, background: active ? "#F5F5F7" : "#fff" }}>
                 {opt.img ? <img src={opt.img} alt={opt.name} className="w-10 h-10 rounded-lg object-cover" /> : <div className="w-10 h-10 rounded-lg bg-[#ECEDEF]" />}
                 <div className="flex-1">
                   <p className="text-[13px] font-semibold" style={{ color: "#1D1D1F" }}>{opt.name}</p>
+                  <p className="text-[10px]" style={{ color: "#AEAEB2" }}>asset_id: {opt.id}</p>
                   <p className="text-[11px]" style={{ color: "#8E8E93" }}>{opt.subtitle}</p>
                 </div>
                 {active && <i className="ri-checkbox-circle-fill text-[16px]" style={{ color: "#047857" }} />}

@@ -211,6 +211,16 @@ class RenderExecutorService:
             )
             logger.info("[S4_EXECUTION_INPUT] project_id=%s input=%s", project_id, plan.execution_input)
             logger.info(
+                "[VIDEO_RENDER_ASSET_REFS] project_id=%s segment_id=%s character_asset_ids=%s character_names=%s reference_image_urls=%s scene_asset_id=%s product_asset_id=%s",
+                project_id,
+                segment_id,
+                list(plan.execution_input.get("character_asset_ids") or plan.execution_input.get("character_refs") or []),
+                list(plan.execution_input.get("character_names") or []),
+                plan.selected_reference_image_urls,
+                str(plan.execution_input.get("scene_asset_id") or ""),
+                str(plan.execution_input.get("product_asset_id") or ""),
+            )
+            logger.info(
                 "[SEGMENT_REFERENCE_SOURCE_URLS] project_id=%s segment_id=%s urls=%s",
                 project_id,
                 segment_id,

@@ -6,7 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from ...database import SessionLocal, get_db
-from ..models import RenderJob
+from ..models import RenderJob, SegmentScriptRecord
 from ..exceptions import (
     ShortDramaFFmpegError,
     ShortDramaMergeError,
@@ -167,6 +167,53 @@ async def generate_one_segment_video(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    rec = (
+        db.query(SegmentScriptRecord)
+        .filter(
+            SegmentScriptRecord.project_id == body.project_id,
+            SegmentScriptRecord.segment_id == segment_id,
+        )
+        .first()
+    )
+    execution_shots = []
+    if rec and isinstance(rec.script_json, dict):
+        execution_shots = rec.script_json.get("execution_shots") or rec.script_json.get("shots") or []
+    character_asset_ids = sorted(
+        {
+            str(v).strip()
+            for shot in execution_shots
+            if isinstance(shot, dict)
+            for v in (
+                (shot.get("manual_character_refs") or shot.get("character_refs") or [])
+                if isinstance((shot.get("manual_character_refs") or shot.get("character_refs") or []), list)
+                else []
+            )
+            if str(v).strip()
+        }
+    )
+    scene_asset_id = ""
+    product_asset_id = ""
+    for shot in execution_shots:
+        if not isinstance(shot, dict):
+            continue
+        scene_raw = str((shot.get("manual_scene_ref") or shot.get("scene_ref") or "")).strip()
+        if not scene_asset_id and scene_raw:
+            scene_asset_id = scene_raw
+        products_raw = shot.get("manual_product_refs") or shot.get("product_refs") or []
+        if not product_asset_id and isinstance(products_raw, list):
+            first = next((str(x).strip() for x in products_raw if str(x).strip()), "")
+            if first:
+                product_asset_id = first
+        if scene_asset_id and product_asset_id:
+            break
+    logger.info(
+        "[VIDEO_SEGMENT_REGENERATE_PAYLOAD] project_id=%s segment_id=%s character_asset_ids=%s scene_asset_id=%s product_asset_id=%s",
+        body.project_id,
+        segment_id,
+        character_asset_ids,
+        scene_asset_id,
+        product_asset_id,
+    )
     logger.info(
         "[SEGMENT_GENERATE_REQUEST] project_id=%s segment_id=%s request_url=%s base_url_from_request=%s hostname=%s cwd=%s",
         body.project_id,

@@ -29,6 +29,7 @@ class RenderJobSchema(BaseModel):
 
 class VideoProjectRequest(BaseModel):
     project_id: int = Field(..., ge=1)
+    segment_id: str | None = None
 
 
 class VideoBatchSummaryResponse(BaseModel):

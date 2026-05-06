@@ -439,12 +439,24 @@ def _char_by_name(chars: list[CharacterAsset]) -> dict[str, CharacterAsset]:
     return {_norm_name(c.name): c for c in chars}
 
 
+def _char_by_id(chars: list[CharacterAsset]) -> dict[str, CharacterAsset]:
+    return {str(c.id): c for c in chars if getattr(c, "id", None) is not None}
+
+
 def _scene_by_name(scenes: list[SceneAsset]) -> dict[str, SceneAsset]:
     return {_norm_name(s.name): s for s in scenes}
 
 
+def _scene_by_id(scenes: list[SceneAsset]) -> dict[str, SceneAsset]:
+    return {str(s.id): s for s in scenes if getattr(s, "id", None) is not None}
+
+
 def _product_by_name(products: list[ProductAsset]) -> dict[str, ProductAsset]:
     return {_norm_name(p.name): p for p in products}
+
+
+def _product_by_id(products: list[ProductAsset]) -> dict[str, ProductAsset]:
+    return {str(p.id): p for p in products if getattr(p, "id", None) is not None}
 
 
 def build_segment_video_plan(
@@ -487,25 +499,39 @@ def build_segment_video_plan(
     )
 
     cmap = _char_by_name(characters)
+    cmap_id = _char_by_id(characters)
     smap = _scene_by_name(scenes)
+    smap_id = _scene_by_id(scenes)
     pmap = _product_by_name(products)
+    pmap_id = _product_by_id(products)
 
     ref_urls: list[str] = []
+    selected_character_names: list[str] = []
     requested_product_refs: list[str] = []
     for shot in segment.shots:
         for cref in _effective_character_refs(shot):
-            key = _norm_name(str(cref))
-            row = cmap.get(key)
+            raw = str(cref).strip()
+            row = cmap_id.get(raw) if raw.isdigit() else None
+            if row is None:
+                key = _norm_name(raw)
+                row = cmap.get(key)
             if row and row.image_url:
                 ref_urls.append(row.image_url)
+                selected_character_names.append(str(row.name or "").strip())
         sref = _norm_name(str(_effective_scene_ref(shot)))
-        if sref:
-            row = smap.get(sref)
+        raw_scene_ref = str(_effective_scene_ref(shot) or "").strip()
+        if raw_scene_ref:
+            row = smap_id.get(raw_scene_ref) if raw_scene_ref.isdigit() else None
+            if row is None and sref:
+                row = smap.get(sref)
             if row and row.image_url:
                 ref_urls.append(row.image_url)
         for pref in _effective_product_refs(shot):
             requested_product_refs.append(pref)
-            row = pmap.get(_norm_name(str(pref)))
+            raw = str(pref).strip()
+            row = pmap_id.get(raw) if raw.isdigit() else None
+            if row is None:
+                row = pmap.get(_norm_name(raw))
             if row and row.image_url:
                 ref_urls.append(row.image_url)
 
@@ -515,6 +541,7 @@ def build_segment_video_plan(
                 ref_urls.append(p.image_url)
 
     ref_urls = _dedupe_preserve(ref_urls)
+    selected_character_names = _dedupe_preserve(selected_character_names)
     if not ref_urls:
         raise ShortDramaVideoInputError(
             f"Segment {segment.segment_id!r} has no reference images "
@@ -522,6 +549,14 @@ def build_segment_video_plan(
         )
     if len(ref_urls) > _MAX_REFS:
         ref_urls = ref_urls[:_MAX_REFS]
+    character_asset_ids = list(
+        dict.fromkeys([r for s in segment.shots for r in _effective_character_refs(s) if str(r).strip()])
+    )
+    scene_asset_id = next((r for s in segment.shots for r in [str(_effective_scene_ref(s)).strip()] if r), "")
+    product_asset_id = next(
+        (r for s in segment.shots for r in _effective_product_refs(s) if str(r).strip()),
+        "",
+    )
 
     manual_video_prompt_used = any(str(_get_shot_value(s, "manual_video_prompt", "") or "").strip() for s in segment.shots)
     manual_refs_used = _manual_refs_used(segment)
@@ -572,8 +607,12 @@ def build_segment_video_plan(
             "manual_video_prompt_used": manual_video_prompt_used,
             "manual_refs_used": manual_refs_used,
             "character_refs": list(dict.fromkeys([r for s in segment.shots for r in _effective_character_refs(s)])),
+            "character_asset_ids": character_asset_ids,
+            "character_names": selected_character_names,
             "scene_ref": list(dict.fromkeys([_effective_scene_ref(s) for s in segment.shots if _effective_scene_ref(s)])),
+            "scene_asset_id": scene_asset_id,
             "product_refs": list(dict.fromkeys([r for s in segment.shots for r in _effective_product_refs(s)])),
+            "product_asset_id": product_asset_id,
             "must_show": list(
                 dict.fromkeys([r for s in segment.shots for r in (_get_shot_value(s, "must_show", []) or [])])
             ),

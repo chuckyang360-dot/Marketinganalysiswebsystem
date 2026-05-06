@@ -216,8 +216,11 @@ class UpdateSegmentShotRequest(BaseModel):
     subtitle_text_presentation: Optional[str] = None
     audio_intent: Optional[str] = None
     character_refs: Optional[List[str]] = None
+    character_asset_ids: Optional[List[str]] = None
     scene_refs: Optional[List[str]] = None
+    scene_asset_id: Optional[str] = None
     product_refs: Optional[List[str]] = None
+    product_asset_id: Optional[str] = None
     duration_sec: Optional[float] = None
 
 

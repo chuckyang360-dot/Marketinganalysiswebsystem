@@ -436,7 +436,7 @@ export async function generateShortDramaSingleSegmentVideo(
     `/api/short-drama/videos/generate/${encodeURIComponent(segmentId)}`,
     {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectId }),
+      body: JSON.stringify({ project_id: projectId, segment_id: segmentId }),
     },
   );
 }
