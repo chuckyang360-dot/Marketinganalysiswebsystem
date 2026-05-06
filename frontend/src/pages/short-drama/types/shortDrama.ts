@@ -309,10 +309,13 @@ export interface Step4Shot {
   marketLocalizationDetail?: string;
   manualVideoPrompt?: string;
   characterRefs?: string[];
+  characterAssetIds?: string[];
   manualCharacterRefs?: string[];
   sceneRef?: string;
+  sceneAssetId?: string;
   manualSceneRef?: string;
   productRefs?: string[];
+  productAssetId?: string;
   manualProductRefs?: string[];
   mustShow?: string[];
   mustAvoid?: string[];

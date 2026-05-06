@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -38,6 +39,18 @@ from ..utils.flow_logging import log_api_error, log_api_request, log_api_success
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _clean_asset_ids(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = str(raw or "").strip()
+        if not value or not re.fullmatch(r"\d+", value) or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
 
 
 @router.post("/generate", response_model=VideoBatchSummaryResponse)
@@ -178,7 +191,20 @@ async def generate_one_segment_video(
     execution_shots = []
     if rec and isinstance(rec.script_json, dict):
         execution_shots = rec.script_json.get("execution_shots") or rec.script_json.get("shots") or []
-    character_asset_ids = sorted(
+    character_asset_ids = _clean_asset_ids(
+        [
+            str(v).strip()
+            for shot in execution_shots
+            if isinstance(shot, dict)
+            for v in (
+                (shot.get("character_asset_ids") or [])
+                if isinstance((shot.get("character_asset_ids") or []), list)
+                else []
+            )
+            if str(v).strip()
+        ]
+    )
+    character_names = sorted(
         {
             str(v).strip()
             for shot in execution_shots
@@ -196,21 +222,25 @@ async def generate_one_segment_video(
     for shot in execution_shots:
         if not isinstance(shot, dict):
             continue
-        scene_raw = str((shot.get("manual_scene_ref") or shot.get("scene_ref") or "")).strip()
-        if not scene_asset_id and scene_raw:
+        scene_raw = str((shot.get("scene_asset_id") or "")).strip()
+        if not scene_asset_id and re.fullmatch(r"\d+", scene_raw):
             scene_asset_id = scene_raw
-        products_raw = shot.get("manual_product_refs") or shot.get("product_refs") or []
+        product_raw = str((shot.get("product_asset_id") or "")).strip()
+        if not product_asset_id and re.fullmatch(r"\d+", product_raw):
+            product_asset_id = product_raw
+        products_raw = shot.get("product_refs") or []
         if not product_asset_id and isinstance(products_raw, list):
-            first = next((str(x).strip() for x in products_raw if str(x).strip()), "")
+            first = next((str(x).strip() for x in products_raw if re.fullmatch(r"\d+", str(x).strip())), "")
             if first:
                 product_asset_id = first
         if scene_asset_id and product_asset_id:
             break
     logger.info(
-        "[VIDEO_SEGMENT_REGENERATE_PAYLOAD] project_id=%s segment_id=%s character_asset_ids=%s scene_asset_id=%s product_asset_id=%s",
+        "[VIDEO_SEGMENT_REGENERATE_PAYLOAD] project_id=%s segment_id=%s character_asset_ids=%s character_names=%s scene_asset_id=%s product_asset_id=%s",
         body.project_id,
         segment_id,
         character_asset_ids,
+        character_names,
         scene_asset_id,
         product_asset_id,
     )

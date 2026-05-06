@@ -109,6 +109,65 @@ def _dedupe_preserve(urls: list[str]) -> list[str]:
     return out
 
 
+def _clean_asset_ids(values: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = str(raw or "").strip()
+        if not value or not value.isdigit() or value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
+def _shot_character_asset_ids(shot) -> list[str]:
+    raw: list[str] = []
+    for key in ("character_asset_ids",):
+        values = _get_shot_value(shot, key, []) or []
+        if isinstance(values, list):
+            raw.extend(str(x) for x in values)
+    asset_refs = _get_shot_value(shot, "asset_refs", {}) or {}
+    if isinstance(asset_refs, dict):
+        values = asset_refs.get("character_asset_ids") or []
+        if isinstance(values, list):
+            raw.extend(str(x) for x in values)
+    return _clean_asset_ids(raw)
+
+
+def _shot_scene_asset_id(shot) -> str:
+    candidates: list[str] = []
+    for key in ("scene_asset_id", "scene_id"):
+        value = str(_get_shot_value(shot, key, "") or "").strip()
+        if value:
+            candidates.append(value)
+    asset_refs = _get_shot_value(shot, "asset_refs", {}) or {}
+    if isinstance(asset_refs, dict):
+        value = str(asset_refs.get("scene_asset_id") or "").strip()
+        if value:
+            candidates.append(value)
+    for value in candidates:
+        if value.isdigit():
+            return value
+    return ""
+
+
+def _shot_product_asset_id(shot) -> str:
+    candidates: list[str] = []
+    value = str(_get_shot_value(shot, "product_asset_id", "") or "").strip()
+    if value:
+        candidates.append(value)
+    asset_refs = _get_shot_value(shot, "asset_refs", {}) or {}
+    if isinstance(asset_refs, dict):
+        value = str(asset_refs.get("product_asset_id") or "").strip()
+        if value:
+            candidates.append(value)
+    for value in candidates:
+        if value.isdigit():
+            return value
+    return ""
+
+
 def _compact_text(text: str, max_chars: int) -> str:
     text = re.sub(r"\s+", " ", (text or "").strip())
     if len(text) <= max_chars:
@@ -508,34 +567,52 @@ def build_segment_video_plan(
     ref_urls: list[str] = []
     selected_character_names: list[str] = []
     requested_product_refs: list[str] = []
-    for shot in segment.shots:
-        for cref in _effective_character_refs(shot):
-            raw = str(cref).strip()
-            row = cmap_id.get(raw) if raw.isdigit() else None
-            if row is None:
-                key = _norm_name(raw)
-                row = cmap.get(key)
-            if row and row.image_url:
-                ref_urls.append(row.image_url)
-                selected_character_names.append(str(row.name or "").strip())
-        sref = _norm_name(str(_effective_scene_ref(shot)))
-        raw_scene_ref = str(_effective_scene_ref(shot) or "").strip()
-        if raw_scene_ref:
-            row = smap_id.get(raw_scene_ref) if raw_scene_ref.isdigit() else None
-            if row is None and sref:
-                row = smap.get(sref)
-            if row and row.image_url:
-                ref_urls.append(row.image_url)
-        for pref in _effective_product_refs(shot):
-            requested_product_refs.append(pref)
-            raw = str(pref).strip()
-            row = pmap_id.get(raw) if raw.isdigit() else None
-            if row is None:
-                row = pmap.get(_norm_name(raw))
-            if row and row.image_url:
-                ref_urls.append(row.image_url)
+    character_asset_ids = list(
+        dict.fromkeys([asset_id for s in segment.shots for asset_id in _shot_character_asset_ids(s)])
+    )
+    scene_asset_id = next((sid for s in segment.shots for sid in [_shot_scene_asset_id(s)] if sid), "")
+    product_asset_id = next((pid for s in segment.shots for pid in [_shot_product_asset_id(s)] if pid), "")
 
-    if not requested_product_refs:
+    for shot in segment.shots:
+        # If explicit character asset ids exist, do id-only strict lookup and never fallback to names.
+        if character_asset_ids:
+            for asset_id in _shot_character_asset_ids(shot):
+                row = cmap_id.get(asset_id)
+                if row and row.image_url:
+                    ref_urls.append(row.image_url)
+                    selected_character_names.append(str(row.name or "").strip())
+        else:
+            for cref in _effective_character_refs(shot):
+                raw = str(cref).strip()
+                if not raw:
+                    continue
+                row = cmap.get(_norm_name(raw))
+                if row and row.image_url:
+                    ref_urls.append(row.image_url)
+                    selected_character_names.append(str(row.name or "").strip())
+        if scene_asset_id:
+            row = smap_id.get(scene_asset_id)
+            if row and row.image_url:
+                ref_urls.append(row.image_url)
+        else:
+            sref = _norm_name(str(_effective_scene_ref(shot)))
+            if sref:
+                row = smap.get(sref)
+                if row and row.image_url:
+                    ref_urls.append(row.image_url)
+        if product_asset_id:
+            row = pmap_id.get(product_asset_id)
+            if row and row.image_url:
+                ref_urls.append(row.image_url)
+        else:
+            for pref in _effective_product_refs(shot):
+                requested_product_refs.append(pref)
+                raw = str(pref).strip()
+                row = pmap.get(_norm_name(raw))
+                if row and row.image_url:
+                    ref_urls.append(row.image_url)
+
+    if not requested_product_refs and not product_asset_id:
         for p in sorted(products, key=lambda x: x.id):
             if p.image_url:
                 ref_urls.append(p.image_url)
@@ -549,15 +626,6 @@ def build_segment_video_plan(
         )
     if len(ref_urls) > _MAX_REFS:
         ref_urls = ref_urls[:_MAX_REFS]
-    character_asset_ids = list(
-        dict.fromkeys([r for s in segment.shots for r in _effective_character_refs(s) if str(r).strip()])
-    )
-    scene_asset_id = next((r for s in segment.shots for r in [str(_effective_scene_ref(s)).strip()] if r), "")
-    product_asset_id = next(
-        (r for s in segment.shots for r in _effective_product_refs(s) if str(r).strip()),
-        "",
-    )
-
     manual_video_prompt_used = any(str(_get_shot_value(s, "manual_video_prompt", "") or "").strip() for s in segment.shots)
     manual_refs_used = _manual_refs_used(segment)
     prompt_source = "ai_shot_video_prompt_merge" if any(str(_get_shot_value(s, "video_prompt", "") or "").strip() for s in segment.shots) else "builder_fallback"

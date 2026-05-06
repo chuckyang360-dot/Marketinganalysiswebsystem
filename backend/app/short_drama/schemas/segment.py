@@ -35,6 +35,7 @@ class ShotSchema(BaseModel):
     shot_type: str = ""
     scene_ref: str = ""
     character_refs: List[str] = Field(default_factory=list)
+    character_asset_ids: List[str] = Field(default_factory=list)
     visual_description: str = ""
     visual_action: str = ""
     scene_description: str = ""
@@ -64,9 +65,11 @@ class ShotSchema(BaseModel):
     market_localization_detail: str = ""
     manual_video_prompt: str = ""
     product_refs: List[str] = Field(default_factory=list)
+    product_asset_id: str = ""
     product_ids: List[str] = Field(default_factory=list)
     character_ids: List[str] = Field(default_factory=list)
     scene_id: str = ""
+    scene_asset_id: str = ""
     manual_character_refs: List[str] = Field(default_factory=list)
     manual_scene_ref: str = ""
     manual_product_refs: List[str] = Field(default_factory=list)
@@ -127,18 +130,6 @@ class ShotSchema(BaseModel):
             out["generation_prompt"] = _stringify_line(out.get("video_prompt"))
         if not _stringify_line(out.get("video_prompt")) and _stringify_line(out.get("generation_prompt")):
             out["video_prompt"] = _stringify_line(out.get("generation_prompt"))
-        if not out.get("character_ids") and out.get("character_refs"):
-            out["character_ids"] = out.get("character_refs")
-        if not out.get("character_refs") and out.get("character_ids"):
-            out["character_refs"] = out.get("character_ids")
-        if not out.get("product_ids") and out.get("product_refs"):
-            out["product_ids"] = out.get("product_refs")
-        if not out.get("product_refs") and out.get("product_ids"):
-            out["product_refs"] = out.get("product_ids")
-        if not _stringify_line(out.get("scene_id")) and _stringify_line(out.get("scene_ref")):
-            out["scene_id"] = _stringify_line(out.get("scene_ref"))
-        if not _stringify_line(out.get("scene_ref")) and _stringify_line(out.get("scene_id")):
-            out["scene_ref"] = _stringify_line(out.get("scene_id"))
         return out
 
     @field_validator("duration_seconds", "duration_sec", mode="before")

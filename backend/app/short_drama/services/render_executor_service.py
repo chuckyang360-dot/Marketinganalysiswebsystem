@@ -214,7 +214,7 @@ class RenderExecutorService:
                 "[VIDEO_RENDER_ASSET_REFS] project_id=%s segment_id=%s character_asset_ids=%s character_names=%s reference_image_urls=%s scene_asset_id=%s product_asset_id=%s",
                 project_id,
                 segment_id,
-                list(plan.execution_input.get("character_asset_ids") or plan.execution_input.get("character_refs") or []),
+                list(plan.execution_input.get("character_asset_ids") or []),
                 list(plan.execution_input.get("character_names") or []),
                 plan.selected_reference_image_urls,
                 str(plan.execution_input.get("scene_asset_id") or ""),

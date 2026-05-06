@@ -396,8 +396,11 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
         duration,
         durationSeconds: Number.isFinite(durationSec) ? durationSec : 0,
         characterRefs: asStringArray(s.character_refs),
+        characterAssetIds: asStringArray(s.character_asset_ids),
         sceneRef: asStringArray(s.scene_refs)[0],
+        sceneAssetId: typeof s.scene_asset_id === 'string' ? s.scene_asset_id.trim() : undefined,
         productRefs: asStringArray(s.product_refs),
+        productAssetId: typeof s.product_asset_id === 'string' ? s.product_asset_id.trim() : undefined,
         viewerTakeaway: normalizeDisplayText(stringifyLine(s.viewer_takeaway)) || undefined,
         visualDirection: visualDirection || undefined,
         characterDirection: characterDirection || undefined,
@@ -527,11 +530,17 @@ function scriptShotsToStep4Shots(script: Record<string, unknown>): Step4Shot[] {
           ? s.manual_video_prompt.trim()
           : undefined,
       characterRefs: stringArray(s.character_refs),
+      characterAssetIds: stringArray(s.character_asset_ids),
       manualCharacterRefs: stringArray(s.manual_character_refs),
       sceneRef: typeof s.scene_ref === 'string' && s.scene_ref.trim() ? s.scene_ref.trim() : undefined,
+      sceneAssetId: typeof s.scene_id === 'string' && s.scene_id.trim() ? s.scene_id.trim() : undefined,
       manualSceneRef:
         typeof s.manual_scene_ref === 'string' && s.manual_scene_ref.trim() ? s.manual_scene_ref.trim() : undefined,
       productRefs: stringArray(s.product_refs),
+      productAssetId:
+        typeof s.product_asset_id === 'string' && s.product_asset_id.trim()
+          ? s.product_asset_id.trim()
+          : undefined,
       manualProductRefs: stringArray(s.manual_product_refs),
       mustShow: stringArray(s.must_show),
       mustAvoid: stringArray(s.must_avoid),

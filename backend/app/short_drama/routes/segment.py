@@ -64,6 +64,18 @@ def _clean_string_list(values: list[str] | None) -> list[str]:
     return out
 
 
+def _clean_asset_id_list(values: list[str] | None, *, keep_last_only: bool = False) -> list[str]:
+    cleaned = [x for x in _clean_string_list(values) if re.fullmatch(r"\d+", x)]
+    if keep_last_only and cleaned:
+        return [cleaned[-1]]
+    return cleaned
+
+
+def _clean_asset_id(value: str | None) -> str:
+    text = _safe_text(value)
+    return text if re.fullmatch(r"\d+", text) else ""
+
+
 def _safe_text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -108,8 +120,11 @@ def _presentation_shot_from_execution(shot: dict[str, Any], *, shot_index: int) 
         ),
         "duration_sec": float(shot.get("duration_seconds") or shot.get("duration_sec") or 0.0),
         "character_refs": [str(x) for x in (shot.get("character_refs") or []) if str(x).strip()],
+        "character_asset_ids": _clean_asset_id_list([str(x) for x in (shot.get("character_asset_ids") or []) if str(x).strip()]),
         "scene_refs": [str(shot.get("scene_ref") or "").strip()] if str(shot.get("scene_ref") or "").strip() else [],
+        "scene_asset_id": _clean_asset_id(_safe_text(shot.get("scene_asset_id"))),
         "product_refs": [str(x) for x in (shot.get("product_refs") or []) if str(x).strip()],
+        "product_asset_id": _clean_asset_id(_safe_text(shot.get("product_asset_id"))),
         "dialogue_text": _presentation_text(shot.get("spoken_text") or shot.get("dialogue")),
         "voiceover_text": _presentation_text(shot.get("voiceover_text") or shot.get("voiceover") or shot.get("narration")),
         "subtitle_text": _presentation_text(shot.get("subtitle_text") or shot.get("subtitle")),
@@ -126,8 +141,13 @@ def _execution_shot_from_presentation(presentation: dict[str, Any], existing_exe
     voiceover_text = _safe_text(presentation.get("voiceover_text") or base.get("voiceover_text") or base.get("voiceover"))
     subtitle_text = _safe_text(presentation.get("subtitle_text") or base.get("subtitle_text") or base.get("subtitle"))
     character_refs = [str(x) for x in (presentation.get("character_refs") or base.get("character_refs") or []) if str(x).strip()]
+    character_asset_ids = _clean_asset_id_list(
+        [str(x) for x in (presentation.get("character_asset_ids") or base.get("character_asset_ids") or []) if str(x).strip()]
+    )
     scene_refs = [str(x) for x in (presentation.get("scene_refs") or []) if str(x).strip()]
+    scene_asset_id = _clean_asset_id(_safe_text(presentation.get("scene_asset_id") or base.get("scene_asset_id")))
     product_refs = [str(x) for x in (presentation.get("product_refs") or base.get("product_refs") or []) if str(x).strip()]
+    product_asset_id = _clean_asset_id(_safe_text(presentation.get("product_asset_id") or base.get("product_asset_id")))
     scene_ref = scene_refs[0] if scene_refs else _safe_text(base.get("scene_ref"))
     duration_sec = float(presentation.get("duration_sec") or base.get("duration_seconds") or base.get("duration_sec") or 0.0)
     audio_intent = _safe_text(presentation.get("audio_intent") or base.get("audio_intent"))
@@ -144,7 +164,10 @@ def _execution_shot_from_presentation(presentation: dict[str, Any], existing_exe
             "action_description": character_action or visual_direction,
             "scene_ref": scene_ref,
             "character_refs": character_refs,
+            "character_asset_ids": character_asset_ids,
             "product_refs": product_refs,
+            "scene_asset_id": scene_asset_id,
+            "product_asset_id": product_asset_id,
             "duration_seconds": duration_sec,
             "duration_sec": duration_sec,
             "spoken_text": dialogue_text,
@@ -747,17 +770,29 @@ async def update_segment_shot(
     if body.character_refs is not None:
         p_shot["character_refs"] = _clean_string_list(body.character_refs)
     if body.character_asset_ids is not None:
-        p_shot["character_refs"] = _clean_string_list(body.character_asset_ids)
+        p_shot["character_asset_ids"] = _clean_asset_id_list(body.character_asset_ids, keep_last_only=True)
     if body.scene_refs is not None:
         p_shot["scene_refs"] = _clean_string_list(body.scene_refs)
     if body.scene_asset_id is not None:
-        p_shot["scene_refs"] = _clean_string_list([body.scene_asset_id])
+        p_shot["scene_asset_id"] = _clean_asset_id(body.scene_asset_id)
     if body.product_refs is not None:
         p_shot["product_refs"] = _clean_string_list(body.product_refs)
     if body.product_asset_id is not None:
-        p_shot["product_refs"] = _clean_string_list([body.product_asset_id])
+        p_shot["product_asset_id"] = _clean_asset_id(body.product_asset_id)
     if body.duration_sec is not None:
         p_shot["duration_sec"] = float(body.duration_sec or 0)
+    # Runtime cleanup for legacy mixed pollution in asset id fields.
+    p_shot["character_asset_ids"] = _clean_asset_id_list(
+        [str(x) for x in (p_shot.get("character_asset_ids") or []) if str(x).strip()],
+        keep_last_only=True,
+    )
+    p_shot["scene_asset_id"] = _clean_asset_id(_safe_text(p_shot.get("scene_asset_id")))
+    p_shot["product_asset_id"] = _clean_asset_id(_safe_text(p_shot.get("product_asset_id")))
+    p_shot["asset_refs"] = {
+        "character_asset_ids": p_shot["character_asset_ids"],
+        "scene_asset_id": p_shot["scene_asset_id"],
+        "product_asset_id": p_shot["product_asset_id"],
+    }
     shot.setdefault("shot_id", shot_id)
     shot["manual_updated_at"] = datetime.now(timezone.utc).isoformat()
     p_shot["shot_id"] = shot.get("shot_id") or p_shot.get("shot_id") or shot_id

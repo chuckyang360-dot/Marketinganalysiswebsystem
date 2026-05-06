@@ -26,8 +26,11 @@ type ShotDraft = {
   mustAvoidText: string;
   durationSeconds: number;
   characterRefs: string[];
+  characterAssetIds: string[];
   sceneRef: string;
+  sceneAssetId: string;
   productRefs: string[];
+  productAssetId: string;
 };
 
 type SegmentDraft = {
@@ -47,6 +50,11 @@ type AssetOption = {
   name: string;
   subtitle: string;
   img: string | null;
+};
+
+type SelectorSaveValue = {
+  refs: string[];
+  assetIds: string[];
 };
 
 interface SegmentWorkbenchProps {
@@ -190,11 +198,11 @@ export function StepFourSegmentWorkbench({
           subtitle_text_presentation: sd.subtitleText,
           audio_intent: sd.emotion,
           character_refs: sd.characterRefs,
-          character_asset_ids: sd.characterRefs,
+          character_asset_ids: sd.characterAssetIds,
           scene_refs: sd.sceneRef ? [sd.sceneRef] : [],
-          scene_asset_id: sd.sceneRef || undefined,
+          scene_asset_id: sd.sceneAssetId || undefined,
           product_refs: sd.productRefs,
-          product_asset_id: sd.productRefs[0] || undefined,
+          product_asset_id: sd.productAssetId || undefined,
           manual_character_refs: sd.characterRefs,
           manual_scene_ref: sd.sceneRef,
           manual_product_refs: sd.productRefs,
@@ -348,9 +356,22 @@ export function StepFourSegmentWorkbench({
           onSave={(values) => {
             const seg = segments.find((s) => s.id === selector.segId);
             if (!seg) return;
-            if (selector.kind === "characters") updateShotDraft(seg, selector.shotId, { characterRefs: values });
-            else if (selector.kind === "scene") updateShotDraft(seg, selector.shotId, { sceneRef: values[0] ?? "" });
-            else updateShotDraft(seg, selector.shotId, { productRefs: values });
+            if (selector.kind === "characters") {
+              updateShotDraft(seg, selector.shotId, {
+                characterRefs: values.refs,
+                characterAssetIds: cleanAssetIds(values.assetIds),
+              });
+            } else if (selector.kind === "scene") {
+              updateShotDraft(seg, selector.shotId, {
+                sceneRef: values.refs[0] ?? "",
+                sceneAssetId: cleanAssetIds(values.assetIds)[0] ?? "",
+              });
+            } else {
+              updateShotDraft(seg, selector.shotId, {
+                productRefs: values.refs,
+                productAssetId: cleanAssetIds(values.assetIds)[0] ?? "",
+              });
+            }
             setSelector(null);
           }}
         />
@@ -369,6 +390,9 @@ function makeSegmentDraft(seg: Step4SegmentItem): SegmentDraft {
 }
 
 function makeShotDraft(shot?: Step4Shot): ShotDraft {
+  const characterRefs = shot?.manualCharacterRefs?.length ? shot.manualCharacterRefs : shot?.characterRefs ?? [];
+  const cleanedCharacterRefs = characterRefs.map((x) => String(x || "").trim()).filter(Boolean);
+  const characterAssetIds = cleanAssetIds(shot?.characterAssetIds);
   return {
     shotRole: shot?.shotRole ?? "",
     viewerTakeaway: shot?.viewerTakeaway ?? "",
@@ -389,10 +413,25 @@ function makeShotDraft(shot?: Step4Shot): ShotDraft {
     mustShowText: (shot?.mustShow ?? []).join("；"),
     mustAvoidText: (shot?.mustAvoid ?? []).join("；"),
     durationSeconds: shot?.durationSeconds ?? 0,
-    characterRefs: shot?.manualCharacterRefs?.length ? shot.manualCharacterRefs : shot?.characterRefs ?? [],
+    characterRefs: cleanedCharacterRefs.length ? [cleanedCharacterRefs[cleanedCharacterRefs.length - 1]] : [],
+    characterAssetIds: characterAssetIds.length ? [characterAssetIds[characterAssetIds.length - 1]] : [],
     sceneRef: shot?.manualSceneRef || shot?.sceneRef || "",
+    sceneAssetId: cleanAssetIds(shot?.sceneAssetId ? [shot.sceneAssetId] : [])[0] ?? "",
     productRefs: shot?.manualProductRefs?.length ? shot.manualProductRefs : shot?.productRefs ?? [],
+    productAssetId: cleanAssetIds(shot?.productAssetId ? [shot.productAssetId] : [])[0] ?? "",
   };
+}
+
+function cleanAssetIds(values: string[] | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values ?? []) {
+    const value = String(raw || "").trim();
+    if (!/^\d+$/.test(value) || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
 }
 
 function splitList(text: string): string[] {
@@ -816,7 +855,7 @@ function SegmentActions({
   );
 }
 
-function ReferenceSelector({ selector, library, draft, onClose, onSave }: { selector: { segId: number; shotId: number; kind: RefKind }; library: StepFourAssetLibraryVm; draft?: SegmentDraft; onClose: () => void; onSave: (values: string[]) => void }) {
+function ReferenceSelector({ selector, library, draft, onClose, onSave }: { selector: { segId: number; shotId: number; kind: RefKind }; library: StepFourAssetLibraryVm; draft?: SegmentDraft; onClose: () => void; onSave: (values: SelectorSaveValue) => void }) {
   const current = draft?.shots[selector.shotId];
   const options: AssetOption[] =
     selector.kind === "characters"
@@ -824,9 +863,13 @@ function ReferenceSelector({ selector, library, draft, onClose, onSave }: { sele
       : selector.kind === "scene"
         ? library.scenes.map((x) => ({ id: String(x.id), name: x.name, subtitle: x.type, img: x.img }))
         : library.products.map((x) => ({ id: String(x.id), name: x.name, subtitle: x.type, img: x.img }));
-  const initial = selector.kind === "characters" ? current?.characterRefs ?? [] : selector.kind === "scene" ? (current?.sceneRef ? [current.sceneRef] : []) : current?.productRefs ?? [];
+  const initial = selector.kind === "characters"
+    ? cleanAssetIds(current?.characterAssetIds)
+    : selector.kind === "scene"
+      ? cleanAssetIds(current?.sceneAssetId ? [current.sceneAssetId] : [])
+      : cleanAssetIds(current?.productAssetId ? [current.productAssetId] : []);
   const [selected, setSelected] = useState<string[]>(initial);
-  const multi = selector.kind !== "scene";
+  const multi = selector.kind === "products";
   const title = selector.kind === "characters" ? "选择角色引用" : selector.kind === "scene" ? "选择场景引用" : "选择产品引用";
 
   return (
@@ -854,7 +897,21 @@ function ReferenceSelector({ selector, library, draft, onClose, onSave }: { sele
         </div>
         <div className="flex justify-end gap-2 px-5 py-4" style={{ borderTop: "1px solid #EAEAEA" }}>
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-[12px]" style={{ background: "#F7F8FA", color: "#444444" }}>取消</button>
-          <button type="button" onClick={() => onSave(selected)} className="px-4 py-2 rounded-lg text-[12px] font-semibold" style={{ background: "#1D1D1F", color: "#fff" }}>保存引用</button>
+          <button
+            type="button"
+            onClick={() => {
+              const selectedIds = cleanAssetIds(selected);
+              const selectedRows = options.filter((opt) => selectedIds.includes(opt.id));
+              onSave({
+                refs: selectedRows.map((row) => row.name),
+                assetIds: selectedIds,
+              });
+            }}
+            className="px-4 py-2 rounded-lg text-[12px] font-semibold"
+            style={{ background: "#1D1D1F", color: "#fff" }}
+          >
+            保存引用
+          </button>
         </div>
       </div>
     </div>
